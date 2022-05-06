@@ -1,0 +1,21 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix models: <http://enilink.net/vocab/komma/models#> .
+
+<> a owl:Ontology ;	owl:imports <platform:/plugin/net.enilink.platform.core/resources/user-admin.ttl> .
+
+<urn:enilink:data> a models:MemoryModelSet ; 
+	models:inference false .
+
+# <urn:enilink:data> a models:PersistentModelSet ; 
+#	models:inference false ; 
+#	models:repository <workspace:/data/> .
+
+@base <plugin://net.enilink.lift/EnilinkRules/> .
+<> <jaasConfigUrl> <platform:/plugin/net.enilink.platform.core/resources/jaas.conf> ;
+	<loginModule> [ <jaasConfigName> "eniLINK" ; rdfs:label "eniLINK" ] .
+
+# @base <plugin://net.enilink.platform.core/> .
+# <> <jaasConfiguration> [
+#	<url> <platform:/base/enilink-config/jaas.conf> ;
+#	<loginModule> [ <name> "DUMMY" ; rdfs:label "Test" ], [ <name> "OpenID" ; rdfs:label "OpenID" ] 
+# ] .

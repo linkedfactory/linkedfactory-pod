@@ -1,0 +1,9 @@
+Bundle-ClassPath: .,\
+lib/influxdb-java.jar,\
+lib/logging-interceptor.jar,\
+lib/okhttp.jar,\
+lib/okio.jar,\
+lib/leveldb-api.jar,\
+lib/leveldb.jar,\
+lib/snappy.jar
+Import-Package: com.google.common.*, net.enilink.*, org.slf4j, scala.*

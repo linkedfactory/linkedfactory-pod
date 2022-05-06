@@ -1,0 +1,3 @@
+Bundle-ClassPath: .,\
+lib/uanodeset-parser.jar
+Import-Package: *

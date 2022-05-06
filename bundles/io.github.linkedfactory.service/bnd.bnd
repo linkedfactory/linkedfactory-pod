@@ -1,0 +1,8 @@
+Lift-Packages: io.github.linkedfactory.service
+Lift-Module: io.github.linkedfactory.service.LiftModule
+Bundle-ClassPath: ., \
+lib/org.eclipse.paho.client.mqttv3.jar, \
+lib/ww-geo-coords.jar, \
+lib/commons-csv.jar
+Import-Package: !org.osgi.service.component.annotations, !com.ibm.mqttdirect.modules.local.bindings, \
+!gov.nasa.*, !org.apache.commons.csv, *

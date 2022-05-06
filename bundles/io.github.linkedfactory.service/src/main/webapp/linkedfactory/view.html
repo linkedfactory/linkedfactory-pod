@@ -1,0 +1,163 @@
+<div data-lift="surround?with=default;at=content"
+	prefix="lf: http://linkedfactory.github.io/vocab# owl: http://www.w3.org/2002/07/owl#
+	rdfs: http://www.w3.org/2000/01/rdf-schema#">
+
+	<script data-lift="JS.templates"></script>
+	<script data-lift="head" src="/linkedfactory/js/require.config.js"></script>
+
+	<link rel="stylesheet" type="text/css"
+		href="/classpath/webjars/select2/4.0.13/dist/css/select2.min.css"
+		data-lift="head">
+	<link rel="stylesheet" type="text/css"
+		href="/classpath/webjars/eonasdan-bootstrap-datetimepicker/4.17.47/build/css/bootstrap-datetimepicker.min.css"
+		data-lift="head">
+	<link rel="stylesheet" type="text/css"
+		href="/classpath/webjars/slickgrid/2.4.9/slick.grid.css" data-lift="head">
+	<link rel="stylesheet" type="text/css"
+		href="/linkedfactory/css/slick.custom.css"
+		data-lift="head">
+	<link rel="stylesheet" type="text/css"
+		href="/linkedfactory/css/view.css" data-lift="head">
+
+	<script data-lift="head" src="/linkedfactory/js/view/view.js"></script>
+
+	<div class="navigation" data-lift="linkedfactory/LoadNavigation">
+		<ol class="breadcrumb">
+			<li data-lift="Menu.item?name=linkedfactory.dashboard&linkToSelf=true"></li>
+			<li data-lift="hierarchy.allButLast"><a href="#"></a></li>
+			<li data-lift="hierarchy.last" class="active"></li>
+			<li>
+				<button class="btn btn-primary btn-xs" type="button">
+					<span class="glyphicon glyphicon-option-horizontal"></span>
+				</button>
+			</li>
+
+			<li class="search-form">
+				<form class="form-inline">
+					<div class="form-group">
+						<input class="form-control input-sm" type="text"
+							placeholder="Search..." autocomplete="off"></input>
+					</div>
+					<button class="btn btn-primary btn-sm" type="button">
+						<i class="glyphicon glyphicon-search"></i>
+					</button>
+				</form>
+			</li>
+		</ol>
+
+		<div class="nav-children"></div>
+	</div>
+
+	<div data-lift="getObjectRdfa">
+		<div id="features" data-lift="linkedfactory/LoadFeatures">
+			<div class="item-name">
+				<h3>
+					<span class="features-toggle"><span data-lift="rdf.name"></span>
+						<i class="glyphicon glyphicon-chevron-up"
+						style="font-size: small; vertical-align: top"></i></span> <span
+						class="uri" data-lift="rdf.ref"></span>
+				</h3>
+				<div data-lift="rdfa" about="?this" property="rdfs:comment"
+					content="?">
+					<span data-lift="rdf.label"></span>
+				</div>
+			</div>
+
+			<div>
+				<script data-lift="JS.rdfa"></script>
+				<script data-lift="JS.templates"></script>
+				<div data-lift="embed?what=editsupport"></div>
+
+				<div class="features-content" style="display: none;"></div>
+
+				<script>
+					$(function() {
+						$("#features").on("show-features", function() {
+							$("#features .features-toggle").toggleClass("expanded");
+							$("#features .features-toggle i").toggleClass("glyphicon-chevron-up glyphicon-chevron-down");
+
+							var $content = $("#features .features-content");
+							$content.slideToggle(500);
+							if ($content.is(":visible")) {
+								$("html, body").animate({
+									scrollTop : $('#features').offset().top
+								}, 1000);
+							}
+							$("#features .section-header a").removeAttr('onclick').unbind('click').click(function() {
+								$('#features').trigger('show-features');
+							});
+						});
+					});
+				</script>
+			</div>
+		</div>
+		<!-- div data-lift="getObjectRdfa">
+			<div data-lift="sparql" data-sparql="select ?child (avg(?v) as ?avg) {
+			    { select ?child where { ?this <http://linkedfactory.github.io/vocab#contains>* ?child } }
+				service <kvin:> { ?child <r:value> ?o . ?o <kvin:value> ?v ; <kvin:limit> 5 }
+			} group by ?child order by ?child">
+				<div about="?child">
+					<span data-lift="rdf.label"></span>:
+					<span content="?avg" data-lift="rdf.label"></span>
+				</div>
+			</div>
+		</div -->
+	</div>
+
+	<div class="watcher" style="display: none"></div>
+	<!-- Graph -->
+	<div class="widget">
+		<div data-lift="streamData"></div>
+		<div class="well well-sm">
+			<div class="row">
+				<div class="col-md-3">
+					<ul class="view-switcher nav nav-tabs">
+						<li class="active"><a data-tab="#graph-view">Graph</a></li>
+						<li><a data-tab="#grid-view">Grid</a></li>
+					</ul>
+				</div>
+				<div class="col-md-6">
+					<div class="form-inline" style="margin-bottom: 10px">
+						<div class="form-group">
+							<div class="input-group date" id="picker-from">
+								<input type="text" class="form-control" /> <span
+									class="input-group-addon"> <span
+									class="glyphicon glyphicon-calendar"></span>
+								</span>
+							</div>
+							<div class="input-group date" id="picker-to">
+								<input type="text" class="form-control" /> <span
+									class="input-group-addon"> <span
+									class="glyphicon glyphicon-calendar"></span>
+								</span>
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="col-md-3">
+					<div class="form-inline" style="margin-top: 5px">
+						<button class="btn btn-small export-csv-button"
+							title="Export to CSV">
+							<i class="glyphicon glyphicon-list"></i>
+						</button>
+						<div class="checkbox" style="margin-left: 1em">
+							<label><input class="relative-time-checkbox"
+								type="checkbox"></input> relative time</label>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div id="view-container">
+			<div id="graph-view">
+				<div id="graph-properties"></div>
+				<div id="graph-sensordata"></div>
+			</div>
+			<div id="grid-view" class="grid" style="display: none">
+				<select multiple id="grid-properties" style="width: 100%"></select>
+				<div id="grid-sensordata"></div>
+				<div id="grid-info"></div>
+			</div>
+		</div>
+	</div>
+</div>

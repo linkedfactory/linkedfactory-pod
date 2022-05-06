@@ -1,0 +1,34 @@
+<div prefix="lf: http://linkedfactory.github.io/vocab#">
+    <div data-lift="rdfa?inferred=false" about="?this"
+         class="container-fluid">
+        <div class="row">
+            <div data-if-param="q">
+                <div class="search-patterns" data-for="?child" data-param="q"></div>
+            </div>
+
+            <a class="col-md-2 btn btn-default nav_next_child asc" role="button"
+               data-lift="Util.href" data-parent="?this" data-child="?child"
+               rel="lf:contains" resource="?child"
+               style="margin: 2px; overflow: hidden; text-overflow: ellipsis; direction: rtl;"
+            ></a>
+
+            <div data-unless="?child">No items found.</div>
+        </div>
+
+        <!-- textarea class="query"></textarea -->
+
+        <!-- paginator -->
+        <div data-if="?child" data-for="?child" class="paginator" data-items="10">
+            <ul class="pagination pagination-sm" style="margin-bottom: 5px;">
+                <li class="first"></li>
+                <li class="prev"></li>
+                <li class="zoomed-pages"></li>
+                <li class="next"></li>
+                <li class="last"></li>
+            </ul>
+            <div style="font-size: smaller; margin-bottom: 20px">
+                <div class="records"></div>
+            </div>
+        </div>
+    </div>
+</div>

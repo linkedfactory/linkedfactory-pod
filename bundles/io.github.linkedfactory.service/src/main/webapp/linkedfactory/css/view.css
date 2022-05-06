@@ -1,0 +1,182 @@
+svg {
+	font: 10px sans-serif;
+}
+
+.line {
+	fill: none;
+	stroke: #000;
+	stroke-width: 1.5px;
+}
+
+.axis path, .axis line {
+	fill: none;
+	stroke: #000;
+	shape-rendering: crispEdges;
+}
+
+.section-header {
+	margin: 20px 0 20px;
+	padding-bottom: 9px;
+}
+
+.section-header.expanded {
+	border-bottom: 1px solid #eee;
+}
+
+.item {
+	margin-top: 5px;
+	padding-left: 5px;
+	border-left: 2px solid #C5C5C5;
+}
+
+.item:hover {
+	border-color: grey;
+}
+
+.item .glyphicon {
+	margin-right: 5px;
+}
+
+/* some tweaks for the search form */
+.search-form * {
+	margin-bottom: 0px;
+}
+
+.search-form form * {
+	display: inline-block;
+}
+
+.jqstooltip {
+	-webkit-box-sizing: content-box;
+	-moz-box-sizing: content-box;
+	box-sizing: content-box;
+}
+
+.view-switcher {
+	font-size: larger;
+}
+
+.view-switcher li {
+	cursor: pointer;
+}
+
+.display-property {
+	font-weight: bold;
+}
+
+ol.breadcrumb {
+	padding: 10px 15px;
+	position: relative;
+}
+
+ol.breadcrumb li.selected a {
+	font-style: italic;
+	font-weight: bold;
+}
+
+ol.breadcrumb li.prev a {
+	font-style: italic;
+}
+
+@media ( min-width : 992px) {
+	ol.breadcrumb li.search-form {
+		position: absolute;
+		right: 10px;
+		top: 5px
+	}
+}
+
+@media ( max-width : 991px) {
+	ol.breadcrumb li.search-form {
+		margin-top: 15px;
+		display: block;
+		width: auto;
+	}
+}
+
+ol.breadcrumb li.search-form::before {
+	/* hide slash */
+	content: none;
+}
+
+.nav_next_child a {
+	pointer-events: none;
+}
+
+.breadcrumb_next_child a {
+	pointer-events: none;
+}
+
+#graph-view {
+	margin-top: 1em;
+}
+
+.item-name>* {
+	margin: 0;
+}
+
+.item-name >*, .item-name a, .item-name a:hover, .item-name a:focus {
+	color: white;
+}
+
+.item-name {
+	background-color: #009474;
+	padding: 10px;
+	margin-top: 1em;
+}
+
+.item-name h3 {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+}
+
+.item-name .uri {
+	font-size: medium;
+	font-style: italic;
+}
+
+.item-name .uri::before {
+	content: "<";
+}
+
+.item-name .uri::after {
+	content: ">";
+}
+
+.features-content {
+	padding: 10px;
+}
+
+#content {
+	display: flex;
+	flex-direction: column;
+}
+
+#view-container {
+	flex-grow: 5;
+}
+
+#graph-sensordata {
+	width: 50%;
+}
+
+#grid-view {
+	width: 100%;
+	height: 100%;
+	position: relative;
+}
+
+#grid-properties {
+	margin-bottom: 5px;
+}
+
+#grid-info {
+	position: absolute;
+	right: 0;
+}
+
+#grid-sensordata {
+	height: 60vh;
+}

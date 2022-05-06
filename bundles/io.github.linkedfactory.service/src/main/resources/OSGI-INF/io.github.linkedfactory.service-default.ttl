@@ -1,0 +1,9 @@
+# @base <plugin://io.github.linkedfactory.service/mqtt/> .
+# <MqttEventBridge> <broker> <tcp://example-server.org:8883> .
+
+@base <plugin://io.github.linkedfactory.service> .
+#<> <mockdata> [ <machines> 10 ] ; <mocktracker> true .
+
+@base <plugin://io.github.linkedfactory.service/data/> .
+<store> <model>   <http://linkedfactory.github.io/data/> ;
+        <dirName> "linkedfactory-valuestore" .

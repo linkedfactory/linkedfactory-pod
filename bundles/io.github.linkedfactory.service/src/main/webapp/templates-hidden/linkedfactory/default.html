@@ -1,0 +1,68 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:lift="http://liftweb.net/">
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8"></meta>
+    <meta name="viewport" content="width=device-width, user-scalable=no"></meta>
+    <style data-lift="CSSUtil.bootstrap"></style>
+    <script data-lift="JS.require"></script>
+    <script id="jquery" src="/classpath/jquery.js" type="text/javascript"></script>
+</head>
+<body>
+<header role="banner">
+    <div class="navbar navbar-default navbar-static-top"
+         style="z-index: 1010">
+        <div class="container-fluid">
+            <div class="navbar-header">
+                <button type="button" class="navbar-toggle" data-toggle="collapse"
+                        data-target=".navbar-main">
+                    <span class="sr-only">Toggle navigation</span> <span
+                        class="icon-bar"></span> <span class="icon-bar"></span> <span
+                        class="icon-bar"></span>
+                </button>
+                <a class="navbar-brand" href="#"><img
+                        src="/images/enilink-grayscale-dark.png"></img></a>
+            </div>
+            <nav class="navbar-main collapse navbar-collapse" role="navigation">
+                <span data-lift="bs.menu"></span>
+            </nav>
+        </div>
+    </div>
+    <nav
+            class="navbar-main subnav navbar navbar-static-top navbar-default collapse navbar-collapse"
+            role="navigation" data-lift="bs.submenu">
+        <div class="container">
+            <ul class="nav navbar-nav">
+            </ul>
+        </div>
+    </nav>
+    <div style="position: fixed; top: 20px; right: 0px; z-index: 9999">
+        <img alt="" id="ajax-loader" src="/images/ajax-loader.gif"
+             style="float: left; margin-right: 25px; display: none"></img>
+        <div class="visible-xs" style="float: left; width: 50px"></div>
+    </div>
+</header>
+<script data-lift="JS.bootstrap"></script>
+
+<div class="container-fluid">
+    <div style="position: relative">
+        <div id="notification-area"
+             style="margin: 0px 5px 10px 5px; max-height: 120px; overflow: auto;">
+            <div data-lift="Msgs?showAll=false">
+                <lift:error_msg class="alert alert-danger"></lift:error_msg>
+                <lift:warning_msg class="alert alert-warning"></lift:warning_msg>
+                <lift:notice_msg class="alert alert-info"></lift:notice_msg>
+            </div>
+        </div>
+    </div>
+
+    <div role="main">
+        <div id="content">The main content will get bound here</div>
+    </div>
+
+    <footer role="contentinfo">
+        <hr></hr>
+        <p>&copy; Fraunhofer IWU 2022</p>
+    </footer>
+</div>
+</body>
+</html>

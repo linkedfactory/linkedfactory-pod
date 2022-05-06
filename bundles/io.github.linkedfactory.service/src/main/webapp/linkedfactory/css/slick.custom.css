@@ -1,0 +1,136 @@
+/* some modifications for Bootstrap 3 */
+.grid {
+  height: 380.0px;
+  width: 800.0px;
+  position: relative;
+  border-bottom: 1.0px solid #dddddd;
+}
+.grid input[type="checkbox"] {
+  vertical-align: baseline;
+  margin: 0.0;
+}
+.grid .slick-viewport {
+  border-top: 1.0px solid #dddddd;
+}
+.grid .grid-canvas {
+  /* XXX ... needed ? */
+
+}
+.grid .grid-canvas .slick-row {
+  border: 0.0 none;
+  position: absolute;
+  width: 100.0%;
+}
+.grid .grid-canvas .slick-cell,
+.grid .grid-canvas .slick-headerrow-column {
+  border-top: 0.0;
+  border-bottom: 1.0px solid #dddddd;
+  border-left: 0.0;
+  border-right: 0.0;
+}
+.grid .grid-canvas .even {
+  background: #ebf6f4;
+}
+.grid .grid-canvas .slick-cell {
+  padding: 5.0px 7.5834px;
+  font-size: 14.0px;
+}
+.grid .grid-canvas .slick-cell td {
+  font-size: 14.0px;
+}
+body .grid .grid-canvas .slick-cell {
+  line-height: 20.0px;
+}
+.grid .grid-canvas .slick-cell a,
+.grid .grid-canvas .slick-cell a:visited,
+.grid .grid-canvas .slick-cell .ui-widget-content a,
+.grid .grid-canvas .slick-cell .ui-widget-content a:visited {
+  color: #0088cc;
+  text-decoration: none;
+}
+.grid .grid-canvas .slick-cell a:hover,
+.grid .grid-canvas .slick-cell .ui-widget-content a:hover {
+  color: #005580;
+  text-decoration: none;
+  border-bottom: none;
+}
+.grid .grid-canvas .slick-cell table {
+  height: 100.0%;
+  border: 0.0 none;
+  padding: 0.0;
+  background: none;
+}
+.grid .grid-canvas .slick-cell td {
+  border: 0.0 none;
+  padding: 0.0;
+  vertical-align: middle;
+  text-align: left;
+}
+.grid .slick-header {
+  border-top: 0.0;
+  border-bottom: 0.0;
+}
+.grid .slick-header-columns {
+  background: transparent;
+}
+.grid .slick-header-columns .slick-header-column {
+  height: 25px;
+  margin: 0;
+  border: 0;
+  /* like TH  */
+
+  background: transparent;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: #333333;
+  font-weight: bold;
+}
+.grid .slick-header-columns .slick-header-column.ui-state-default {
+  padding: 5.0px 7.5834px;
+  font-size: 14.0px;
+}
+.grid .slick-header-columns .slick-header-column.ui-state-default td {
+  font-size: 14.0px;
+}
+body .grid .slick-header-columns .slick-header-column.ui-state-default {
+}
+.grid .slick-header-columns .slick-header-column a,
+.grid .slick-header-columns .slick-header-column a:visited {
+  color: #333333;
+}
+.grid .slick-header-columns .slick-header-column a:hover {
+  color: #333333;
+}
+.grid .slick-header-columns .slick-header-column.ui-state-default {
+  /* like TH  */
+
+  background: transparent;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: #333333;
+  font-weight: bold;
+}
+.grid .slick-header-columns .slick-header-column.ui-state-default a,
+.grid .slick-header-columns .slick-header-column.ui-state-default a:visited {
+  color: #333333;
+}
+.grid .slick-header-columns .slick-header-column.ui-state-default a:hover {
+  color: #333333;
+}
+.grid .slick-header-columns .slick-header-column.slick-header-column-sorted {
+  font-style: normal;
+  color: #333333;
+}
+.grid .slick-header-columns .slick-header-column:hover {
+  color: #333333;
+}
+.grid .slick-header-columns .slick-header-column .slick-sort-indicator-asc {
+  vertical-align: middle;
+}
+.grid .slick-header-columns .slick-header-column .slick-sort-indicator-desc {
+  vertical-align: middle;
+}
+.grid-col {
+  padding: 35.0px;
+}
+.info-col {
+  padding: 20.0px;
+}

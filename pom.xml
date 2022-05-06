@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project
+		xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+		xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>io.github.linkedfactory</groupId>
+	<artifactId>linkedfactory-parent</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<packaging>pom</packaging>
+
+	<organization>
+		<name>LinkedFactory</name>
+	</organization>
+	<inceptionYear>2022</inceptionYear>
+
+	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+		<komma.version>1.5.2</komma.version>
+		<enilink.version>1.4.0-SNAPSHOT</enilink.version>
+		<scala.version>2.13.2</scala.version>
+		<karaf.tooling.version>4.3.0</karaf.tooling.version>
+
+		<bnd.version>5.3.0</bnd.version>
+	</properties>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>net.alchim31.maven</groupId>
+				<artifactId>scala-maven-plugin</artifactId>
+				<version>4.5.4</version>
+				<configuration>
+					<scalaVersion>${scala.version}</scalaVersion>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>add-source</goal>
+							<goal>compile</goal>
+							<goal>testCompile</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+
+			<plugin>
+				<groupId>biz.aQute.bnd</groupId>
+				<artifactId>bnd-maven-plugin</artifactId>
+				<executions>
+					<execution>
+						<phase>compile</phase>
+						<goals>
+							<goal>bnd-process</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+
+		<pluginManagement>
+			<plugins>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-compiler-plugin</artifactId>
+					<version>3.8.1</version>
+					<configuration>
+						<release>11</release>
+					</configuration>
+				</plugin>
+
+				<plugin>
+					<groupId>biz.aQute.bnd</groupId>
+					<artifactId>bnd-maven-plugin</artifactId>
+					<version>${bnd.version}</version>
+				</plugin>
+
+				<plugin>
+					<groupId>org.apache.karaf.tooling</groupId>
+					<artifactId>karaf-maven-plugin</artifactId>
+					<version>${karaf.tooling.version}</version>
+					<extensions>true</extensions>
+				</plugin>
+
+				<!-- Plugins for copying of Webjars and Java dependencies into the projects. -->
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-dependency-plugin</artifactId>
+					<version>2.10</version>
+					<executions>
+						<execution>
+							<id>embed-webjars</id>
+							<phase>none</phase>
+							<goals>
+								<goal>unpack-dependencies</goal>
+							</goals>
+							<configuration>
+								<includeGroupIds>org.webjars, org.webjars.bower,
+									org.webjars.npm
+								</includeGroupIds>
+								<outputDirectory>${project.build.outputDirectory}</outputDirectory>
+								<includeScope>provided</includeScope>
+								<includes>META-INF/resources/webjars/**</includes>
+								<excludes>**/src/**</excludes>
+								<overWriteIfNewer>true</overWriteIfNewer>
+							</configuration>
+						</execution>
+						<execution>
+							<id>copy-libraries</id>
+							<phase>none</phase>
+							<goals>
+								<goal>copy-dependencies</goal>
+							</goals>
+							<configuration>
+								<excludeGroupIds>org.webjars, org.webjars.bower,
+									org.webjars.npm
+								</excludeGroupIds>
+								<stripVersion>true</stripVersion>
+								<outputDirectory>${project.build.outputDirectory}/lib</outputDirectory>
+								<includeScope>runtime</includeScope>
+							</configuration>
+						</execution>
+					</executions>
+				</plugin>
+
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-jar-plugin</artifactId>
+					<version>3.1.1</version>
+					<configuration>
+						<archive>
+							<manifestFile>${project.build.outputDirectory}/META-INF/MANIFEST.MF</manifestFile>
+						</archive>
+					</configuration>
+					<executions>
+						<execution>
+							<goals>
+								<goal>test-jar</goal>
+							</goals>
+						</execution>
+					</executions>
+				</plugin>
+
+				<!-- Configuration for Eclipse M2E -->
+				<plugin>
+					<groupId>org.eclipse.m2e</groupId>
+					<artifactId>lifecycle-mapping</artifactId>
+					<version>1.0.0</version>
+					<configuration>
+						<lifecycleMappingMetadata>
+							<pluginExecutions>
+								<pluginExecution>
+									<pluginExecutionFilter>
+										<groupId>org.apache.maven.plugins</groupId>
+										<artifactId>maven-dependency-plugin</artifactId>
+										<versionRange>[0.0,)</versionRange>
+										<goals>
+											<goal>unpack-dependencies</goal>
+										</goals>
+									</pluginExecutionFilter>
+									<action>
+										<execute/>
+									</action>
+								</pluginExecution>
+							</pluginExecutions>
+						</lifecycleMappingMetadata>
+					</configuration>
+				</plugin>
+			</plugins>
+		</pluginManagement>
+
+		<resources>
+			<resource>
+				<directory>src/main/resources</directory>
+				<excludes>
+					<exclude>.keep</exclude>
+				</excludes>
+			</resource>
+
+			<resource>
+				<directory>.</directory>
+				<includes>
+					<include>plugin.xml</include>
+					<include>plugin.properties</include>
+				</includes>
+			</resource>
+
+			<resource>
+				<directory>src/main/webapp</directory>
+				<excludes>
+					<exclude>.keep</exclude>
+				</excludes>
+			</resource>
+		</resources>
+	</build>
+
+	<profiles>
+		<profile>
+			<id>update-licenses</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>com.mycila</groupId>
+						<artifactId>license-maven-plugin</artifactId>
+						<version>4.1</version>
+						<configuration>
+							<header>releng/license-header.txt</header>
+							<properties>
+								<license.owners>LinkedFactory contributors</license.owners>
+								<license.years>2022</license.years>
+							</properties>
+							<includes>
+								<include>src/*/java/**/*.java</include>
+								<include>src/*/scala/**/*.scala</include>
+							</includes>
+							<skipExistingHeaders>false</skipExistingHeaders>
+						</configuration>
+						<executions>
+							<execution>
+								<id>first</id>
+								<goals>
+									<goal>format</goal>
+								</goals>
+								<phase>process-sources</phase>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
+
+	<repositories>
+		<repository>
+			<id>oss-sonatype-snapshots</id>
+			<name>OSS Sonatype Snapshots</name>
+			<url>https://oss.sonatype.org/content/repositories/snapshots/</url>
+			<releases>
+				<enabled>false</enabled>
+			</releases>
+		</repository>
+	</repositories>
+
+	<modules>
+		<module>bundles/io.github.linkedfactory.kvin</module>
+		<module>bundles/io.github.linkedfactory.service</module>
+		<module>bundles/io.github.linkedfactory.opcua</module>
+		<module>features/io.github.linkedfactory.feature</module>
+	</modules>
+</project>

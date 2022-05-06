@@ -1,0 +1,50 @@
+<div data-lift="surround?with=default;at=content"
+	prefix="lf: http://linkedfactory.github.io/vocab#">
+	<style data-lift="head">
+.item {
+	margin-top: 5px;
+	padding-top: 10px;
+	padding-bottom: 10px;
+	padding-left: 10px;
+	border: 2px solid #C5C5C5;
+	background-color: #E0E0E0;
+}
+
+.item:hover {
+	border-color: grey;
+	background-color: #C5C5C5;
+}
+
+.search-form {
+	margin-top: 20px;
+	margin-bottom: 0px;
+}
+</style>
+	<div data-lift="rdfa?inferred=false">
+		<div class="page-header clearfix" style="">
+			<h1 class="pull-left">
+				Overview <a data-unless-param="showall" style="font-size: small"
+					href="?showall=true">Show all</a>
+			</h1>
+			<div class="pull-right">
+				<div class="search-form"></div>
+			</div>
+		</div>
+		
+		<div class="search-patterns" data-for="?resource" data-param="q"></div>
+			<div about="?resource" class="asc item">
+				<div data-if-param="showall">
+					<div class="union clearable">
+						<div rev="lf:contains" resource="?"></div>
+						<div rel="lf:contains" resource="?"></div>
+					</div>
+				</div>
+				<div data-unless-param="showall">
+					<div class="not-exists clearable" rev="lf:contains" resource="?"></div>
+					<span class="clearable" rel="lf:contains" resource="?"></span>
+				</div>
+				<a data-lift="Util.href" data-child="?resource"></a>
+			</div>
+		<div data-for="?resource" class="paginator"></div>
+	</div>
+</div>
