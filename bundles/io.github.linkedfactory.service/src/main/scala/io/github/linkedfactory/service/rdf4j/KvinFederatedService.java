@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service.rdf4j;
 
 import io.github.linkedfactory.kvin.Kvin;
-import org.eclipse.rdf4j.RDF4JException;
+import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.common.iteration.*;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;

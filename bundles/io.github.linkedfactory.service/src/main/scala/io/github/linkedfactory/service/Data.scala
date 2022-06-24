@@ -155,8 +155,7 @@ object Data {
       var done = false
       while (!done && current.segmentCount > 1) {
         val parent = current.trimSegments(1)
-        val stmt = new Statement(parent, PROPERTY_CONTAINS, current)
-        if (seen.add(current) && !manager.contains(stmt)) manager.add(stmt) else done = true
+        if (seen.add(current) && !manager.hasMatch(parent, PROPERTY_CONTAINS, current)) manager.add(new Statement(parent, PROPERTY_CONTAINS, current)) else done = true
         current = parent
       }
     })

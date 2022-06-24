@@ -1,21 +1,11 @@
 package io.github.linkedfactory.service.rdf4j;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.eclipse.rdf4j.RDF4JException;
-import org.eclipse.rdf4j.model.IRI;
-import org.eclipse.rdf4j.model.Literal;
+import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.model.Value;
-import org.eclipse.rdf4j.query.algebra.Join;
-import org.eclipse.rdf4j.query.algebra.SingletonSet;
-import org.eclipse.rdf4j.query.algebra.StatementPattern;
-import org.eclipse.rdf4j.query.algebra.TupleExpr;
-import org.eclipse.rdf4j.query.algebra.Var;
+import org.eclipse.rdf4j.query.algebra.*;
 import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
+
+import java.util.*;
 
 class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
 	static class Parameters {
