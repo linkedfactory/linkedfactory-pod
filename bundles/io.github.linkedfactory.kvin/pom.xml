@@ -1,5 +1,5 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 
 	<parent>
@@ -15,6 +15,12 @@
 			<groupId>io.github.pcmind</groupId>
 			<artifactId>leveldb</artifactId>
 			<version>1.1</version>
+			<exclusions>
+				<exclusion>
+					<groupId>com.google.guava</groupId>
+					<artifactId>*</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.iq80.snappy</groupId>
@@ -39,7 +45,7 @@
 		<dependency>
 			<groupId>com.google.guava</groupId>
 			<artifactId>guava</artifactId>
-			<version>25.1-jre</version>
+			<version>30.1.1-jre</version>
 		</dependency>
 		<dependency>
 			<groupId>net.enilink.komma</groupId>
@@ -68,9 +74,11 @@
 					<execution>
 						<id>copy-libraries</id>
 						<phase>validate</phase>
-						
+
 						<configuration>
-						<includeGroupIds>org.iq80.leveldb,org.iq80.snappy,io.github.pcmind,org.influxdb,com.squareup.okhttp3,com.squareup.okio</includeGroupIds>
+							<includeGroupIds>
+								org.iq80.leveldb,org.iq80.snappy,io.github.pcmind,org.influxdb,com.squareup.okhttp3,com.squareup.okio
+							</includeGroupIds>
 						</configuration>
 					</execution>
 				</executions>
