@@ -32,4 +32,6 @@ jobs:
 
       # Runs the Maven build
       - name: Build and deploy with Maven
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: mvn deploy -B
