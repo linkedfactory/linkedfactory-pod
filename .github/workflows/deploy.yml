@@ -1,0 +1,35 @@
+name: Build and deploy to Github packages
+
+# Controls when the action will run.
+on:
+  push:
+    # Sequence of patterns matched against refs/heads
+    branches:
+      - snapshots
+    # Sequence of patterns matched against refs/tags
+    tags:
+      - v*
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    environment: sonatype
+
+    steps:
+      # Checks-out the repository under $GITHUB_WORKSPACE
+      - uses: actions/checkout@v2
+
+      # Sets up JDK
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3.4.0
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      # Runs the Maven build
+      - name: Build and deploy with Maven
+        run: mvn deploy -B

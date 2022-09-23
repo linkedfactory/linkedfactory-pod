@@ -241,6 +241,14 @@
 		</repository>
 	</repositories>
 
+	<distributionManagement>
+		<repository>
+			<id>github</id>
+			<name>GitHub linkedfactory Apache Maven Packages</name>
+			<url>https://maven.pkg.github.com/linkedfactory/repo</url>
+		</repository>
+	</distributionManagement>
+
 	<modules>
 		<module>bundles/io.github.linkedfactory.kvin</module>
 		<module>bundles/io.github.linkedfactory.service</module>
