@@ -239,13 +239,13 @@
 				<enabled>false</enabled>
 			</releases>
 		</repository>
-		<repository>
+		<!-- repository>
 			<id>github</id>
 			<url>https://maven.pkg.github.com/linkedfactory/linkedfactory-pod</url>
 			<snapshots>
 				<enabled>true</enabled>
 			</snapshots>
-		</repository>
+		</repository -->
 	</repositories>
 
 	<distributionManagement>
