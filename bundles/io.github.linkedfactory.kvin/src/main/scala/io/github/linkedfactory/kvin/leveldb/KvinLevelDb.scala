@@ -157,7 +157,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     ids.put(keyWithPrefix, idBytes)
 
     // add reverse mapping
-    ids.put(idBytes, key)
+    val idKeyBytes = idKey(entryType.reverse.toByte, idBytes)
+    ids.put(idKeyBytes, key)
     idBytes
   }
 
@@ -558,16 +559,11 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   }
 
   def varIntLength(bytes: Array[Byte], pos: Int): Int = {
-    var i = 0
-    while ((bytes(pos + i) & 0x80) != 0) i += 1
-    i + 1
+    Varint.firstToLength(bytes(pos))
   }
 
   def varIntLength(bb: ByteBuffer): Int = {
-    val pos = bb.position()
-    var i = 0
-    while ((bb.get(pos + i) & 0x80) != 0) i += 1
-    i + 1
+    Varint.firstToLength(bb.get(bb.position()))
   }
 
   def fetchInternal(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE, begin: Long = 0L, limit: Long = 0L, interval: Long = 0L): IExtendedIterator[KvinTuple] = {
