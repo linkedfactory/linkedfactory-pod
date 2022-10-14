@@ -56,22 +56,28 @@ object ItemDataParser extends Loggable {
 
     var activeContexts = List[JValue]()
 
-    def resolveUri(item: String, contexts: List[JValue]):URI = {
+    def resolveUri(item: String, contexts: List[JValue]): URI = {
       item.split(":") match {
-        case Array(pref, suf) if suf.startsWith("//") => URIs.createURI(item)
+        // is a URI with scheme
+        case Array(_, suf, _*) if suf.startsWith("//") => URIs.createURI(item)
+        // may be a CURIE
         case Array(pref, _*) => contexts match {
-            case first::rest =>
-              first  \ pref match {
+          case first :: rest =>
+            first \ pref match {
               case JNothing => resolveUri(item, rest)
               case JString(s) =>
-                  val  sufPref = resolveUri(s, contexts).toString
-                  if(pref.length < item.length)
-                    URIs.createURI(sufPref.concat(item.substring(pref.length +1)))
-                 else
-                    URIs.createURI(sufPref.concat(item.substring(pref.length)))
+                val sufPref = resolveUri(s, contexts).toString
+                if (pref.length < item.length)
+                  URIs.createURI(sufPref.concat(item.substring(pref.length + 1)))
+                else
+                  URIs.createURI(sufPref.concat(item.substring(pref.length)))
             }
-            case Nil =>URIs.createURI(item.replaceAll(":", "/")).resolve(rootItem)
-      }
+          // no prefix defined, just use item as URI
+          case Nil => {
+            val result = URIs.createURI(item)
+            if (result.isRelative) result.resolve(rootItem) else result
+          }
+        }
       }
     }
 
@@ -80,29 +86,29 @@ object ItemDataParser extends Loggable {
       case JArray(values) =>
         parseProperty(rootItem, URIs.createURI("value"), values, currentTime)
 
-        // { "item" : { "property1" : [ { "time" : 123, "sequenceNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "sequenceNr" : 5, "value" : 3.2 } ] } }
-      case JObject(fields) =>  fields.flatMap {
-          case JField(item, itemData)  if item.equals("@context") =>  activeContexts= itemData :: activeContexts; None
-          // "item" : { ... }
-          case JField(item, itemData) if !item.equals("@context") =>
-            // resolve relative URIs
-            var itemUri = resolveUri(item, activeContexts)
-            if (itemUri.lastSegment == "") itemUri = itemUri.trimSegments(1)
-            itemData match {
-              // "property1" : [{ ... }]
-              case JObject(props) =>
-                props.map {
-                  case JField(prop, propData) =>
-                    // support single and multiple values
-                    val values = propData match {
-                      case JArray(values) => values
-                      case other => List(other)
-                    }
-                    parseProperty(itemUri, resolveUri(prop, activeContexts), values, currentTime)
-                }
-              case other => Failure("Invalid data: Expected an object with property keys.")
-            }
-        }.foldRight(Empty: Box[List[ItemData]])(collectErrors _)
+      // { "item" : { "property1" : [ { "time" : 123, "sequenceNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "sequenceNr" : 5, "value" : 3.2 } ] } }
+      case JObject(fields) => fields.flatMap {
+        case JField(item, itemData) if item.equals("@context") => activeContexts = itemData :: activeContexts; None
+        // "item" : { ... }
+        case JField(item, itemData) if !item.equals("@context") =>
+          // resolve relative URIs
+          var itemUri = resolveUri(item, activeContexts)
+          if (itemUri.lastSegment == "") itemUri = itemUri.trimSegments(1)
+          itemData match {
+            // "property1" : [{ ... }]
+            case JObject(props) =>
+              props.map {
+                case JField(prop, propData) =>
+                  // support single and multiple values
+                  val values = propData match {
+                    case JArray(values) => values
+                    case other => List(other)
+                  }
+                  parseProperty(itemUri, resolveUri(prop, activeContexts), values, currentTime)
+              }
+            case other => Failure("Invalid data: Expected an object with property keys.")
+          }
+      }.foldRight(Empty: Box[List[ItemData]])(collectErrors _)
       case other => Failure("Invalid data")
     }
   }
@@ -118,7 +124,7 @@ object ItemDataParser extends Loggable {
   def parseValue(value: JValue): Box[Any] = value match {
     case null | JNothing | JArray(_) =>
       Failure("Invalid value")
-    case obj : JObject =>
+    case obj: JObject =>
       Full(objectToEvent(obj))
     case value =>
       val unboxed = value.values

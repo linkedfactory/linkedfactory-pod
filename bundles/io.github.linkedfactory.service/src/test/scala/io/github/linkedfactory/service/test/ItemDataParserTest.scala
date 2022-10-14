@@ -38,13 +38,13 @@ class ItemDataParserTest {
     Assert.assertEquals("val", value)
     val  (resource2, property2,_, value2) = ItemDataParser.parseItem(root, simpleJson, time).head.tail.head
     Assert.assertEquals("http://test1.example/", resource2.toString)
-    Assert.assertEquals("http://example.root/pref2/pref3", property2.toString)
+    Assert.assertEquals("pref2:pref3", property2.toString)
     Assert.assertEquals("val2", value2)
 
     val withoutContext = ("pref" -> ("pref:rest" -> "val")  ~ ("pref2:pref3" -> "val2"))
     val (r,p,_,v) = ItemDataParser.parseItem(root,withoutContext,time).head.head
     Assert.assertEquals("http://example.root/pref", r.toString)
-    Assert.assertEquals("http://example.root/pref/rest", p.toString)
+    Assert.assertEquals("pref:rest", p.toString)
     Assert.assertEquals("val", v)
 
     val withMultiContext = ("@context" -> ("pref" -> "http://test1.example/") ~ ("pref2" -> "http://pref2.example/")) ~
