@@ -15,6 +15,7 @@
  */
 package io.github.linkedfactory.service
 
+import com.google.common.cache.CacheBuilder
 import io.github.linkedfactory.kvin.influxdb.KvinInfluxDb
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.kvin.{Kvin, KvinListener}
@@ -36,8 +37,8 @@ import java.io.File
 import java.nio.file.Files
 import java.security.PrivilegedExceptionAction
 import java.text.SimpleDateFormat
+import java.util.concurrent.Executors
 import javax.security.auth.Subject
-import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 import scala.reflect.{ClassTag, classTag}
 import scala.util.{Failure, Success, Try}
@@ -60,62 +61,74 @@ object Data {
 
   // get configuration settings from plugin config model
   Globals.withPluginConfig { pcModel => {
-      val cfg = pcModel.getManager.find(cfgURI.appendLocalPart("store")).asInstanceOf[IResource]
-      _modelURI = cfg.getSingle(cfgURI.appendLocalPart("model")) match {
-        case r: IReference if r.getURI != null => r.getURI
-        case s: String => URIs.createURI(s)
-        case _ => URIs.createURI("http://linkedfactory.github.io/data/")
-      }
-      _kvin = cfg.getSingle(cfgURI.appendLocalPart("type")) match {
-        case s: String if (s == "InfluxDB") =>
-          val endpoint = cfg.getSingle(cfgURI.appendLocalPart("endpoint")) match {
-            case r: IReference if (r.getURI != null) => r.getURI
-            case s: String => URIs.createURI(s)
-            case _ => URIs.createURI("http://localhost:8086/")
-          }
-          val db = cfg.getSingle(cfgURI.appendLocalPart("database")) match {
-            case s: String => s
-            case _ => "LinkedFactory"
-          }
-          Try(new KvinInfluxDb(endpoint, db)) match {
-            case Failure(throwable) =>
-              System.err.println(s"Value store: FAILURE for InfluxDB @ $endpoint: ${throwable.getMessage}")
-              None
-            case Success(success) =>
-              println(s"Value store: using InfluxDB @ $endpoint")
-              Some(success)
-          }
-        //case s: String if (s == "KVIN") =>
-        case _ =>
-          val dirName = cfg.getSingle(cfgURI.appendLocalPart("dirName")) match {
-            case s: String => s
-            case _ => "linkedfactory-valuestore"
-          }
-          val valueStorePath = new File(dirName) match {
-            case dir if (dir.isAbsolute()) => dir
-            case _ if (instanceLoc.isSet) => new File(new File(instanceLoc.getURL.toURI), dirName)
-            case _ => new File(Files.createTempDirectory("lf").toFile, dirName)
-          }
-          Try {
-            new KvinLevelDb(valueStorePath)
-          } match {
-            case Failure(throwable) =>
-              System.err.println(s"Value store: FAILURE for LF w/ path=$valueStorePath: ${throwable.getMessage}")
-              None
-            case Success(success) =>
-              println(s"Value store: using LF w/ path=$valueStorePath")
-              Some(success)
-          }
-      }
+    val cfg = pcModel.getManager.find(cfgURI.appendLocalPart("store")).asInstanceOf[IResource]
+    _modelURI = cfg.getSingle(cfgURI.appendLocalPart("model")) match {
+      case r: IReference if r.getURI != null => r.getURI
+      case s: String => URIs.createURI(s)
+      case _ => URIs.createURI("http://linkedfactory.github.io/data/")
+    }
+    _kvin = cfg.getSingle(cfgURI.appendLocalPart("type")) match {
+      case s: String if (s == "InfluxDB") =>
+        val endpoint = cfg.getSingle(cfgURI.appendLocalPart("endpoint")) match {
+          case r: IReference if (r.getURI != null) => r.getURI
+          case s: String => URIs.createURI(s)
+          case _ => URIs.createURI("http://localhost:8086/")
+        }
+        val db = cfg.getSingle(cfgURI.appendLocalPart("database")) match {
+          case s: String => s
+          case _ => "LinkedFactory"
+        }
+        Try(new KvinInfluxDb(endpoint, db)) match {
+          case Failure(throwable) =>
+            System.err.println(s"Value store: FAILURE for InfluxDB @ $endpoint: ${throwable.getMessage}")
+            None
+          case Success(success) =>
+            println(s"Value store: using InfluxDB @ $endpoint")
+            Some(success)
+        }
+      //case s: String if (s == "KVIN") =>
+      case _ =>
+        val dirName = cfg.getSingle(cfgURI.appendLocalPart("dirName")) match {
+          case s: String => s
+          case _ => "linkedfactory-valuestore"
+        }
+        val valueStorePath = new File(dirName) match {
+          case dir if (dir.isAbsolute()) => dir
+          case _ if (instanceLoc.isSet) => new File(new File(instanceLoc.getURL.toURI), dirName)
+          case _ => new File(Files.createTempDirectory("lf").toFile, dirName)
+        }
+        Try {
+          new KvinLevelDb(valueStorePath)
+        } match {
+          case Failure(throwable) =>
+            System.err.println(s"Value store: FAILURE for LF w/ path=$valueStorePath: ${throwable.getMessage}")
+            None
+          case Success(success) =>
+            println(s"Value store: using LF w/ path=$valueStorePath")
+            Some(success)
+        }
     }
   }
+  }
+
+  import java.util.concurrent.TimeUnit
+
+  private val createHierarchyExecutor = Executors.newSingleThreadExecutor()
+  private val SEEN_HIERARCHY_ITEMS = CacheBuilder.newBuilder
+    .maximumSize(100000)
+    .expireAfterWrite(10, TimeUnit.SECONDS)
+    .build[URI, Any]()
 
   val modelURI = _modelURI
   val kvin: Option[Kvin] = _kvin map { kvin =>
     kvin.addListener(new KvinListener {
       override def entityCreated(item: URI, property: URI): Unit = {
         // FIXME: add/use actual subject via session/token/...
-        Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() => createHierarchy(item)))
+        createHierarchyExecutor.submit(new Runnable {
+          override def run(): Unit = {
+            Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() => createHierarchy(item)))
+          }
+        })
       }
 
       override def valueAdded(item: URI, property: URI, context: URI, time: Long, sequenceNr: Long, value: Any): Unit = {
@@ -148,14 +161,18 @@ object Data {
     kvin
   }
 
-  private def createHierarchy(uri: URI, seen: mutable.Set[URI] = mutable.Set.empty) {
+  private def createHierarchy(uri: URI) {
     // add hierarchy to RDF store
     currentModel.map(m => withTransaction(m.getManager) { manager =>
       var current = uri
       var done = false
       while (!done && current.segmentCount > 1) {
         val parent = current.trimSegments(1)
-        if (seen.add(current) && !manager.hasMatch(parent, PROPERTY_CONTAINS, current)) manager.add(new Statement(parent, PROPERTY_CONTAINS, current)) else done = true
+        if (SEEN_HIERARCHY_ITEMS.getIfPresent(current) == null &&
+          !manager.hasMatch(parent, PROPERTY_CONTAINS, current)) {
+          manager.add(new Statement(parent, PROPERTY_CONTAINS, current))
+          SEEN_HIERARCHY_ITEMS.put(current, true)
+        } else done = true
         current = parent
       }
     })
@@ -166,6 +183,7 @@ object Data {
     withTransaction(model.getManager) {
       manager =>
         def vocab(localPart: String) = URIs.createURI(NAMESPACE + localPart)
+
         manager.add(new Statement(vocab("description"), RDF.PROPERTY_TYPE, OWL.TYPE_DATATYPEPROPERTY))
         manager.add(new Statement(vocab("sensorType"), RDF.PROPERTY_TYPE, OWL.TYPE_DATATYPEPROPERTY))
         manager.add(new Statement(vocab("machineType"), RDF.PROPERTY_TYPE, OWL.TYPE_DATATYPEPROPERTY))
@@ -173,9 +191,8 @@ object Data {
         manager.setNamespace("factory", URIs.createURI(NAMESPACE))
 
         // re-create existing hierarchy from valuestore
-        val seen: mutable.Set[URI] = mutable.Set.empty
         kvin.descendants(URIs.createURI("")).iterator.asScala.foreach {
-          uri  => createHierarchy(uri, seen)
+          uri => createHierarchy(uri)
         }
     }
   }
