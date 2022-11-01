@@ -21,7 +21,9 @@ import org.eclipse.rdf4j.query.algebra.Join;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.Var;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
+import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
+import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -285,8 +287,13 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 		return null;
 	}
 
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(Join join, BindingSet bindings)
-			throws QueryEvaluationException {
-		return new KvinJoinIterator(this, join, bindings);
+	@Override
+	protected QueryEvaluationStep prepare(Join join, QueryEvaluationContext context) throws QueryEvaluationException {
+		return new QueryEvaluationStep() {
+			@Override
+			public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
+				return new KvinJoinIterator(KvinEvaluationStrategy.this, join, bindingSet);
+			}
+		};
 	}
 }
