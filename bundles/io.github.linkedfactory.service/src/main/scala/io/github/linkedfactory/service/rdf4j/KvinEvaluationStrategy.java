@@ -24,7 +24,6 @@ import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 
-import io.github.linkedfactory.service.rdf4j.ParameterScanner.Parameters;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URIs;
 import io.github.linkedfactory.kvin.Kvin;
@@ -86,7 +85,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 						valueToData.put(rdfValue, tuple.value);
 					} else {
 						// convert value to literal
-						rdfValue = toLiteral(tuple.value);
+						rdfValue = toRdfValue(tuple.value);
 					}
 
 					if (!valueVar.isConstant()) {
@@ -97,7 +96,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 					Var timeVar = stmt.getObjectVar();
 					// System.out.println("Bind: " + timeVar);
 					if (!timeVar.isConstant() && !bs.hasBinding(timeVar.getName())) {
-						newBs.addBinding(timeVar.getName(), toLiteral(tuple.time));
+						newBs.addBinding(timeVar.getName(), toRdfValue(tuple.time));
 					}
 					return new SingletonIteration<>(newBs);
 				}
@@ -113,7 +112,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 					QueryBindingSet newBs = new QueryBindingSet(bs);
 					if (!valueVar.isConstant()) {
 						// TODO recurse if getValue() is also an Event
-						newBs.addBinding(valueVar.getName(), toLiteral(e.getValue()));
+						newBs.addBinding(valueVar.getName(), toRdfValue(e.getValue()));
 					}
 					return new SingletonIteration<>(newBs);
 				}
@@ -230,7 +229,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 							newBs.addBinding(predVar.getName(), currentPropertyIRI);
 						}
 						if (time != null && !time.isConstant() && !bs.hasBinding(time.getName())) {
-							newBs.addBinding(time.getName(), toLiteral(tuple.time));
+							newBs.addBinding(time.getName(), toRdfValue(tuple.time));
 						}
 						if (contextVar != null && !contextVar.isConstant()) {
 							newBs.addBinding(contextVar.getName(), contextValue[0]);
@@ -257,29 +256,31 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 		return super.evaluate(stmt, bs);
 	}
 
-	protected Literal toLiteral(Object value) {
-		Literal literal;
-		if (value instanceof Double) {
-			literal = vf.createLiteral((Double) value);
+	protected Value toRdfValue(Object value) {
+		Value rdfValue;
+		if (value instanceof URI) {
+			rdfValue = vf.createIRI(value.toString());
+		} else if (value instanceof Double) {
+			rdfValue = vf.createLiteral((Double) value);
 		} else if (value instanceof Float) {
-			literal = vf.createLiteral((Float) value);
+			rdfValue = vf.createLiteral((Float) value);
 		} else if (value instanceof Integer) {
-			literal = vf.createLiteral((Integer) value);
+			rdfValue = vf.createLiteral((Integer) value);
 		} else if (value instanceof Long) {
-			literal = vf.createLiteral((Long) value);
+			rdfValue = vf.createLiteral((Long) value);
 		} else if (value instanceof BigDecimal) {
-			literal = vf.createLiteral((BigDecimal) value);
+			rdfValue = vf.createLiteral((BigDecimal) value);
 		} else if (value instanceof BigInteger) {
-			literal = vf.createLiteral((BigInteger) value);
+			rdfValue = vf.createLiteral((BigInteger) value);
 		} else {
-			literal = vf.createLiteral(value.toString());
+			rdfValue = vf.createLiteral(value.toString());
 		}
-		return literal;
+		return rdfValue;
 	}
 
 	net.enilink.komma.core.URI toKommaUri(Value value) {
 		if (value instanceof IRI) {
-			return URIs.createURI(((IRI) value).toString());
+			return URIs.createURI(value.toString());
 		}
 		return null;
 	}

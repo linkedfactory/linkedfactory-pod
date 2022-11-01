@@ -42,6 +42,8 @@ object ItemDataParser extends Loggable {
   }
 
   def parseItem(rootItem: URI, json: JValue, currentTime: Long = System.currentTimeMillis): Box[List[ItemData]] = {
+    var activeContexts = List[JValue]()
+
     def collectErrors(a: Box[List[ItemData]], b: Box[List[ItemData]]): Box[List[ItemData]] = {
       (a, b) match {
         // accumulate errors
@@ -54,7 +56,61 @@ object ItemDataParser extends Loggable {
       }
     }
 
-    var activeContexts = List[JValue]()
+    def objectToEvent(obj: JObject): Event = obj.foldField(Event.NULL) { case (e, field) =>
+      val property = URIs.createURI(field.name)
+      parseValue(field.value) match {
+        case Full(value) => e.append(new Event(property, value))
+        case _ => e
+      }
+    }
+
+    def parseValue(value: JValue): Box[Any] = value match {
+      case null | JNothing | JArray(_) =>
+        Failure("Invalid value")
+      case obj: JObject =>
+        obj \ "@id" match {
+          case JString(id) => Full(resolveUri(id, activeContexts))
+          case _ => Full(objectToEvent(obj))
+        }
+      case value =>
+        val unboxed = value.values
+        Full(unboxed)
+    }
+
+    def parseProperty(item: URI, property: URI, values: List[JValue], currentTime: Long): Box[List[ItemData]] = {
+      val result = values.map {
+        // { "time" : 123, "sequenceNr" : 2, "value" : 1.3 }
+        case JObject(fields) =>
+          val time = (fields \ "time").toOpt.getOrElse(fields \ "t") match {
+            case JString(s) => datatypeFactory.newXMLGregorianCalendar(s).toGregorianCalendar.getTimeInMillis
+            case JInt(n) => n.longValue
+            case _ => currentTime
+          }
+
+          parseValue((fields \ "value").toOpt.getOrElse(fields \ "v")) match {
+            case Full(value) =>
+              Full((item, property, time, value): ItemData)
+            case _ =>
+              Failure("Invalid value for item \"" + item + "\" and property \"" + property + "\".")
+          }
+        case other => parseValue(other) match {
+          case Full(value) =>
+            Full((item, property, currentTime, value): ItemData)
+          case _ =>
+            Failure("Invalid value for item \"" + item + "\" and property \"" + property + "\".")
+        }
+      }
+
+      result.foldRight(Empty: Box[List[ItemData]]) {
+        // accumulate errors
+        case (a: Failure, b: Failure) => Failure(a.msg + "\n" + b.msg)
+        case (a: Failure, b) => a
+        case (a, b: Failure) => b
+        // this is the cause for foldRight, foldLeft would always required to traverse
+        // all previously folded values when using the ++ operator
+        case (a, b) => Full(a.toList ++ b.openOr(Nil))
+      }
+    }
 
     def resolveUri(item: String, contexts: List[JValue]): URI = {
       item.split(":") match {
@@ -110,59 +166,6 @@ object ItemDataParser extends Loggable {
           }
       }.foldRight(Empty: Box[List[ItemData]])(collectErrors _)
       case other => Failure("Invalid data")
-    }
-  }
-
-  def objectToEvent(obj: JObject): Event = obj.foldField(Event.NULL) { case (e, field) =>
-    val property = URIs.createURI(field.name)
-    parseValue(field.value) match {
-      case Full(value) => e.append(new Event(property, value))
-      case _ => e
-    }
-  }
-
-  def parseValue(value: JValue): Box[Any] = value match {
-    case null | JNothing | JArray(_) =>
-      Failure("Invalid value")
-    case obj: JObject =>
-      Full(objectToEvent(obj))
-    case value =>
-      val unboxed = value.values
-      Full(unboxed)
-  }
-
-  def parseProperty(item: URI, property: URI, values: List[JValue], currentTime: Long): Box[List[ItemData]] = {
-    val result = values.map {
-      // { "time" : 123, "sequenceNr" : 2, "value" : 1.3 }
-      case JObject(fields) =>
-        val time = (fields \ "time").toOpt.getOrElse(fields \ "t") match {
-          case JString(s) => datatypeFactory.newXMLGregorianCalendar(s).toGregorianCalendar.getTimeInMillis
-          case JInt(n) => n.longValue
-          case _ => currentTime
-        }
-
-        parseValue((fields \ "value").toOpt.getOrElse(fields \ "v")) match {
-          case Full(value) =>
-            Full((item, property, time, value): ItemData)
-          case _ =>
-            Failure("Invalid value for item \"" + item + "\" and property \"" + property + "\".")
-        }
-      case other => parseValue(other) match {
-        case Full(value) =>
-          Full((item, property, currentTime, value): ItemData)
-        case _ =>
-          Failure("Invalid value for item \"" + item + "\" and property \"" + property + "\".")
-      }
-    }
-
-    result.foldRight(Empty: Box[List[ItemData]]) {
-      // accumulate errors
-      case (a: Failure, b: Failure) => Failure(a.msg + "\n" + b.msg)
-      case (a: Failure, b) => a
-      case (a, b: Failure) => b
-      // this is the cause for foldRight, foldLeft would always required to traverse 
-      // all previously folded values when using the ++ operator
-      case (a, b) => Full(a.toList ++ b.openOr(Nil))
     }
   }
 }

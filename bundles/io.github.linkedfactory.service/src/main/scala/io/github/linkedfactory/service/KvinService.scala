@@ -128,6 +128,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
               case b: Boolean => b.toString
               case n: Number => n.toString
               case s: String => compactRender(JString(s))
+              case uri : URI => compactRender(JObject(JField("@id", uri.toString)))
               case x: JValue => compactRender(x)
               case e: linkedfactory.kvin.Event => compactRender(eventToJson(e))
               case _ => compactRender(decompose(value))
