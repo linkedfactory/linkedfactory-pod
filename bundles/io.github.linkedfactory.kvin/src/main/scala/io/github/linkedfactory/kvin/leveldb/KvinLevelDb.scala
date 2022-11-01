@@ -537,13 +537,13 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     b.get match {
       // this is an object
       case 'O' =>
-        var dataObj = Event.NULL
+        var dataObj = Record.NULL
         while (b.hasRemaining) {
           val pId = new Array[Byte](varIntLength(b))
           b.get(pId)
           val pUriOpt = toUri(pId, EntryType.PropertyToId)
           val value = decode(b)
-          pUriOpt.foreach { pUri => dataObj = dataObj.append(new Event(pUri, value)) }
+          pUriOpt.foreach { pUri => dataObj = dataObj.append(new Record(pUri, value)) }
         }
         dataObj
       // a URI reference

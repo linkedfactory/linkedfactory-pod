@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service.util
 
-import io.github.linkedfactory.kvin.Event
+import io.github.linkedfactory.kvin.Record
 
 import javax.xml.datatype.DatatypeFactory
 import net.enilink.komma.core.{URI, URIs}
@@ -56,10 +56,10 @@ object ItemDataParser extends Loggable {
       }
     }
 
-    def objectToEvent(obj: JObject): Event = obj.foldField(Event.NULL) { case (e, field) =>
-      val property = URIs.createURI(field.name)
+    def objectToRecord(o: JObject): Record = o.obj.foldLeft(Record.NULL) { case (e, field) =>
+      val property = resolveUri(field.name, activeContexts)
       parseValue(field.value) match {
-        case Full(value) => e.append(new Event(property, value))
+        case Full(value) => e.append(new Record(property, value))
         case _ => e
       }
     }
@@ -70,7 +70,7 @@ object ItemDataParser extends Loggable {
       case obj: JObject =>
         obj \ "@id" match {
           case JString(id) => Full(resolveUri(id, activeContexts))
-          case _ => Full(objectToEvent(obj))
+          case _ => Full(objectToRecord(obj))
         }
       case value =>
         val unboxed = value.values
@@ -104,33 +104,33 @@ object ItemDataParser extends Loggable {
       result.foldRight(Empty: Box[List[ItemData]]) {
         // accumulate errors
         case (a: Failure, b: Failure) => Failure(a.msg + "\n" + b.msg)
-        case (a: Failure, b) => a
-        case (a, b: Failure) => b
+        case (a: Failure, _) => a
+        case (_, b: Failure) => b
         // this is the cause for foldRight, foldLeft would always required to traverse
         // all previously folded values when using the ++ operator
         case (a, b) => Full(a.toList ++ b.openOr(Nil))
       }
     }
 
-    def resolveUri(item: String, contexts: List[JValue]): URI = {
-      item.split(":") match {
+    def resolveUri(uri: String, contexts: List[JValue]): URI = {
+      uri.split(":") match {
         // is a URI with scheme
-        case Array(_, suf, _*) if suf.startsWith("//") => URIs.createURI(item)
+        case Array(_, suf, _*) if suf.startsWith("//") => URIs.createURI(uri)
         // may be a CURIE
         case Array(pref, _*) => contexts match {
           case first :: rest =>
             first \ pref match {
-              case JNothing => resolveUri(item, rest)
               case JString(s) =>
                 val sufPref = resolveUri(s, contexts).toString
-                if (pref.length < item.length)
-                  URIs.createURI(sufPref.concat(item.substring(pref.length + 1)))
+                if (pref.length < uri.length)
+                  URIs.createURI(sufPref.concat(uri.substring(pref.length + 1)))
                 else
-                  URIs.createURI(sufPref.concat(item.substring(pref.length)))
+                  URIs.createURI(sufPref.concat(uri.substring(pref.length)))
+              case _ => resolveUri(uri, rest)
             }
           // no prefix defined, just use item as URI
           case Nil => {
-            val result = URIs.createURI(item)
+            val result = URIs.createURI(uri)
             if (result.isRelative) result.resolve(rootItem) else result
           }
         }
@@ -162,10 +162,10 @@ object ItemDataParser extends Loggable {
                   }
                   parseProperty(itemUri, resolveUri(prop, activeContexts), values, currentTime)
               }
-            case other => Failure("Invalid data: Expected an object with property keys.")
+            case _ => Failure("Invalid data: Expected an object with property keys.")
           }
       }.foldRight(Empty: Box[List[ItemData]])(collectErrors _)
-      case other => Failure("Invalid data")
+      case _ => Failure("Invalid data")
     }
   }
 }

@@ -24,30 +24,30 @@ import net.enilink.komma.core.URI;
  * 
  * This is inspired by RDF and the scala.xml.MetaData implementation.
  */
-public class Event extends Data<Event> {
-	public static final Event NULL = new Event(null, null);
+public class Record extends Data<Record> {
+	public static final Record NULL = new Record(null, null);
 
 	public static final URI PROPERTY_VALUE = Data.PROPERTY_VALUE;
 
-	public Event(URI property, Object value) {
+	public Record(URI property, Object value) {
 		this(property, value, null);
 	}
 
-	public Event(URI property, Object value, Event next) {
+	public Record(URI property, Object value, Record next) {
 		super(property, value, next == NULL ? null : next);
 	}
 
 	@Override
-	public Event copy(Event next) {
+	public Record copy(Record next) {
 		if (property == null) {
 			return next;
 		} else {
-			return new Event(property, value, next);
+			return new Record(property, value, next);
 		}
 	}
 
 	@Override
-	protected Event NULL() {
+	protected Record NULL() {
 		return NULL;
 	}
 }

@@ -16,7 +16,7 @@
 package io.github.linkedfactory.kvin.test
 
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
-import io.github.linkedfactory.kvin.{Event, KvinTuple}
+import io.github.linkedfactory.kvin.{Record, KvinTuple}
 import net.enilink.komma.core.URIs
 import org.junit.Assert._
 import org.junit.{After, Before, Test}
@@ -54,7 +54,7 @@ class KvinLevelDbTest extends KvinTestBase {
       val uri = itemUri(nr)
       for (i <- 0 until points) {
         val time = startTime - i * pointDistance
-        val value = new Event(URIs.createURI("prop:itemNr"), nr).append(new Event(URIs.createURI("prop:pointNr"), i)).append(new Event(URIs.createURI("prop:value"), URIs.createURI("some:value")))
+        val value = new Record(URIs.createURI("prop:itemNr"), nr).append(new Record(URIs.createURI("prop:pointNr"), i)).append(new Record(URIs.createURI("prop:value"), URIs.createURI("some:value")))
         // println("ADD: " + new KvinTuple(uri, valueProperty, ctx, time, value))
         store.put(new KvinTuple(uri, valueProperty, ctx, time, value))
       }

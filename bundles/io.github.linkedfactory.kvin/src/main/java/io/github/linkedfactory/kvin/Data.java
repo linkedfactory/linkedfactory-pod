@@ -17,6 +17,7 @@ package io.github.linkedfactory.kvin;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -153,7 +154,8 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 		if (property.equals(this.property)) {
 			return next;
 		}
-		return copy(next.removeFirst(property));
+		T newNext = next == null ? null : next.removeFirst(property);
+		return newNext != next ? copy(newNext) : (T) this;
 	}
 
 	/**
@@ -174,7 +176,8 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 		if (property.equals(this.property) && value.equals(this.value)) {
 			return next;
 		}
-		return copy(next.removeFirst(property, value));
+		T newNext = next == null ? null : next.removeFirst(property, value);
+		return newNext != next ? copy(newNext) : (T) this;
 	}
 
 	/**
@@ -186,7 +189,7 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 		if (property == null) {
 			return 0;
 		}
-		return 1 + next.size();
+		return 1 + (next == null ? 0 : next.size());
 	}
 
 	@Override
@@ -203,4 +206,17 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 	}
 
 	protected abstract T NULL();
+
+	@Override
+	public boolean equals(Object o) {
+		if (this == o) return true;
+		if (!(o instanceof Data)) return false;
+		Data<?> data = (Data<?>) o;
+		return property.equals(data.property) && Objects.equals(next, data.next) && Objects.equals(value, data.value);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(property, next, value);
+	}
 }

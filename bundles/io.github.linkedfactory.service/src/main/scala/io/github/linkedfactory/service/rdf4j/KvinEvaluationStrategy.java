@@ -4,8 +4,8 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Map;
 
+import io.github.linkedfactory.kvin.Record;
 import net.enilink.komma.core.URI;
-import io.github.linkedfactory.kvin.Event;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
@@ -79,7 +79,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 					Var valueVar = stmt.getObjectVar();
 
 					Value rdfValue;
-					if (tuple.value instanceof Event) {
+					if (tuple.value instanceof Record) {
 						// value is an event, create a blank node
 						rdfValue = valueVar.isConstant() ? valueVar.getValue() : vf.createBNode();
 						valueToData.put(rdfValue, tuple.value);
@@ -102,17 +102,17 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 				}
 				// TODO support other properties
 			}
-		} else if (data instanceof Event) {
+		} else if (data instanceof Record) {
 			Value predValue = getVarValue(stmt.getPredicateVar(), bs);
 			net.enilink.komma.core.URI predicate = toKommaUri(subjectValue);
 			if (predicate != null) {
-				Event e = ((Event)data).first(predicate);
-				if (e != Event.NULL) {
+				Record r = ((Record)data).first(predicate);
+				if (r != Record.NULL) {
 					Var valueVar = stmt.getObjectVar();
 					QueryBindingSet newBs = new QueryBindingSet(bs);
 					if (!valueVar.isConstant()) {
-						// TODO recurse if getValue() is also an Event
-						newBs.addBinding(valueVar.getName(), toRdfValue(e.getValue()));
+						// TODO recurse if getValue() is also a Record
+						newBs.addBinding(valueVar.getName(), toRdfValue(r.getValue()));
 					}
 					return new SingletonIteration<>(newBs);
 				}

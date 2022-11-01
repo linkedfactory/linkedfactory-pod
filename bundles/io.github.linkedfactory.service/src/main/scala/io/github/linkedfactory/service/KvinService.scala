@@ -16,7 +16,7 @@
 package io.github.linkedfactory.service
 
 import io.github.linkedfactory
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
+import io.github.linkedfactory.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.service.util.{ItemDataParser, LineProtocolParser}
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}
@@ -115,9 +115,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           case "application/json" =>
             // { "item" : { "property1" : [ { "time" : 123, "sequenceNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "sequenceNr" : 5, "value" : 3.2 } ] } }
 
-            def eventToJson(e : linkedfactory.kvin.Event) : JObject = JObject(e.iterator().asScala.map { e =>
+            def recordToJson(r : Record) : JObject = JObject(r.iterator().asScala.map { e =>
               JField(e.getProperty.toString, e.getValue match {
-                case someEvent : linkedfactory.kvin.Event => eventToJson(someEvent)
+                case someEvent : Record => recordToJson(someEvent)
                 case other => decompose(other)
               })
             }.toList)
@@ -130,7 +130,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
               case s: String => compactRender(JString(s))
               case uri : URI => compactRender(JObject(JField("@id", uri.toString)))
               case x: JValue => compactRender(x)
-              case e: linkedfactory.kvin.Event => compactRender(eventToJson(e))
+              case e: Record => compactRender(recordToJson(e))
               case _ => compactRender(decompose(value))
             }
             val streamer = (os: OutputStream) => {
