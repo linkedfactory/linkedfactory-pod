@@ -8,16 +8,12 @@ import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
-import org.eclipse.rdf4j.query.algebra.QueryRoot;
 import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryJoinOptimizer;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryModelNormalizer;
 import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
-import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryOptimizerList;
 
 import java.util.*;
 
@@ -34,7 +30,7 @@ public class KvinFederatedService implements FederatedService {
 	@Override
 	public boolean ask(Service service, BindingSet bindings, String baseUri) throws QueryEvaluationException {
 		final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
-				new SingletonIteration<BindingSet, QueryEvaluationException>(bindings), baseUri);
+				new SingletonIteration<>(bindings), baseUri);
 		try {
 			while (iter.hasNext()) {
 				BindingSet bs = iter.next();
@@ -52,7 +48,7 @@ public class KvinFederatedService implements FederatedService {
 			CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri)
 					throws QueryEvaluationException {
 		if (!bindings.hasNext()) {
-			return new EmptyIteration<BindingSet, QueryEvaluationException>();
+			return new EmptyIteration<>();
 		}
 
 		TupleExpr expr = service.getArg();
@@ -63,9 +59,9 @@ public class KvinFederatedService implements FederatedService {
 			throw new QueryEvaluationException(e);
 		}
 
-		QueryOptimizerList optimizers = new QueryOptimizerList();
-		optimizers.add(new QueryModelNormalizer());
-		optimizers.add(new QueryJoinOptimizer());
+		// QueryOptimizerList optimizers = new QueryOptimizerList();
+		// optimizers.add(new QueryModelNormalizer());
+		// optimizers.add(new QueryJoinOptimizer());
 
 		Map<Value, Object> valueToData = new WeakHashMap<>();
 		EvaluationStrategy strategy = new KvinEvaluationStrategy(kvin, scanner, vf, null, null, valueToData);
@@ -74,10 +70,10 @@ public class KvinFederatedService implements FederatedService {
 		while (bindings.hasNext()) {
 			BindingSet bs = bindings.next();
 
-			TupleExpr optimized = new QueryRoot(expr.clone());
-			optimizers.optimize(optimized, null, bs);
+			// TupleExpr optimized = new QueryRoot(expr.clone());
+			// optimizers.optimize(optimized, null, bs);
 
-			resultIters.add(strategy.evaluate(optimized, bs));
+			resultIters.add(strategy.evaluate(expr, bs));
 		}
 
 		return resultIters.size() > 1 ? new DistinctIteration<>(new UnionIteration<>(resultIters)) : resultIters.get(0);
@@ -97,12 +93,12 @@ public class KvinFederatedService implements FederatedService {
 	public CloseableIteration<BindingSet, QueryEvaluationException> select(Service service,
 			final Set<String> projectionVars, BindingSet bindings, String baseUri) throws QueryEvaluationException {
 		final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
-				new SingletonIteration<BindingSet, QueryEvaluationException>(bindings), baseUri);
+				new SingletonIteration<>(bindings), baseUri);
 		if (service.getBindingNames().equals(projectionVars)) {
 			return iter;
 		}
 
-		return new CloseableIteration<BindingSet, QueryEvaluationException>() {
+		return new CloseableIteration<>() {
 			@Override
 			public boolean hasNext() throws QueryEvaluationException {
 				return iter.hasNext();

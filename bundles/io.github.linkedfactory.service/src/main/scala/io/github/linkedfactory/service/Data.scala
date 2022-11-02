@@ -124,11 +124,23 @@ object Data {
     kvin.addListener(new KvinListener {
       override def entityCreated(item: URI, property: URI): Unit = {
         // FIXME: add/use actual subject via session/token/...
-        createHierarchyExecutor.submit(new Runnable {
-          override def run(): Unit = {
-            Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() => createHierarchy(item)))
-          }
-        })
+        currentModel.foreach { m =>
+          createHierarchyExecutor.submit(new Runnable {
+            override def run(): Unit = {
+              Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() => {
+                val uow = m.getModelSet.getUnitOfWork
+                uow.begin()
+                try {
+                  withTransaction(m.getManager) { manager =>
+                    createHierarchy(item, manager)
+                  }
+                } finally {
+                  uow.end()
+                }
+              }))
+            }
+          })
+        }
       }
 
       override def valueAdded(item: URI, property: URI, context: URI, time: Long, sequenceNr: Long, value: Any): Unit = {
@@ -161,21 +173,19 @@ object Data {
     kvin
   }
 
-  private def createHierarchy(uri: URI) {
+  private def createHierarchy(uri: URI, em: IEntityManager) {
     // add hierarchy to RDF store
-    currentModel.map(m => withTransaction(m.getManager) { manager =>
-      var current = uri
-      var done = false
-      while (!done && current.segmentCount > 1) {
-        val parent = current.trimSegments(1)
-        if (SEEN_HIERARCHY_ITEMS.getIfPresent(current) == null &&
-          !manager.hasMatch(parent, PROPERTY_CONTAINS, current)) {
-          manager.add(new Statement(parent, PROPERTY_CONTAINS, current))
-          SEEN_HIERARCHY_ITEMS.put(current, true)
-        } else done = true
-        current = parent
-      }
-    })
+    var current = uri
+    var done = false
+    while (!done && current.segmentCount > 1) {
+      val parent = current.trimSegments(1)
+      if (SEEN_HIERARCHY_ITEMS.getIfPresent(current) == null &&
+        !em.hasMatch(parent, PROPERTY_CONTAINS, current)) {
+        em.add(new Statement(parent, PROPERTY_CONTAINS, current))
+        SEEN_HIERARCHY_ITEMS.put(current, true)
+      } else done = true
+      current = parent
+    }
   }
 
   private def init(model: IModel, kvin: Kvin) {
@@ -192,7 +202,7 @@ object Data {
 
         // re-create existing hierarchy from valuestore
         kvin.descendants(URIs.createURI("")).iterator.asScala.foreach {
-          uri => createHierarchy(uri)
+          uri => createHierarchy(uri, manager)
         }
     }
   }
