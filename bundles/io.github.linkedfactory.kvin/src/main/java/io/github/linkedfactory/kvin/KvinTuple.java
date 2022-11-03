@@ -31,7 +31,7 @@ public class KvinTuple {
 	public final URI item;
 	public final URI property;
 	public final long time;
-	public final int sequenceNr;
+	public final int seqNr;
 	public final Object value;
 	public final URI context;
 
@@ -55,10 +55,10 @@ public class KvinTuple {
 	 * @param property   The property URI.
 	 * @param context    The context URI.
 	 * @param time       The associated time.
-	 * @param sequenceNr The sequence number.
+	 * @param seqNr The sequence number.
 	 * @param value      The value at the given time.
 	 */
-	public KvinTuple(URI item, URI property, URI context, long time, int sequenceNr, Object value) {
+	public KvinTuple(URI item, URI property, URI context, long time, int seqNr, Object value) {
 		if (time > TIME_MAX_VALUE) {
 			throw new IllegalArgumentException(
 					"Maximum range of time attribute exceeded: " + time + " > " + TIME_MAX_VALUE);
@@ -67,19 +67,24 @@ public class KvinTuple {
 		this.item = item;
 		this.property = property;
 		this.time = time;
-		this.sequenceNr = sequenceNr;
+		this.seqNr = seqNr;
 		this.value = value;
 		this.context = context;
 	}
 
 	@Override
-	public boolean equals(Object other) {
-		return Objects.equals(this, other);
+	public boolean equals(Object o) {
+		if (this == o) return true;
+		if (!(o instanceof KvinTuple)) return false;
+		KvinTuple kvinTuple = (KvinTuple) o;
+		return time == kvinTuple.time && seqNr == kvinTuple.seqNr && item.equals(kvinTuple.item) &&
+				property.equals(kvinTuple.property) && value.equals(kvinTuple.value) &&
+				context.equals(kvinTuple.context);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(item, property, time, sequenceNr, value, context);
+		return Objects.hash(item, property, time, seqNr, value, context);
 	}
 
 	@Override
@@ -87,8 +92,8 @@ public class KvinTuple {
 		StringBuilder sb = new StringBuilder();
 		sb.append(getClass().getSimpleName());
 		Formatter f = new Formatter(sb);
-		f.format("(item=%s, property=%s, context=%s, time=%s, sequenceNr=%s, value=%s", item, property, context, time,
-				sequenceNr, value);
+		f.format("(item=%s, property=%s, context=%s, time=%s, seqNr=%s, value=%s", item, property, context, time,
+				seqNr, value);
 		f.close();
 		return sb.toString();
 	}

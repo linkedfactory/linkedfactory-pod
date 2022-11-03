@@ -29,5 +29,5 @@ public interface KvinListener {
 	/**
 	 * Called when a new value for the (item, property, context) combination has been added.
 	 */
-	void valueAdded(URI item, URI property, URI context, long time, long sequenceNr, Object value);
+	void valueAdded(URI item, URI property, URI context, long time, long seqNr, Object value);
 }

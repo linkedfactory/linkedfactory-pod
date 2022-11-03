@@ -34,36 +34,36 @@ class LineProtocolParserTest {
 
     // int value
     val d1 = p.parse("""http://example.org/intProperty,item=http://example.org/item value=42i""", time)
-    Assert.assertEquals(URIs.createURI("http://example.org/item"), d1._1)
-    Assert.assertEquals(URIs.createURI("http://example.org/intProperty"), d1._2)
+    Assert.assertEquals(URIs.createURI("http://example.org/item"), d1.item)
+    Assert.assertEquals(URIs.createURI("http://example.org/intProperty"), d1.property)
     // timestamp not given, should be set to current time
-    Assert.assertEquals(time, d1._3)
-    Assert.assertEquals(42, d1._4)
+    Assert.assertEquals(time, d1.time)
+    Assert.assertEquals(42, d1.value)
 
     // string value with escaped characters
     val d2 = p.parse("http://example.org/stringProperty,item=http://example.org/item value=\"escaped\\ characters:\\\t\\ \\\"\\=\\,\"", time)
-    Assert.assertEquals(URIs.createURI("http://example.org/item"), d2._1)
-    Assert.assertEquals(URIs.createURI("http://example.org/stringProperty"), d2._2)
+    Assert.assertEquals(URIs.createURI("http://example.org/item"), d2.item)
+    Assert.assertEquals(URIs.createURI("http://example.org/stringProperty"), d2.property)
     // timestamp not given, should be set to current time
-    Assert.assertEquals(time, d2._3)
-    Assert.assertEquals("escaped characters:\t \"=,", d2._4)
+    Assert.assertEquals(time, d2.time)
+    Assert.assertEquals("escaped characters:\t \"=,", d2.value)
 
     // double value (default) and timestamp in ns
     val d3 = p.parse("""http://example.org/property\,type\=Double,item=http://example.org/item value=23 1529592952925259295""", time)
-    Assert.assertEquals(URIs.createURI("http://example.org/item"), d3._1)
-    Assert.assertEquals(URIs.createURI("http://example.org/property,type=Double"), d3._2)
+    Assert.assertEquals(URIs.createURI("http://example.org/item"), d3.item)
+    Assert.assertEquals(URIs.createURI("http://example.org/property,type=Double"), d3.property)
     // timestamp given (in nanoseconds)
-    Assert.assertEquals(1529592952925259295L / 1000 / 1000, d3._3) // ns -> ms
-    Assert.assertEquals(23.0, d3._4)
+    Assert.assertEquals(1529592952925259295L / 1000 / 1000, d3.time) // ns -> ms
+    Assert.assertEquals(23.0, d3.value)
 
     // boolean value (false) and additional tag b, field d
     // FIXME: additional tags and fields are parsed, but ignored
     val d4 = p.parse("""a,item=http://example.org/item,b=c value=f,d=t""", time)
-    Assert.assertEquals(URIs.createURI("http://example.org/item"), d4._1)
-    Assert.assertEquals(URIs.createURI("a"), d4._2)
+    Assert.assertEquals(URIs.createURI("http://example.org/item"), d4.item)
+    Assert.assertEquals(URIs.createURI("a"), d4.property)
    // timestamp not given, should be set to current time
-    Assert.assertEquals(time, d4._3)
-    Assert.assertEquals(false, d4._4)
+    Assert.assertEquals(time, d4.time)
+    Assert.assertEquals(false, d4.value)
   }
 
   // simple benchmark: regex vs. tokenizer vs. parser

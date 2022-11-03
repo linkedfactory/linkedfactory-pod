@@ -15,21 +15,19 @@
  */
 package io.github.linkedfactory.service.util
 
-import io.github.linkedfactory.kvin.Record
-
-import javax.xml.datatype.DatatypeFactory
+import io.github.linkedfactory.kvin.{Kvin, KvinTuple, Record}
 import net.enilink.komma.core.{URI, URIs}
 import net.liftweb.common.Box.box2Iterable
 import net.liftweb.common._
 import net.liftweb.json.JsonAST._
 import net.liftweb.json.JsonDSL._
 
+import javax.xml.datatype.DatatypeFactory
+
 /**
  * Parses JSON objects with linked factory item data.
  */
-object ItemDataParser extends Loggable {
-  type ItemData = (URI, URI, Long, Any)
-
+object JsonFormatParser extends Loggable {
   val dtFactoryLocal = new ThreadLocal[DatatypeFactory]
 
   def datatypeFactory = {
@@ -41,10 +39,10 @@ object ItemDataParser extends Loggable {
     factory
   }
 
-  def parseItem(rootItem: URI, json: JValue, currentTime: Long = System.currentTimeMillis): Box[List[ItemData]] = {
+  def parseItem(rootItem: URI, json: JValue, currentTime: Long = System.currentTimeMillis): Box[List[KvinTuple]] = {
     var activeContexts = List[JValue]()
 
-    def collectErrors(a: Box[List[ItemData]], b: Box[List[ItemData]]): Box[List[ItemData]] = {
+    def collectErrors(a: Box[List[KvinTuple]], b: Box[List[KvinTuple]]): Box[List[KvinTuple]] = {
       (a, b) match {
         // accumulate errors
         case (a: Failure, b: Failure) => Failure(a.msg + "\n" + b.msg)
@@ -77,31 +75,43 @@ object ItemDataParser extends Loggable {
         Full(unboxed)
     }
 
-    def parseProperty(item: URI, property: URI, values: List[JValue], currentTime: Long): Box[List[ItemData]] = {
+    def parseProperty(item: URI, property: URI, values: List[JValue], currentTime: Long): Box[List[KvinTuple]] = {
+      var generatedSeqNr = -1
       val result = values.map {
-        // { "time" : 123, "sequenceNr" : 2, "value" : 1.3 }
+        // { "time" : 123, "seqNr" : 2, "value" : 1.3 }
         case JObject(fields) =>
+          var seqNr = fields \ "seqNr" match {
+            case JInt(n) => n.intValue
+            case _ => 0
+          }
+
           val time = (fields \ "time").toOpt.getOrElse(fields \ "t") match {
             case JString(s) => datatypeFactory.newXMLGregorianCalendar(s).toGregorianCalendar.getTimeInMillis
             case JInt(n) => n.longValue
-            case _ => currentTime
+            case _ =>
+              if (seqNr == 0) {
+                // generate sequence numbers for multiple values if neither time nor sequence numbers are specified
+                generatedSeqNr += 1
+                seqNr = generatedSeqNr
+              }
+              currentTime
           }
 
           parseValue((fields \ "value").toOpt.getOrElse(fields \ "v")) match {
             case Full(value) =>
-              Full((item, property, time, value): ItemData)
+              Full(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, time, seqNr, value))
             case _ =>
               Failure("Invalid value for item \"" + item + "\" and property \"" + property + "\".")
           }
         case other => parseValue(other) match {
           case Full(value) =>
-            Full((item, property, currentTime, value): ItemData)
+            Full(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, currentTime, value))
           case _ =>
             Failure("Invalid value for item \"" + item + "\" and property \"" + property + "\".")
         }
       }
 
-      result.foldRight(Empty: Box[List[ItemData]]) {
+      result.foldRight(Empty: Box[List[KvinTuple]]) {
         // accumulate errors
         case (a: Failure, b: Failure) => Failure(a.msg + "\n" + b.msg)
         case (a: Failure, _) => a
@@ -138,11 +148,11 @@ object ItemDataParser extends Loggable {
     }
 
     json match {
-      // [ { "time" : 123, "sequenceNr" : 2, "value" : 1.3 } ]
+      // [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ]
       case JArray(values) =>
         parseProperty(rootItem, URIs.createURI("value"), values, currentTime)
 
-      // { "item" : { "property1" : [ { "time" : 123, "sequenceNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "sequenceNr" : 5, "value" : 3.2 } ] } }
+      // { "item" : { "property1" : [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "seqNr" : 5, "value" : 3.2 } ] } }
       case JObject(fields) => fields.flatMap {
         case JField(item, itemData) if item.equals("@context") => activeContexts = itemData :: activeContexts; None
         // "item" : { ... }
@@ -164,7 +174,7 @@ object ItemDataParser extends Loggable {
               }
             case _ => Failure("Invalid data: Expected an object with property keys.")
           }
-      }.foldRight(Empty: Box[List[ItemData]])(collectErrors _)
+      }.foldRight(Empty: Box[List[KvinTuple]])(collectErrors _)
       case _ => Failure("Invalid data")
     }
   }

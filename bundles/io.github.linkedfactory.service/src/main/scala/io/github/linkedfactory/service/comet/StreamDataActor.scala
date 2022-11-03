@@ -96,7 +96,7 @@ class StreamDataActor extends CometActor with KvinListener {
             kvin.fetch(item, property, Kvin.DEFAULT_CONTEXT, end, 0L, limit, 0L, null)
               .iterator.asScala.map { e =>
               timestamp = timestamp.max(e.time)
-              ("time", e.time) ~ ("sequenceNr", decompose(e.sequenceNr)) ~ ("value", decompose(e.value))
+              ("time", e.time) ~ ("seq", decompose(e.seqNr)) ~ ("value", decompose(e.value))
             }.toList))
 
           // update time stamp for last query
@@ -136,7 +136,7 @@ class StreamDataActor extends CometActor with KvinListener {
   override def entityCreated(item: URI, property: URI) {
   }
 
-  override def valueAdded(item: URI, property: URI, ctx : URI, time: Long, sequenceNr: Long, value: Any) {
+  override def valueAdded(item: URI, property: URI, ctx : URI, time: Long, seqNr: Long, value: Any) {
     var trackedItem = items.contains(item)
     if (!trackedItem && prefixes != null && {
       val prefix = prefixes.floor(item.toString)
@@ -175,7 +175,7 @@ class StreamDataActor extends CometActor with KvinListener {
               val propData = Data.kvin.map(_.fetch(item, property, Kvin.DEFAULT_CONTEXT, KvinTuple.TIME_MAX_VALUE, timestamp, 100, 0L, null)
                 .iterator.asScala.map { e =>
                 timestamp = timestamp.max(e.time)
-                ("time", e.time) ~ ("sequenceNr", decompose(e.sequenceNr)) ~ ("value", decompose(e.value))
+                ("time", e.time) ~ ("seqNr", decompose(e.seqNr)) ~ ("value", decompose(e.value))
               }.toList)
               propData map { propData =>
                 propInfo.lastTimestamp = timestamp + 1

@@ -56,7 +56,7 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 		this.limit = limit;
 	}
 
-	protected abstract T createElement(URI item, URI property, URI context, long time, int sequenceNr, Object value);
+	protected abstract T createElement(URI item, URI property, URI context, long time, int seqNr, Object value);
 
 	@Override
 	public boolean hasNext() {

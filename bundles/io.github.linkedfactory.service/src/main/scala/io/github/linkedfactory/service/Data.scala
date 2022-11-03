@@ -143,7 +143,7 @@ object Data {
         }
       }
 
-      override def valueAdded(item: URI, property: URI, context: URI, time: Long, sequenceNr: Long, value: Any): Unit = {
+      override def valueAdded(item: URI, property: URI, context: URI, time: Long, seqNr: Long, value: Any): Unit = {
       }
     })
 

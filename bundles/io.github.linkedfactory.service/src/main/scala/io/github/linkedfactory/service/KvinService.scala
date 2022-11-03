@@ -15,9 +15,8 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory
 import io.github.linkedfactory.kvin.{Kvin, KvinTuple, Record}
-import io.github.linkedfactory.service.util.{ItemDataParser, LineProtocolParser}
+import io.github.linkedfactory.service.util.{JsonFormatParser, LineProtocolParser}
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}
 import net.liftweb.common.Box.box2Iterable
@@ -113,7 +112,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
         val response = responseType(req) map {
           case "application/json" =>
-            // { "item" : { "property1" : [ { "time" : 123, "sequenceNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "sequenceNr" : 5, "value" : 3.2 } ] } }
+            // { "item" : { "property1" : [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "seqNr" : 5, "value" : 3.2 } ] } }
 
             def recordToJson(r : Record) : JObject = JObject(r.iterator().asScala.map { e =>
               JField(e.getProperty.toString, e.getValue match {
@@ -145,7 +144,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
                   streamWriter.write(s"""\n    "$property":[""")
                   for ((entry, k) <- propertyData.iterator.asScala.zipWithIndex) {
                     if (propertyData.hasNext && k % 100 == 0) streamWriter.write("\n      ")
-                    streamWriter.write(s"""{"time":${entry.time},"value":${ value2Str(entry.value) }}""")
+                    streamWriter.write(s"""{"time":${entry.time},"seqNr":${entry.seqNr},"value":${ value2Str(entry.value) }}""")
                     if (propertyData.hasNext) streamWriter.write(",")
                   }
                   propertyData.close() // close the iterator
@@ -161,7 +160,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             OutputStreamResponse(streamer, -1, ("Content-Type", "application/json; charset=utf-8") ::
               ("Content-Disposition", s"""inline; filename=${filename("json")}""") :: responseHeaders, S.responseCookies, 200)
           case "text/csv" =>
-            // { "item" : { "property1" : [ { "time" : 123, "sequenceNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "sequenceNr" : 5, "value" : 3.2 } ] } }
+            // { "item" : { "property1" : [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "seqNr" : 5, "value" : 3.2 } ] } }
             val streamer = (os: OutputStream) => {
               val streamWriter = new OutputStreamWriter(os)
               val csvFormat = CSVFormat.EXCEL
@@ -226,10 +225,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
-    ItemDataParser.parseItem(parentUri, json, currentTime) map ( _.foreach {
-      case (item, property, time, value) =>
-        publishEvent(item, property, time, value)
-        store.put(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, time, value))
+    JsonFormatParser.parseItem(parentUri, json, currentTime) map ( _.foreach { tuple =>
+        publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
+        store.put(tuple)
     })
   }
 
@@ -238,10 +236,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
-    LineProtocolParser.parseLines(parentUri, is, currentTime) map ( _.foreach {
-      case (item, property, time, value) =>
-        publishEvent(item, property, time, value)
-        store.put(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, time, value))
+    LineProtocolParser.parseLines(parentUri, is, currentTime) map ( _.foreach { tuple =>
+        publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
+        store.put(tuple)
     })
   }
 

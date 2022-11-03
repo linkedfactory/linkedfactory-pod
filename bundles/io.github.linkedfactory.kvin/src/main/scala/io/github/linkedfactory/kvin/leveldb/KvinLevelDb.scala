@@ -428,13 +428,13 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         readLock(lock) {
           val prefix = toId(entry.item, entry.property, entry.context, generate = true)
           var keyLength = prefix.length + TIME_BYTES
-          //          if (entry.sequenceNr > 0) 
+          //          if (entry.seqNr > 0)
           keyLength += SEQ_BYTES
           val key = new Array[Byte](keyLength)
           val bb = ByteBuffer.wrap(key).order(BYTE_ORDER)
           bb.put(prefix).putInt6(mapTime(entry.time))
-          //          if (entry.sequenceNr > 0) 
-          bb.putShortUnsigned(mapSeq(entry.sequenceNr))
+          //          if (entry.seqNr > 0)
+          bb.putShortUnsigned(mapSeq(entry.seqNr))
 
           values.put(key, encodedValue)
 
@@ -443,7 +443,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         }
       }
       entries.foreach { entry =>
-        for (l <- listeners.asScala) l.valueAdded(entry.item, entry.property, entry.context, entry.time, entry.sequenceNr, entry.value)
+        for (l <- listeners.asScala) l.valueAdded(entry.item, entry.property, entry.context, entry.time, entry.seqNr, entry.value)
       }
     }
   }
@@ -457,13 +457,13 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         readLock(lock) {
           val prefix = toId(entry.item, entry.property, entry.context, generate = true)
           var keyLength = prefix.length + TIME_BYTES
-          //          if (entry.sequenceNr > 0) 
+          //          if (entry.seqNr > 0)
           keyLength += SEQ_BYTES
           val key = new Array[Byte](keyLength)
           val bb = ByteBuffer.wrap(key).order(BYTE_ORDER)
           bb.put(prefix).putInt6(mapTime(entry.time))
-          //          if (entry.sequenceNr > 0) 
-          bb.putShortUnsigned(mapSeq(entry.sequenceNr))
+          //          if (entry.seqNr > 0)
+          bb.putShortUnsigned(mapSeq(entry.seqNr))
 
           batch.put(key, encodedValue)
 
@@ -476,7 +476,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
       batch.close()
     }
     entries.asScala.foreach { entry =>
-      for (l <- listeners.asScala) l.valueAdded(entry.item, entry.property, entry.context, entry.time, entry.sequenceNr, entry.value)
+      for (l <- listeners.asScala) l.valueAdded(entry.item, entry.property, entry.context, entry.time, entry.seqNr, entry.value)
     }
   }
 
@@ -486,8 +486,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     var results = fetchInternal(item, property, context, end, begin, limit, interval)
     if (op != null) {
       results = new AggregatingIterator(results, interval, op.trim.toLowerCase, limit) {
-        override def createElement(item: URI, property: URI, context: URI, time: Long, sequenceNr: Int, value: Object): KvinTuple = {
-          new KvinTuple(item, property, context, time, sequenceNr, value)
+        override def createElement(item: URI, property: URI, context: URI, time: Long, seqNr: Int, value: Object): KvinTuple = {
+          new KvinTuple(item, property, context, time, seqNr, value)
         }
       }
     }

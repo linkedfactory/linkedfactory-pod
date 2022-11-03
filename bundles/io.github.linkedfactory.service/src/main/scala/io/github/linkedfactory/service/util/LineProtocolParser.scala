@@ -15,10 +15,12 @@
  */
 package io.github.linkedfactory.service.util
 
+import io.github.linkedfactory.kvin.Kvin
+import io.github.linkedfactory.kvin.KvinTuple
+
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
-
 import net.enilink.komma.core.URI
 import net.enilink.komma.core.URIs
 import net.liftweb.common.Box
@@ -34,9 +36,7 @@ import net.liftweb.util.Helpers.tryo
  * LF properties map to InfluxDB's measurements, LF items map to tags (key='item').
  */
 object LineProtocolParser extends Loggable {
-  type ItemData = (URI, URI, Long, Any)
-
-  def parseLines(rootItem: URI, is: InputStream, currentTime: Long = System.currentTimeMillis): Box[List[ItemData]] = {
+  def parseLines(rootItem: URI, is: InputStream, currentTime: Long = System.currentTimeMillis): Box[List[KvinTuple]] = {
     val reader = new BufferedReader(new InputStreamReader(is))
     val p = new Parser
     // FIXME: toList -> all read into memory
@@ -44,7 +44,7 @@ object LineProtocolParser extends Loggable {
       tryo(p.parse(l, currentTime))
     }
     reader.close()
-    result.foldRight(Empty: Box[List[ItemData]]) {
+    result.foldRight(Empty: Box[List[KvinTuple]]) {
       // accumulate errors
       case (a: Failure, b: Failure) => Failure(a.msg + "\n" + b.msg)
       case (a: Failure, _) => a
@@ -55,10 +55,11 @@ object LineProtocolParser extends Loggable {
     }
   }
 
-  def mkItemData(property: String, item: String, value: String, time: String, currentTime: Long = System.currentTimeMillis): ItemData = {
-    (
+  def mkItemData(property: String, item: String, value: String, time: String, currentTime: Long = System.currentTimeMillis): KvinTuple = {
+    new KvinTuple(
       URIs.createURI(item.trim),
       URIs.createURI(property.trim),
+      Kvin.DEFAULT_CONTEXT,
       // Note: line protocol timestamp defaults to nanosecond precision
       if (time == null || time.trim.isEmpty) currentTime else time.trim.toLong / 1000 / 1000,
       value.trim match {
@@ -68,7 +69,7 @@ object LineProtocolParser extends Loggable {
         case t: String if t == "t" || t == "T" || t == "true" || t == "True" || t == "TRUE" => true
         case f: String if f == "f" || f == "F" || f == "false" || f == "False" || f == "FALSE" => false
         case o @ _ => o.toDouble
-      }): ItemData
+      })
   }
 }
 
@@ -76,7 +77,7 @@ object LineProtocolParser extends Loggable {
  * Simple Parser to handle line protocol entries for InfluxDB's line protocol.
  */
 class Parser {
-  def parse(input: CharSequence, currentTime: Long = System.currentTimeMillis): LineProtocolParser.ItemData = {
+  def parse(input: CharSequence, currentTime: Long = System.currentTimeMillis): KvinTuple = {
     val t = new Tokenizer(input)
     class ParseException(val reason: String) extends Exception(reason + " @ " + t.pos + ": '" + t.remainder + "'")
 
