@@ -96,7 +96,7 @@ class StreamDataActor extends CometActor with KvinListener {
             kvin.fetch(item, property, Kvin.DEFAULT_CONTEXT, end, 0L, limit, 0L, null)
               .iterator.asScala.map { e =>
               timestamp = timestamp.max(e.time)
-              ("time", e.time) ~ ("seq", decompose(e.seqNr)) ~ ("value", decompose(e.value))
+              ("time", e.time) ~ ("seqNr", decompose(e.seqNr)) ~ ("value", decompose(e.value))
             }.toList))
 
           // update time stamp for last query
