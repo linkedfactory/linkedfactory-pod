@@ -1,15 +1,12 @@
 package io.github.linkedfactory.service.rdf4j;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.util.Map;
-
+import io.github.linkedfactory.kvin.Kvin;
+import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
+import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
-import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
-import org.eclipse.rdf4j.common.iteration.CloseableIteration;
-import org.eclipse.rdf4j.common.iteration.EmptyIteration;
-import org.eclipse.rdf4j.common.iteration.SingletonIteration;
+import net.enilink.komma.core.URIs;
+import org.eclipse.rdf4j.common.iteration.*;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
@@ -26,18 +23,24 @@ import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceRes
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 
-import net.enilink.commons.iterator.IExtendedIterator;
-import net.enilink.komma.core.URIs;
-import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.KvinTuple;
-
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 	final Kvin kvin;
 	final ParameterScanner scanner;
 	final ValueFactory vf;
 	final Map<Value, Object> valueToData;
+
+	// IterationWrapper has a protected constructor
+	class KvinIterationWrapper<E, X extends Exception> extends IterationWrapper<E, X> {
+		KvinIterationWrapper(Iteration<? extends E, ? extends X> iter) {
+			super(iter);
+		}
+	}
 
 	public KvinEvaluationStrategy(Kvin kvin, ParameterScanner scanner, ValueFactory vf, Dataset dataset,
 								  FederatedServiceResolver serviceResolver, Map<Value, Object> valueToData) {
@@ -68,6 +71,32 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 		final Value subjectValue = getVarValue(subjectVar, bs);
 
 		if (subjectValue == null) {
+			// this happens for patterns like (:subject :property [ <kvin:value> ?someValue ])
+			// where [ <kvin:value> ?someValue ] is evaluated first
+			// referencedBy contains the pattern (:subject :property [...])
+			List<StatementPattern> referencedBy = scanner.referencedBy.get(subjectVar);
+			if (referencedBy != null) {
+				for (StatementPattern reference : referencedBy) {
+					Value altSubjectValue = getVarValue(reference.getSubjectVar(), bs);
+					if (altSubjectValue != null) {
+						return new KvinIterationWrapper<>(evaluate(reference, bs)) {
+							@Override
+							public BindingSet next() throws QueryEvaluationException {
+								BindingSet bs = super.next();
+								CloseableIteration<BindingSet, QueryEvaluationException> it = evaluate(stmt, bs);
+								try {
+									if (it.hasNext()) {
+										return it.next();
+									}
+									return bs;
+								} finally {
+									it.close();
+								}
+							}
+						};
+					}
+				}
+			}
 			return new EmptyIteration<>();
 		}
 
@@ -189,7 +218,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 				}
 
 				final long beginFinal = begin, endFinal = end, limitFinal = limit;
-				final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<BindingSet, QueryEvaluationException>() {
+				final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<>() {
 					IExtendedIterator<KvinTuple> it;
 					IRI currentPropertyIRI;
 

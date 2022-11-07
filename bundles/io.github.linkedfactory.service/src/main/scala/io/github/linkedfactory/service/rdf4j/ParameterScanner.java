@@ -18,7 +18,7 @@ class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
 	}
 
 	Map<Var, Parameters> parameterIndex = new HashMap<>();
-	Map<Var, Map<Var, List<StatementPattern>>> spIndex = new HashMap<>();
+	Map<Var, List<StatementPattern>> referencedBy = new HashMap<>();
 
 	/**
 	 * Extracts the parameters from the given <code>expr</code>.
@@ -82,20 +82,8 @@ class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
 				getParameters(sp.getSubjectVar()).time = o;
 			} else {
 				// normal statement
-				Var subj = sp.getSubjectVar();
-				Map<Var, List<StatementPattern>> predMap = spIndex.get(subj);
-				if (predMap == null) {
-					predMap = new HashMap<>();
-					spIndex.put(subj, predMap);
-				}
-				List<StatementPattern> v = predMap.get(p);
-				if (v == null) {
-					v = new ArrayList<StatementPattern>();
-					predMap.put(p, v);
-				}
-				v.add(sp);
-
 				remove = false;
+				referencedBy.computeIfAbsent(sp.getObjectVar(), v -> new ArrayList<>()).add(sp);
 			}
 			// remove any meta statements (from, to etc.) sub-statements for
 			// properties of values

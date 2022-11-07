@@ -9,11 +9,15 @@ import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.Service;
+import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
+import org.eclipse.rdf4j.query.algebra.evaluation.impl.EvaluationStatistics;
 import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
+import scala.reflect.internal.TypeDebugging;
+import scala.tools.reflect.Eval;
 
 import java.util.*;
 
@@ -59,21 +63,14 @@ public class KvinFederatedService implements FederatedService {
 			throw new QueryEvaluationException(e);
 		}
 
-		// QueryOptimizerList optimizers = new QueryOptimizerList();
-		// optimizers.add(new QueryModelNormalizer());
-		// optimizers.add(new QueryJoinOptimizer());
-
 		Map<Value, Object> valueToData = new WeakHashMap<>();
 		EvaluationStrategy strategy = new KvinEvaluationStrategy(kvin, scanner, vf, null, null, valueToData);
 
 		List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
 		while (bindings.hasNext()) {
 			BindingSet bs = bindings.next();
-
-			// TupleExpr optimized = new QueryRoot(expr.clone());
-			// optimizers.optimize(optimized, null, bs);
-
-			resultIters.add(strategy.evaluate(expr, bs));
+			TupleExpr optimized = strategy.optimize(expr, null, bs);
+			resultIters.add(strategy.evaluate(optimized, bs));
 		}
 
 		return resultIters.size() > 1 ? new DistinctIteration<>(new UnionIteration<>(resultIters)) : resultIters.get(0);
