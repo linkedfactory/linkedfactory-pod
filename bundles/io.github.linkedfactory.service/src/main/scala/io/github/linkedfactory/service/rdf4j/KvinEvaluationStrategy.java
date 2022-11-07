@@ -11,6 +11,7 @@ import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.impl.SimpleBNode;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
@@ -22,18 +23,36 @@ import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
+import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 	final Kvin kvin;
 	final ParameterScanner scanner;
 	final ValueFactory vf;
-	final Map<Value, Object> valueToData;
+
+	static class BNodeWithValue extends SimpleBNode {
+		private static final String uniqueIdPrefix = UUID.randomUUID().toString().replace("-", "");
+		private static final AtomicLong uniqueIdSuffix = new AtomicLong();
+		Object value;
+
+		BNodeWithValue(Object value) {
+			super(generateId());
+			this.value = value;
+		}
+
+		static String generateId() {
+			String var10001 = uniqueIdPrefix;
+			return var10001 + uniqueIdSuffix.incrementAndGet();
+		}
+	}
 
 	// IterationWrapper has a protected constructor
 	class KvinIterationWrapper<E, X extends Exception> extends IterationWrapper<E, X> {
@@ -48,7 +67,6 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 		this.kvin = kvin;
 		this.scanner = scanner;
 		this.vf = vf;
-		this.valueToData = valueToData;
 	}
 
 	protected long getLongValue(Var var, BindingSet bs, long defaultValue) {
@@ -82,13 +100,15 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 						return new KvinIterationWrapper<>(evaluate(reference, bs)) {
 							@Override
 							public BindingSet next() throws QueryEvaluationException {
-								BindingSet bs = super.next();
-								CloseableIteration<BindingSet, QueryEvaluationException> it = evaluate(stmt, bs);
+								BindingSet tempBs = super.next();
+								// tempBs already contains additional bindings computed by evaluate(reference, bs)
+								// as a side effect
+								CloseableIteration<BindingSet, QueryEvaluationException> it = evaluate(stmt, tempBs);
 								try {
 									if (it.hasNext()) {
 										return it.next();
 									}
-									return bs;
+									return new EmptyBindingSet();
 								} finally {
 									it.close();
 								}
@@ -100,7 +120,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 			return new EmptyIteration<>();
 		}
 
-		Object data = valueToData.get(subjectValue);
+		Object data = subjectValue instanceof BNodeWithValue ? ((BNodeWithValue) subjectValue).value : null;
 		if (data instanceof KvinTuple) {
 			KvinTuple tuple = (KvinTuple) data;
 			Value predValue = getVarValue(stmt.getPredicateVar(),  bs);
@@ -112,8 +132,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 					Value rdfValue;
 					if (tuple.value instanceof Record) {
 						// value is an event, create a blank node
-						rdfValue = valueVar.isConstant() ? valueVar.getValue() : vf.createBNode();
-						valueToData.put(rdfValue, tuple.value);
+						rdfValue = valueVar.isConstant() ? valueVar.getValue() : new BNodeWithValue(tuple.value);
 					} else {
 						// convert value to literal
 						rdfValue = toRdfValue(tuple.value);
@@ -149,6 +168,11 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 				}
 			}
 		} else {
+			if (bs.hasBinding(stmt.getObjectVar().getName())) {
+				// bindings where already fully computed via scanner.referencedBy
+				return new SingletonIteration<>(bs);
+			}
+
 			net.enilink.komma.core.URI item = toKommaUri(subjectValue);
 			if (item != null) {
 				// the value of item is already known at this point
@@ -251,8 +275,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 						KvinTuple tuple = it.next();
 						QueryBindingSet newBs = new QueryBindingSet(bs);
 
-						Value objectValue = objectVar.isConstant() ? objectVar.getValue() : vf.createBNode();
-						valueToData.put(objectValue, tuple);
+						Value objectValue = objectVar.isConstant() ? objectVar.getValue() : new BNodeWithValue(tuple);
 						if (!objectVar.isConstant()) {
 							newBs.addBinding(objectVar.getName(), objectValue);
 						}

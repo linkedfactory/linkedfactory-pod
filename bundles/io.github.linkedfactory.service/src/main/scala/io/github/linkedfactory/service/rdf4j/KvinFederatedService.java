@@ -69,8 +69,7 @@ public class KvinFederatedService implements FederatedService {
 		List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
 		while (bindings.hasNext()) {
 			BindingSet bs = bindings.next();
-			TupleExpr optimized = strategy.optimize(expr, null, bs);
-			resultIters.add(strategy.evaluate(optimized, bs));
+			resultIters.add(strategy.evaluate(expr, bs));
 		}
 
 		return resultIters.size() > 1 ? new DistinctIteration<>(new UnionIteration<>(resultIters)) : resultIters.get(0);
