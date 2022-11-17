@@ -29,7 +29,7 @@ import net.enilink.platform.lift.util.Globals
 import net.enilink.vocab.owl.OWL
 import net.enilink.vocab.rdf.RDF
 import net.liftweb.common.Box
-import net.liftweb.http.S
+import net.liftweb.http.{RequestVar, S}
 import org.eclipse.core.runtime.Platform
 import org.osgi.framework.FrameworkUtil
 
@@ -120,11 +120,14 @@ object Data {
     .build[URI, Any]()
 
   val modelURI = _modelURI
+  // caches currentModel for each request
+  object modelForRequest extends RequestVar[Box[IModel]](currentModel)
+
   val kvin: Option[Kvin] = _kvin map { kvin =>
     kvin.addListener(new KvinListener {
       override def entityCreated(item: URI, property: URI): Unit = {
         // FIXME: add/use actual subject via session/token/...
-        currentModel.foreach { m =>
+        modelForRequest.foreach { m =>
           createHierarchyExecutor.submit(new Runnable {
             override def run(): Unit = {
               Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() => {
