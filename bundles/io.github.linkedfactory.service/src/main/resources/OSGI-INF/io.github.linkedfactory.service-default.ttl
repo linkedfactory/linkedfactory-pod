@@ -2,7 +2,7 @@
 # <MqttEventBridge> <broker> <tcp://example-server.org:8883> .
 
 @base <plugin://io.github.linkedfactory.service> .
-#<> <mockdata> [ <machines> 10 ] ; <mocktracker> true .
+<> <mockdata> [ <machines> 10 ] ; <mocktracker> true .
 
 @base <plugin://io.github.linkedfactory.service/data/> .
 <store> <model>   <http://linkedfactory.github.io/data/> ;
