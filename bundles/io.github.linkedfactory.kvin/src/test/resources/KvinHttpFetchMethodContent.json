@@ -1,0 +1,24 @@
+{
+  "http://example.org/resource1": {
+    "http://example.org/properties/p1": [
+      { "value": 20.4, "time": 1619424246120 },
+      { "value": 20.3, "time": 1619424246100 }
+    ],
+    "http://example.org/properties/p2": [
+      { "value": {
+        "msg" : "Error 1", "nr" : 1, "test_prop": {"msg": "test"}, "id_prop": { "@id": "http://example.org/properties/test3" }
+      },
+        "time": 1619424246100
+      }
+    ]
+  },
+  "http://example.org/resource2": {
+    "http://example.org/properties/p1": [
+      { "value": 20.4, "time": 1619424246120 },
+      { "value": 20.3, "time": 1619424246100 }
+    ],
+    "http://example.org/properties/p2": [
+      { "value": { "msg" : "Error 1", "nr" : 1 }, "time": 1619424246100 }
+    ]
+  }
+}
