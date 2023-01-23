@@ -1,5 +1,8 @@
 package io.github.linkedfactory.kvin.kvinHttp;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -7,6 +10,7 @@ import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinListener;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.kvin.util.JsonFormatParser;
 import net.enilink.commons.iterator.*;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -22,6 +26,9 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class KvinHttp implements Kvin {
@@ -30,6 +37,7 @@ public class KvinHttp implements Kvin {
     ArrayList<KvinListener> listeners = new ArrayList<>();
     ObjectMapper mapper = new ObjectMapper();
     CloseableHttpClient httpClient;
+    JsonFactory jsonFactory = new JsonFactory();
 
     public KvinHttp(String hostEndpoint) {
         this.hostEndpoint = hostEndpoint;
@@ -142,19 +150,15 @@ public class KvinHttp implements Kvin {
 
     @Override
     public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
-        IExtendedIterator<KvinTuple> kvinTuples = fetchInternal(item, property, context, null, null, limit, null, null);
-        return kvinTuples;
+        return fetchInternal(item, property, context, null, null, limit, null, null);
     }
 
     @Override
     public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
-        IExtendedIterator<KvinTuple> kvinTuples = fetchInternal(item, property, context, end, begin, limit, interval, op);
-        return kvinTuples;
+        return fetchInternal(item, property, context, end, begin, limit, interval, op);
     }
 
     private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
-        ArrayList<KvinTuple> tuples = new ArrayList<>();
-
         try {
             // building url
             URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/linkedfactory/values");
@@ -174,30 +178,11 @@ public class KvinHttp implements Kvin {
             String responseBody = EntityUtils.toString(entity);
 
             // converting json to kvin tuples
-            JsonNode rootNode = mapper.readTree(responseBody);
-
-            Iterator<Map.Entry<String, JsonNode>> data = rootNode.fields();
-            while (data.hasNext()) {
-                Map.Entry<String, JsonNode> itemNode = data.next();
-                String itemName = itemNode.getKey();
-
-                Iterator<Map.Entry<String, JsonNode>> propertyNode = itemNode.getValue().fields();
-                while (propertyNode.hasNext()) {
-                    Map.Entry<String, JsonNode> valueNode = propertyNode.next();
-                    String propertyName = valueNode.getKey();
-
-                    JsonNode valueArray = valueNode.getValue();
-                    for (JsonNode node : valueArray) {
-                        Record value = new Record(URIs.createURI("value"), node.get("value"));
-                        tuples.add(new KvinTuple(URIs.createURI(itemName), URIs.createURI(propertyName), null, Long.parseLong(node.get("time").toString()), value));
-                    }
-                }
-            }
+            JsonFormatParser jsonParser = new JsonFormatParser(new ByteArrayInputStream(responseBody.getBytes(StandardCharsets.UTF_8)));
+            return jsonParser.parse();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-
-        return WrappedIterator.create(tuples.iterator());
     }
 
     public HttpGet createHttpGet(String endpoint) {
@@ -216,19 +201,15 @@ public class KvinHttp implements Kvin {
 
     @Override
     public IExtendedIterator<URI> descendants(URI item) {
-        IExtendedIterator<URI> descendants = descendantsInternal(item, null);
-        return descendants;
+        return descendantsInternal(item, null);
     }
 
     @Override
     public IExtendedIterator<URI> descendants(URI item, long limit) {
-        IExtendedIterator<URI> descendants = descendantsInternal(item, limit);
-        return descendants;
+        return descendantsInternal(item, limit);
     }
 
     private IExtendedIterator<URI> descendantsInternal(URI item, Long limit) {
-        ArrayList<URI> descendants = new ArrayList<>();
-
         try {
             // building url
             URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/linkedfactory/**");
@@ -243,24 +224,51 @@ public class KvinHttp implements Kvin {
             String responseBody = EntityUtils.toString(entity);
 
             // converting json to URI
-            JsonNode rootNode = mapper.readTree(responseBody);
+            return new NiceIterator<>() {
+                final JsonParser jsonParser = jsonFactory.createParser(responseBody);
 
-            if (rootNode.isArray()) {
-                for (JsonNode node : rootNode) {
-                    descendants.add(URIs.createURI(node.get("@id").asText()));
+                @Override
+                public boolean hasNext() {
+                    try {
+                        return isLoopingArray();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
-            }
 
+                @Override
+                public URI next() {
+                    URI descendant = null;
+                    try {
+                        while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                            if (jsonParser.getCurrentToken() == JsonToken.VALUE_STRING) {
+                                descendant = URIs.createURI(jsonParser.getValueAsString());
+                                break;
+                            }
+                        }
+                        jsonParser.nextToken();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                    return descendant;
+                }
+
+                private boolean isLoopingArray() throws IOException {
+                    return jsonParser.nextToken() != JsonToken.END_ARRAY;
+                }
+
+                @Override
+                public void close() {
+                    super.close();
+                }
+            };
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-
-        return WrappedIterator.create(descendants.iterator());
     }
 
     @Override
     public IExtendedIterator<URI> properties(URI item) {
-        ArrayList<URI> properties = new ArrayList<>();
 
         try {
             // building url
@@ -275,20 +283,49 @@ public class KvinHttp implements Kvin {
             String responseBody = EntityUtils.toString(entity);
 
             // converting json to URI
-            JsonNode rootNode = mapper.readTree(responseBody);
+            return new NiceIterator<>() {
+                final JsonParser jsonParser = jsonFactory.createParser(responseBody);
 
-            if (rootNode.isArray()) {
-                for (JsonNode node : rootNode) {
-                    properties.add(URIs.createURI(node.get("@id").asText()));
+                @Override
+                public boolean hasNext() {
+                    try {
+                        return isLoopingArray();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
-            }
+
+                @Override
+                public URI next() {
+                    URI property = null;
+                    try {
+                        while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                            if (jsonParser.getCurrentToken() == JsonToken.VALUE_STRING) {
+                                property = URIs.createURI(jsonParser.getValueAsString());
+                                break;
+                            }
+                        }
+                        jsonParser.nextToken();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                    return property;
+                }
+
+                private boolean isLoopingArray() throws IOException {
+                    return jsonParser.nextToken() != JsonToken.END_ARRAY;
+                }
+
+                @Override
+                public void close() {
+                    super.close();
+                }
+            };
 
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return WrappedIterator.create(properties.iterator());
     }
-
 
     @Override
     public long approximateSize(URI item, URI property, URI context, long end, long begin) {

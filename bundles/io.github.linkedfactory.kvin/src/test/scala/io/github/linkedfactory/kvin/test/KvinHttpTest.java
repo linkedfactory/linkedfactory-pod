@@ -12,17 +12,19 @@ import org.apache.http.StatusLine;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.EntityTemplate;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import javax.swing.text.html.parser.Entity;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Iterator;
 
 import static org.junit.Assert.*;
 
@@ -145,20 +147,9 @@ public class KvinHttpTest extends Mockito {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/machine1/sensor1");
             URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/value");
             long limit = 0;
-            String mockResponse = "{\n" +
-                    "    \"http://example.org/resource1\": {\n" +
-                    "       \"http://example.org/properties/p1\": [\n" +
-                    "           { \"value\": 20.4, \"time\": 1619424246120 },\n" +
-                    "           { \"value\": 20.3, \"time\": 1619424246100 }\n" +
-                    "       ],\n" +
-                    "       \"http://example.org/properties/p2\": [\n" +
-                    "           { \"value\": { \"msg\" : \"Error 1\", \"nr\" : 1 }, \"time\": 1619424246100 }\n" +
-                    "       ]\n" +
-                    "    }\n" +
-                    "}";
 
             // mocking settings for http client response
-            when(httpResponse.getEntity()).thenReturn(new StringEntity(mockResponse));
+            when(httpResponse.getEntity()).thenReturn(new StringEntity(getResourceFileContent("KvinHttpFetchMethodContent.json")));
             when(httpClient.execute(httpGet)).thenReturn(this.httpResponse);
             this.kvinHttp = new KvinHttp("http://samplehost.de") {
                 @Override
@@ -175,16 +166,15 @@ public class KvinHttpTest extends Mockito {
             // kvinHttp.fetch(item, property, null, 1619424246100L, 1619424246100L, 0, 1000, "avg");
             IExtendedIterator<KvinTuple> tuples = kvinHttp.fetch(item, property, null, limit);
             assertNotNull(tuples);
-            Iterator<KvinTuple> tuple = tuples.iterator();
             int index = 0;
-            while (tuple.hasNext()) {
-                KvinTuple t = tuple.next();
-                if (index == 2) {
+            while (tuples.hasNext()) {
+                KvinTuple t = tuples.next();
+                if (index == 2 || index == 5) {
                     assertTrue(t.value instanceof Record);
                 }
                 index++;
             }
-            assertEquals(index, 3);
+            assertEquals(index, 6);
 
 
         } catch (Exception e) {
@@ -196,41 +186,9 @@ public class KvinHttpTest extends Mockito {
     public void shouldFetchDescendants() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/machine1");
-            String mockResponse = "[\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor1\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor10\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor2\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor3\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor4\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor5\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor6\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor7\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor8\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/machine1/sensor9\"\n" +
-                    "    }\n" +
-                    "]";
 
             // mocking settings for http client response
-            when(this.httpResponse.getEntity()).thenReturn(new StringEntity(mockResponse));
+            when(this.httpResponse.getEntity()).thenReturn(new StringEntity(getResourceFileContent("KvinHttpDescendantsMethodContent.json")));
             when(httpClient.execute(httpGet)).thenReturn(this.httpResponse);
             this.kvinHttp = new KvinHttp("http://samplehost.de") {
                 @Override
@@ -246,10 +204,9 @@ public class KvinHttpTest extends Mockito {
 
             IExtendedIterator<URI> descendants = kvinHttp.descendants(item);
             assertNotNull(descendants);
-            Iterator<URI> descendantIterator = descendants.iterator();
             int descendantCount = 0;
-            while (descendantIterator.hasNext()) {
-                URI descendant = descendantIterator.next();
+            while (descendants.hasNext()) {
+                URI descendant = descendants.next();
                 assertTrue(descendant instanceof URI);
                 descendantCount++;
             }
@@ -264,23 +221,9 @@ public class KvinHttpTest extends Mockito {
     public void shouldFetchProperties() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/machine1/sensor1");
-            String mockResponse = "[\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/value\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/flag\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/a\"\n" +
-                    "    },\n" +
-                    "    {\n" +
-                    "        \"@id\": \"http://localhost:8080/linkedfactory/demofactory/json\"\n" +
-                    "    }\n" +
-                    "]";
 
             // mocking settings for http client response
-            when(this.httpResponse.getEntity()).thenReturn(new StringEntity(mockResponse));
+            when(this.httpResponse.getEntity()).thenReturn(new StringEntity(getResourceFileContent("KvinHttpPropertiesMethodContent.json")));
             when(httpClient.execute(httpGet)).thenReturn(this.httpResponse);
             this.kvinHttp = new KvinHttp("http://samplehost.de") {
                 @Override
@@ -297,7 +240,8 @@ public class KvinHttpTest extends Mockito {
             IExtendedIterator<URI> properties = kvinHttp.properties(item);
             assertNotNull(properties);
             int propertyCount = 0;
-            for (URI property : properties) {
+            while (properties.hasNext()) {
+                URI property = properties.next();
                 assertTrue(property instanceof URI);
                 propertyCount++;
             }
@@ -306,5 +250,16 @@ public class KvinHttpTest extends Mockito {
         } catch (Exception e) {
             fail("Something went wrong while testing KvinHttp properties() method");
         }
+    }
+
+    private String getResourceFileContent(String filename) throws IOException {
+        InputStream stream = getClass().getClassLoader().getResourceAsStream(filename);
+        InputStreamReader streamReader = new InputStreamReader(stream, StandardCharsets.UTF_8);
+        BufferedReader reader = new BufferedReader(streamReader);
+        StringBuilder stringBuilder = new StringBuilder();
+        reader.lines().forEach((line -> {
+            stringBuilder.append(line);
+        }));
+        return stringBuilder.toString();
     }
 }

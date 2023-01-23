@@ -1,0 +1,14 @@
+[
+  {
+    "@id": "http://localhost:8080/linkedfactory/demofactory/value"
+  },
+  {
+    "@id": "http://localhost:8080/linkedfactory/demofactory/flag"
+  },
+  {
+    "@id": "http://localhost:8080/linkedfactory/demofactory/a"
+  },
+  {
+    "@id": "http://localhost:8080/linkedfactory/demofactory/json"
+  }
+]
