@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.github.linkedfactory.kvin.util.test;
+package io.github.linkedfactory.kvin.util;
 
 import io.github.linkedfactory.kvin.Record;
 import net.enilink.komma.core.URIs;

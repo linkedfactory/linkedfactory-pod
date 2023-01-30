@@ -13,9 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.github.linkedfactory.kvin.test
+package io.github.linkedfactory.kvin
 
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
 import net.enilink.komma.core.URIs
 import org.junit.Assert._
 import org.junit.Test
