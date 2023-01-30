@@ -16,8 +16,8 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<komma.version>1.6.3-SNAPSHOT</komma.version>
-		<enilink.version>1.4.2-SNAPSHOT</enilink.version>
+		<komma.version>1.7.4</komma.version>
+		<enilink.version>1.5.4</enilink.version>
 		<scala.version>2.13.2</scala.version>
 		<karaf.tooling.version>4.3.0</karaf.tooling.version>
 
@@ -239,13 +239,14 @@
 				<enabled>false</enabled>
 			</releases>
 		</repository>
-		<!-- repository>
-			<id>github</id>
-			<url>https://maven.pkg.github.com/linkedfactory/linkedfactory-pod</url>
+		<repository>
+			<id>oss-sonatype-releases</id>
+			<name>OSS Sonatype Releases</name>
+			<url>https://oss.sonatype.org/content/repositories/releases/</url>
 			<snapshots>
-				<enabled>true</enabled>
+				<enabled>false</enabled>
 			</snapshots>
-		</repository -->
+		</repository>
 	</repositories>
 
 	<distributionManagement>
