@@ -102,7 +102,7 @@ public class KvinFederatedService implements FederatedService {
 
 			@Override
 			public BindingSet next() throws QueryEvaluationException {
-				QueryBindingSet projected = new QueryBindingSet();
+				QueryBindingSet projected = new QueryBindingSet(bindings);
 				BindingSet result = iter.next();
 				for (String var : projectionVars) {
 					Value v = result.getValue(var);
