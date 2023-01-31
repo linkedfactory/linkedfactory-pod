@@ -18,6 +18,7 @@
 
 		<komma.version>1.7.4</komma.version>
 		<enilink.version>1.5.4</enilink.version>
+		<scala.major.version>2.13</scala.major.version>
 		<scala.version>2.13.2</scala.version>
 		<karaf.tooling.version>4.3.0</karaf.tooling.version>
 

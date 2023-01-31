@@ -244,7 +244,7 @@ class ServiceTest {
         Files.delete(dir)
         FileVisitResult.CONTINUE
       }
-    });
+    })
   }
 
 }

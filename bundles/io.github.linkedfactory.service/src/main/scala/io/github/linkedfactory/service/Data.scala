@@ -50,8 +50,8 @@ object Data {
   val cfgURI = URIs.createURI("plugin://de.fraunhofer.iwu.linkedfactory.service/data/")
   val dateFormat = new SimpleDateFormat("dd/MM/yyyy hh:mm:ss")
 
-  val bundleContext = FrameworkUtil.getBundle(getClass).getBundleContext
-  val instanceLoc = Platform.getInstanceLocation
+  val bundleContext = Option(FrameworkUtil.getBundle(getClass)).map(_.getBundleContext).getOrElse(null)
+  val instanceLoc = if (bundleContext != null) Platform.getInstanceLocation else null
 
   def toPEA[T](func: () => T): PrivilegedExceptionAction[T] = { () => func() }
 
@@ -59,56 +59,58 @@ object Data {
   private var _modelURI: URI = _
   private var _kvin: Option[Kvin] = None
 
-  // get configuration settings from plugin config model
-  Globals.withPluginConfig { pcModel => {
-    val cfg = pcModel.getManager.find(cfgURI.appendLocalPart("store")).asInstanceOf[IResource]
-    _modelURI = cfg.getSingle(cfgURI.appendLocalPart("model")) match {
-      case r: IReference if r.getURI != null => r.getURI
-      case s: String => URIs.createURI(s)
-      case _ => URIs.createURI("http://linkedfactory.github.io/data/")
+  if (bundleContext != null) {
+    // get configuration settings from plugin config model
+    Globals.withPluginConfig { pcModel => {
+      val cfg = pcModel.getManager.find(cfgURI.appendLocalPart("store")).asInstanceOf[IResource]
+      _modelURI = cfg.getSingle(cfgURI.appendLocalPart("model")) match {
+        case r: IReference if r.getURI != null => r.getURI
+        case s: String => URIs.createURI(s)
+        case _ => URIs.createURI("http://linkedfactory.github.io/data/")
+      }
+      _kvin = cfg.getSingle(cfgURI.appendLocalPart("type")) match {
+        case s: String if (s == "InfluxDB") =>
+          val endpoint = cfg.getSingle(cfgURI.appendLocalPart("endpoint")) match {
+            case r: IReference if (r.getURI != null) => r.getURI
+            case s: String => URIs.createURI(s)
+            case _ => URIs.createURI("http://localhost:8086/")
+          }
+          val db = cfg.getSingle(cfgURI.appendLocalPart("database")) match {
+            case s: String => s
+            case _ => "LinkedFactory"
+          }
+          Try(new KvinInfluxDb(endpoint, db)) match {
+            case Failure(throwable) =>
+              System.err.println(s"Value store: FAILURE for InfluxDB @ $endpoint: ${throwable.getMessage}")
+              None
+            case Success(success) =>
+              println(s"Value store: using InfluxDB @ $endpoint")
+              Some(success)
+          }
+        //case s: String if (s == "KVIN") =>
+        case _ =>
+          val dirName = cfg.getSingle(cfgURI.appendLocalPart("dirName")) match {
+            case s: String => s
+            case _ => "linkedfactory-valuestore"
+          }
+          val valueStorePath = new File(dirName) match {
+            case dir if (dir.isAbsolute()) => dir
+            case _ if (instanceLoc.isSet) => new File(new File(instanceLoc.getURL.toURI), dirName)
+            case _ => new File(Files.createTempDirectory("lf").toFile, dirName)
+          }
+          Try {
+            new KvinLevelDb(valueStorePath)
+          } match {
+            case Failure(throwable) =>
+              System.err.println(s"Value store: FAILURE for LF w/ path=$valueStorePath: ${throwable.getMessage}")
+              None
+            case Success(success) =>
+              println(s"Value store: using LF w/ path=$valueStorePath")
+              Some(success)
+          }
+      }
     }
-    _kvin = cfg.getSingle(cfgURI.appendLocalPart("type")) match {
-      case s: String if (s == "InfluxDB") =>
-        val endpoint = cfg.getSingle(cfgURI.appendLocalPart("endpoint")) match {
-          case r: IReference if (r.getURI != null) => r.getURI
-          case s: String => URIs.createURI(s)
-          case _ => URIs.createURI("http://localhost:8086/")
-        }
-        val db = cfg.getSingle(cfgURI.appendLocalPart("database")) match {
-          case s: String => s
-          case _ => "LinkedFactory"
-        }
-        Try(new KvinInfluxDb(endpoint, db)) match {
-          case Failure(throwable) =>
-            System.err.println(s"Value store: FAILURE for InfluxDB @ $endpoint: ${throwable.getMessage}")
-            None
-          case Success(success) =>
-            println(s"Value store: using InfluxDB @ $endpoint")
-            Some(success)
-        }
-      //case s: String if (s == "KVIN") =>
-      case _ =>
-        val dirName = cfg.getSingle(cfgURI.appendLocalPart("dirName")) match {
-          case s: String => s
-          case _ => "linkedfactory-valuestore"
-        }
-        val valueStorePath = new File(dirName) match {
-          case dir if (dir.isAbsolute()) => dir
-          case _ if (instanceLoc.isSet) => new File(new File(instanceLoc.getURL.toURI), dirName)
-          case _ => new File(Files.createTempDirectory("lf").toFile, dirName)
-        }
-        Try {
-          new KvinLevelDb(valueStorePath)
-        } match {
-          case Failure(throwable) =>
-            System.err.println(s"Value store: FAILURE for LF w/ path=$valueStorePath: ${throwable.getMessage}")
-            None
-          case Success(success) =>
-            println(s"Value store: using LF w/ path=$valueStorePath")
-            Some(success)
-        }
     }
-  }
   }
 
   import java.util.concurrent.TimeUnit
