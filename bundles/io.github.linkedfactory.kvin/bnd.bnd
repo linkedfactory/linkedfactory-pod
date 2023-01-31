@@ -6,4 +6,4 @@ lib/okio.jar,\
 lib/leveldb-api.jar,\
 lib/leveldb.jar,\
 lib/snappy.jar
-Import-Package: com.google.common.*;version="[25,40)", net.enilink.*, org.slf4j, scala.*
+Import-Package: com.google.common.*;version="[25,40)", net.enilink.*, org.slf4j, scala.*, org.apache.http.*, com.fasterxml.jackson.*
