@@ -7,21 +7,26 @@ import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
 import net.enilink.commons.iterator.NiceIterator;
+import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.Iterator;
-import java.util.Map;
+import java.util.*;
 
 public class JsonFormatParser {
     JsonFactory jsonFactory;
-    final JsonParser jsonParser;
+    JsonParser jsonParser;
     ObjectMapper mapper;
 
     public JsonFormatParser(InputStream content) {
@@ -36,7 +41,14 @@ public class JsonFormatParser {
         }
     }
 
+    public JsonFormatParser() {
+        mapper = new ObjectMapper();
+    }
+
     public NiceIterator<KvinTuple> parse() {
+        if (jsonParser == null) {
+            throw new RuntimeException("cannot parse without json string");
+        }
         return new NiceIterator<>() {
             KvinTuple kvinTuple;
             private String currentItemName = "";
@@ -180,5 +192,6 @@ public class JsonFormatParser {
             return node;
         }
     }
+
 
 }
