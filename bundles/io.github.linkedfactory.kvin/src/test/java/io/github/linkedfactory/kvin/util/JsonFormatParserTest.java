@@ -18,10 +18,14 @@ package io.github.linkedfactory.kvin.util;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
 import net.enilink.commons.iterator.IExtendedIterator;
+import net.enilink.komma.core.URIs;
 import org.junit.Test;
 
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 import static org.junit.Assert.*;
 import static org.junit.Assert.fail;
