@@ -36,11 +36,11 @@ public class KvinFederatedServiceComponent {
                             @Override
                             protected FederatedService createService(String serviceUrl)
                                     throws QueryEvaluationException {
-                                if (getKvinServiceUrl(serviceUrl).isPresent()) {
+                                if (serviceUrl.equals("kvin:")) {
+                                    return new KvinFederatedService(kvin);
+                                } else  if (getKvinServiceUrl(serviceUrl).isPresent()) {
                                     String url = getKvinServiceUrl(serviceUrl).get();
                                     kvin = new KvinHttp(url);
-                                    return new KvinFederatedService(kvin);
-                                } else if (serviceUrl.startsWith("kvin:")) {
                                     return new KvinFederatedService(kvin);
                                 }
                                 return null;
