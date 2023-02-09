@@ -6,7 +6,6 @@ import net.enilink.commons.iterator.WrappedIterator
 import net.enilink.komma.core.URIs
 
 import java.util
-import java.util.{ArrayList, Arrays}
 
 class KvinServiceTestBase {
 
