@@ -18,6 +18,7 @@ import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.avro.AvroParquetWriter;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
 
 import java.io.*;
@@ -27,7 +28,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 public class KvinParquet implements Kvin {
-
     ByteArrayOutputStream byteArrayOutputStream;
 
     public KvinParquet() {
@@ -72,10 +72,13 @@ public class KvinParquet implements Kvin {
                 .name("value_float").type().nullable().floatType().noDefault()
                 .name("value_double").type().nullable().doubleType().noDefault()
                 .name("value_string").type().nullable().stringType().noDefault()
+                .name("value_bool").type().nullable().booleanType().noDefault()
                 .name("value_object").type().nullable().bytesType().noDefault().endRecord();
 
         ParquetWriter<KvinTupleInternal> parquetWriter = AvroParquetWriter.<KvinTupleInternal>builder(file)
                 .withSchema(kvinTupleSchema)
+                .withDictionaryEncoding(true)
+                .withCompressionCodec(CompressionCodecName.SNAPPY)
                 .withDataModel(ReflectData.get())
                 .build();
 
@@ -92,7 +95,8 @@ public class KvinParquet implements Kvin {
             internalTuple.setValue_float(tuple.value instanceof Float ? (float) tuple.value : null);
             internalTuple.setValue_double(tuple.value instanceof Double ? (double) tuple.value : null);
             internalTuple.setValue_string(tuple.value instanceof String ? (String) tuple.value : null);
-            if (tuple.value instanceof Record || tuple.value instanceof URI || tuple.value instanceof BigInteger || tuple.value instanceof BigDecimal || tuple.value instanceof Boolean || tuple.value instanceof Short) {
+            internalTuple.setValue_bool(tuple.value instanceof Boolean ? (Boolean) tuple.value : null);
+            if (tuple.value instanceof Record || tuple.value instanceof URI || tuple.value instanceof BigInteger || tuple.value instanceof BigDecimal || tuple.value instanceof Short) {
                 internalTuple.setValue_object(encodeRecord(tuple.value));
             } else {
                 internalTuple.setValue_object(null);
@@ -211,6 +215,8 @@ public class KvinParquet implements Kvin {
                         value = internalTuple.value_double;
                     } else if (internalTuple.value_string != null) {
                         value = internalTuple.value_string;
+                    } else if (internalTuple.value_bool != null) {
+                        value = internalTuple.value_bool;
                     } else if (internalTuple.value_object != null) {
                         value = decodeRecord(internalTuple.value_object);
                     }
@@ -264,10 +270,11 @@ public class KvinParquet implements Kvin {
         String context;
         Integer value_int;
         Long value_long;
-
         Float value_float;
         Double value_double;
         String value_string;
+        Boolean value_bool;
+
         byte[] value_object;
 
         public String getItem() {
@@ -356,6 +363,14 @@ public class KvinParquet implements Kvin {
 
         public void setValue_object(byte[] value_object) {
             this.value_object = value_object;
+        }
+
+        public Boolean getValue_bool() {
+            return value_bool;
+        }
+
+        public void setValue_bool(Boolean value_bool) {
+            this.value_bool = value_bool;
         }
 
     }
