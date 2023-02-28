@@ -16,23 +16,28 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.avro.AvroParquetWriter;
+import org.apache.parquet.filter2.compat.FilterCompat;
+import org.apache.parquet.filter2.predicate.FilterApi;
+import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
+import org.apache.parquet.io.OutputFile;
+import org.apache.parquet.io.PositionOutputStream;
+import org.apache.parquet.io.api.Binary;
 
 import java.io.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Iterator;
+
+import static org.apache.parquet.filter2.predicate.FilterApi.eq;
 
 public class KvinParquet implements Kvin {
-    ByteArrayOutputStream byteArrayOutputStream;
-
-    public KvinParquet() {
-        byteArrayOutputStream = new ByteArrayOutputStream();
-    }
+    int idCounter = 0;
 
     @Override
     public boolean addListener(KvinListener listener) {
@@ -59,54 +64,94 @@ public class KvinParquet implements Kvin {
     }
 
     private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
-        Path file = new Path("./target/test.parquet");
+        Path dataFile = new Path("./target/test.data.parquet");
+        Path mappingFile = new Path("./target/test.mapping.parquet");
 
+        // data file schema
         Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
-                .name("item").type().stringType().noDefault()
-                .name("property").type().stringType().noDefault()
+                .name("id").type().nullable().intType().noDefault()
                 .name("time").type().longType().noDefault()
                 .name("seqNr").type().intType().intDefault(0)
-                .name("context").type().nullable().stringType().stringDefault("null")
                 .name("value_int").type().nullable().intType().noDefault()
                 .name("value_long").type().nullable().longType().noDefault()
                 .name("value_float").type().nullable().floatType().noDefault()
                 .name("value_double").type().nullable().doubleType().noDefault()
                 .name("value_string").type().nullable().stringType().noDefault()
-                .name("value_bool").type().nullable().booleanType().noDefault()
+                .name("value_bool").type().nullable().intType().noDefault()
                 .name("value_object").type().nullable().bytesType().noDefault().endRecord();
+        // mapping file schema
+        Schema mappingSchema = SchemaBuilder.record("Mapping").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
+                .name("id").type().intType().noDefault()
+                .name("value").type().nullable().bytesType().noDefault().endRecord();
 
-        ParquetWriter<KvinTupleInternal> parquetWriter = AvroParquetWriter.<KvinTupleInternal>builder(file)
+        // mapping writer
+        ParquetWriter<Mapping> parquetMappingWriter = AvroParquetWriter.<Mapping>builder(mappingFile)
+                .withSchema(mappingSchema)
+                .withDictionaryEncoding(true)
+                .withCompressionCodec(CompressionCodecName.SNAPPY)
+                .withRowGroupSize(33554432) // 32 MB
+                .withPageSize(1048576) // 1 MB
+                .withDictionaryPageSize(2097152) // 2 MB
+                .withDataModel(ReflectData.get())
+                .build();
+        // data writer
+        ParquetWriter<KvinTupleInternal> parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(dataFile)
                 .withSchema(kvinTupleSchema)
                 .withDictionaryEncoding(true)
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
+                .withRowGroupSize(33554432) // 32 MB
+                .withPageSize(1048576) // 1 MB
+                .withDictionaryPageSize(2097152) // 2 MB
                 .withDataModel(ReflectData.get())
                 .build();
 
-        for (KvinTuple tuple : tuples) {
+        Iterator<KvinTuple> iterator = tuples.iterator();
+        while (iterator.hasNext()) {
+            KvinTuple tuple = iterator.next();
             KvinTupleInternal internalTuple = new KvinTupleInternal();
-            internalTuple.setItem(tuple.item.toString());
-            internalTuple.setProperty(tuple.property.toString());
+            internalTuple.setId(generateId(tuple.item, tuple.property, tuple.context, parquetMappingWriter));
             internalTuple.setTime(tuple.time);
             internalTuple.setSeqNr(tuple.seqNr);
-            internalTuple.setContext(tuple.context.toString());
 
             internalTuple.setValue_int(tuple.value instanceof Integer ? (int) tuple.value : null);
             internalTuple.setValue_long(tuple.value instanceof Long ? (long) tuple.value : null);
             internalTuple.setValue_float(tuple.value instanceof Float ? (float) tuple.value : null);
             internalTuple.setValue_double(tuple.value instanceof Double ? (double) tuple.value : null);
             internalTuple.setValue_string(tuple.value instanceof String ? (String) tuple.value : null);
-            internalTuple.setValue_bool(tuple.value instanceof Boolean ? (Boolean) tuple.value : null);
+            internalTuple.setValue_bool(tuple.value instanceof Boolean ? (Boolean) tuple.value ? 1 : 0 : null);
             if (tuple.value instanceof Record || tuple.value instanceof URI || tuple.value instanceof BigInteger || tuple.value instanceof BigDecimal || tuple.value instanceof Short) {
                 internalTuple.setValue_object(encodeRecord(tuple.value));
             } else {
                 internalTuple.setValue_object(null);
             }
-            parquetWriter.write(internalTuple);
+            parquetDataWriter.write(internalTuple);
         }
-        parquetWriter.close();
+        parquetMappingWriter.close();
+        parquetDataWriter.close();
+    }
+
+    private int generateId(URI item, URI property, URI context, ParquetWriter<Mapping> mappingParquetWriter) throws IOException {
+        Mapping mapping = new Mapping();
+        mapping.setId(++idCounter);
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        byteArrayOutputStream.write((item.toString() + "^^" + property.toString() + "^^" + context.toString()).getBytes());
+        mapping.setValue(byteArrayOutputStream.toByteArray());
+        mappingParquetWriter.write(mapping);
+        return idCounter;
+    }
+
+    private Mapping getIdMapping(String item, String property, String context) throws IOException {
+        Path file = new Path("./target/test.mapping.parquet");
+        FilterPredicate filter = eq(FilterApi.binaryColumn("value"), Binary.fromString((item + "^^" + property + "^^" + context)));
+        ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(file, new Configuration()))
+                .withDataModel(new ReflectData(Mapping.class.getClassLoader()))
+                .withFilter(FilterCompat.get(filter))
+                .build();
+        return reader.read();
     }
 
     private byte[] encodeRecord(Object record) throws IOException {
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         if (record instanceof Record) {
             Record r = (Record) record;
             byteArrayOutputStream.write("O".getBytes(StandardCharsets.UTF_8));
@@ -168,12 +213,16 @@ public class KvinParquet implements Kvin {
     }
 
     private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
-        Path file = new Path("./target/test.parquet");
+        Path file = new Path("./target/test.data.parquet");
 
         try {
+            // filters
+            Mapping idMapping = getIdMapping(item.toString(), property.toString(), context.toString());
+            FilterPredicate filter = eq(FilterApi.intColumn("id"), idMapping.getId() != null ? idMapping.getId() : -1);
+            // data reader
             ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(file, new Configuration()))
                     .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
-                    .disableCompatibility()
+                    .withFilter(FilterCompat.get(filter))
                     .build();
             return new NiceIterator<>() {
                 KvinTupleInternal internalTuple;
@@ -203,7 +252,7 @@ public class KvinParquet implements Kvin {
                 }
 
                 private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) {
-
+                    String[] idValues = new String(idMapping.getValue(), StandardCharsets.UTF_8).split("\\^\\^");
                     Object value = null;
                     if (internalTuple.value_int != null) {
                         value = internalTuple.value_int;
@@ -216,11 +265,12 @@ public class KvinParquet implements Kvin {
                     } else if (internalTuple.value_string != null) {
                         value = internalTuple.value_string;
                     } else if (internalTuple.value_bool != null) {
-                        value = internalTuple.value_bool;
+                        value = internalTuple.value_bool == 1;
                     } else if (internalTuple.value_object != null) {
                         value = decodeRecord(internalTuple.value_object);
                     }
-                    return new KvinTuple(URIs.createURI(internalTuple.item), URIs.createURI(internalTuple.property), URIs.createURI(internalTuple.context), internalTuple.time, internalTuple.seqNr, value);
+                    return new KvinTuple(URIs.createURI(idValues[0]), URIs.createURI(idValues[1]), URIs.createURI(idValues[2]), internalTuple.time, internalTuple.seqNr, value);
+
                 }
             };
         } catch (IOException e) {
@@ -260,37 +310,27 @@ public class KvinParquet implements Kvin {
 
     @Override
     public void close() {
+
     }
 
     static class KvinTupleInternal {
-        String item;
-        String property;
+        int id;
         Long time;
         Integer seqNr;
-        String context;
         Integer value_int;
         Long value_long;
         Float value_float;
         Double value_double;
         String value_string;
-        Boolean value_bool;
-
+        Integer value_bool;
         byte[] value_object;
 
-        public String getItem() {
-            return item;
+        public int getId() {
+            return id;
         }
 
-        public void setItem(String item) {
-            this.item = item;
-        }
-
-        public String getProperty() {
-            return property;
-        }
-
-        public void setProperty(String property) {
-            this.property = property;
+        public void setId(int id) {
+            this.id = id;
         }
 
         public long getTime() {
@@ -307,14 +347,6 @@ public class KvinParquet implements Kvin {
 
         public void setSeqNr(int seqNr) {
             this.seqNr = seqNr;
-        }
-
-        public String getContext() {
-            return context;
-        }
-
-        public void setContext(String context) {
-            this.context = context;
         }
 
         public Integer getValue_int() {
@@ -365,13 +397,35 @@ public class KvinParquet implements Kvin {
             this.value_object = value_object;
         }
 
-        public Boolean getValue_bool() {
+        public Integer getValue_bool() {
             return value_bool;
         }
 
-        public void setValue_bool(Boolean value_bool) {
+        public void setValue_bool(Integer value_bool) {
             this.value_bool = value_bool;
         }
 
+    }
+
+    static class Mapping {
+        Integer id;
+        byte[] value;
+
+
+        public byte[] getValue() {
+            return value;
+        }
+
+        public void setValue(byte[] value) {
+            this.value = value;
+        }
+
+        public Integer getId() {
+            return id;
+        }
+
+        public void setId(Integer id) {
+            this.id = id;
+        }
     }
 }
