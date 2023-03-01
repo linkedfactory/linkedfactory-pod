@@ -162,8 +162,8 @@ public class KvinHttp implements Kvin {
         try {
             // building url
             URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/linkedfactory/values");
-            uriBuilder.setParameter("item", item.toString());
-            uriBuilder.setParameter("property", property.toString());
+            if (item != null) uriBuilder.setParameter("item", item.toString());
+            if (property != null) uriBuilder.setParameter("property", property.toString());
             if (limit != null) uriBuilder.setParameter("limit", Long.toString(limit));
             if (end != null) uriBuilder.setParameter("to", Long.toString(end));
             if (begin != null) uriBuilder.setParameter("from", Long.toString(begin));
