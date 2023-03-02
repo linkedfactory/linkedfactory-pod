@@ -18,31 +18,24 @@ import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.avro.AvroParquetWriter;
 import org.apache.parquet.filter2.compat.FilterCompat;
-import org.apache.parquet.filter2.predicate.FilterApi;
-import org.apache.parquet.filter2.predicate.FilterPredicate;
+import org.apache.parquet.filter2.predicate.*;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
-import org.apache.parquet.io.OutputFile;
-import org.apache.parquet.io.PositionOutputStream;
+import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.io.api.Binary;
 
 import java.io.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Iterator;
+import java.util.*;
 
-import static org.apache.parquet.filter2.predicate.FilterApi.and;
-import static org.apache.parquet.filter2.predicate.FilterApi.eq;
+import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
-    int ItemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0;
-    URI currentItem, previousItem, currentProperty, previousProperty, currentContext, previousContext;
+    int idCounter = 0;
 
     @Override
     public boolean addListener(KvinListener listener) {
@@ -74,9 +67,7 @@ public class KvinParquet implements Kvin {
 
         // data file schema
         Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
-                .name("item_id").type().nullable().intType().noDefault()
-                .name("property_id").type().nullable().intType().noDefault()
-                .name("context_id").type().nullable().intType().noDefault()
+                .name("id").type().nullable().intType().noDefault()
                 .name("time").type().longType().noDefault()
                 .name("seqNr").type().intType().intDefault(0)
                 .name("value_int").type().nullable().intType().noDefault()
@@ -88,15 +79,13 @@ public class KvinParquet implements Kvin {
                 .name("value_object").type().nullable().bytesType().noDefault().endRecord();
         // mapping file schema
         Schema mappingSchema = SchemaBuilder.record("Mapping").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
-                .name("item_id").type().intType().noDefault()
-                .name("property_id").type().intType().noDefault()
-                .name("context_id").type().intType().noDefault()
+                .name("id").type().intType().noDefault()
                 .name("item").type().stringType().noDefault()
                 .name("property").type().stringType().noDefault()
                 .name("context").type().stringType().noDefault().endRecord();
 
         // mapping writer
-        ParquetWriter<Mapping> parquetMappingWriter = AvroParquetWriter.<Mapping>builder(mappingFile)
+        ParquetWriter<Mapping> parquetMappingWriter = AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(mappingFile, new Configuration()))
                 .withSchema(mappingSchema)
                 .withDictionaryEncoding(true)
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
@@ -106,7 +95,7 @@ public class KvinParquet implements Kvin {
                 .withDataModel(ReflectData.get())
                 .build();
         // data writer
-        ParquetWriter<KvinTupleInternal> parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(dataFile)
+        ParquetWriter<KvinTupleInternal> parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
                 .withSchema(kvinTupleSchema)
                 .withDictionaryEncoding(true)
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
@@ -116,27 +105,9 @@ public class KvinParquet implements Kvin {
                 .withDataModel(ReflectData.get())
                 .build();
 
-        Iterator<KvinTuple> iterator = tuples.iterator();
-        while (iterator.hasNext()) {
-            KvinTuple tuple = iterator.next();
-
-            currentItem = tuple.item;
-            if (previousItem == null) {
-                previousItem = currentItem;
-            }
-            currentProperty = tuple.property;
-            if (previousProperty == null) {
-                previousProperty = currentProperty;
-            }
-            currentContext = tuple.context;
-            if (previousContext == null) {
-                previousContext = currentContext;
-            }
-
+        for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
-            internalTuple.setItem_id(generateId("item"));
-            internalTuple.setProperty_id(generateId("property"));
-            internalTuple.setContext_id(generateId("context"));
+            internalTuple.setId(generateId());
             internalTuple.setTime(tuple.time);
             internalTuple.setSeqNr(tuple.seqNr);
 
@@ -153,9 +124,7 @@ public class KvinParquet implements Kvin {
             }
             // generating mapping
             Mapping mapping = new Mapping();
-            mapping.setItem_id(internalTuple.getItem_id());
-            mapping.setProperty_id(internalTuple.getProperty_id());
-            mapping.setContext_id(internalTuple.getContext_id());
+            mapping.setId(internalTuple.getId());
             mapping.setItem(tuple.item.toString());
             mapping.setProperty(tuple.property.toString());
             mapping.setContext(tuple.context.toString());
@@ -167,34 +136,8 @@ public class KvinParquet implements Kvin {
         parquetDataWriter.close();
     }
 
-    private int generateId(String idType) throws IOException {
-        Integer id = null;
-
-        switch (idType) {
-            case "item":
-                if (!currentItem.equals(previousItem)) {
-                    ++ItemIdCounter;
-                    propertyIdCounter = -1;
-                    previousItem = currentItem;
-                }
-                id = ItemIdCounter;
-                break;
-            case "property":
-                if (!currentProperty.equals(previousProperty)) {
-                    ++propertyIdCounter;
-                    previousProperty = currentProperty;
-                }
-                id = propertyIdCounter;
-                break;
-            case "context":
-                if (!currentContext.equals(previousContext)) {
-                    ++contextIdCounter;
-                    previousContext = currentContext;
-                }
-                id = contextIdCounter;
-                break;
-        }
-        return id;
+    private int generateId() {
+        return ++idCounter;
     }
 
     private ArrayList<Mapping> getIdMapping(URI item, URI property, URI context) throws IOException {
@@ -206,16 +149,40 @@ public class KvinParquet implements Kvin {
         } else if (item != null) {
             filter = eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString()));
         }
-        ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(file, new Configuration()))
+        try (ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(file, new Configuration()))
                 .withDataModel(new ReflectData(Mapping.class.getClassLoader()))
                 .withFilter(FilterCompat.get(filter))
-                .build();
+                .build()) {
 
-        Mapping mapping;
-        while ((mapping = reader.read()) != null) {
-            mappings.add(mapping);
+            Mapping mapping;
+            while ((mapping = reader.read()) != null) {
+                mappings.add(mapping);
+            }
         }
         return mappings;
+    }
+
+    private FilterPredicate generateFetchFilter(ArrayList<Mapping> mappings) {
+        int mappingSize = mappings.size();
+        FilterPredicate filter = null;
+        if (mappingSize > 0) {
+            if (mappingSize == 1) {
+                filter = or(eq(FilterApi.intColumn("id"), mappings.get(0).getId()), eq(FilterApi.intColumn("id"), -1));
+            } else if (mappingSize == 2) {
+                filter = or(eq(FilterApi.intColumn("id"), mappings.get(0).getId()), eq(FilterApi.intColumn("id"), mappings.get(1).getId()));
+            } else {
+                filter = generateFilterPredicates(mappings, 0);
+            }
+        }
+        return filter;
+    }
+
+    private FilterPredicate generateFilterPredicates(ArrayList<Mapping> mappings, int startCount) {
+        FilterPredicate predicate = eq(FilterApi.intColumn("id"), -1);
+        if (startCount < mappings.size()) {
+            predicate = FilterApi.or(eq(FilterApi.intColumn("id"), mappings.get(startCount).getId()), generateFilterPredicates(mappings, ++startCount));
+        }
+        return predicate;
     }
 
     private byte[] encodeRecord(Object record) throws IOException {
@@ -295,107 +262,99 @@ public class KvinParquet implements Kvin {
         try {
             // filters
             ArrayList<Mapping> idMappings = getIdMapping(item, property, context);
-            FilterPredicate filter = null;
-            if (item != null && property != null) {
-                filter = and(eq(FilterApi.intColumn("item_id"), idMappings.get(0).getItem_id()), eq(FilterApi.intColumn("property_id"), idMappings.get(0).getProperty_id()));
-            } else if (item != null && property == null) {
-                filter = eq(FilterApi.intColumn("item_id"), idMappings.get(0).getItem_id());
-            }
+            FilterPredicate filter = generateFetchFilter(idMappings);
             // data reader
-            ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(file, new Configuration()))
+            try (ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(file, new Configuration()))
                     .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
                     .withFilter(FilterCompat.get(filter))
-                    .build();
+                    .build()) {
 
-            return new NiceIterator<>() {
-                KvinTupleInternal internalTuple;
-                HashMap<String, Integer> itemPropertyCount = new HashMap<>();
-                int propertyCount = 0;
-                String currentProperty, previousProperty;
+                return new NiceIterator<>() {
+                    KvinTupleInternal internalTuple;
+                    HashMap<String, Integer> itemPropertyCount = new HashMap<>();
+                    int propertyCount = 0;
+                    String currentProperty, previousProperty;
 
-                @Override
-                public boolean hasNext() {
-                    try {
-                        if (itemPropertyCount.size() > 0) {
-                            if (itemPropertyCount.get(currentProperty) >= limit && limit != 0) {
-                                currentProperty = idMappings.get(propertyCount).getProperty();
-                                previousProperty = currentProperty;
+                    @Override
+                    public boolean hasNext() {
+                        try {
+                            if (itemPropertyCount.size() > 0) {
+                                if (itemPropertyCount.get(currentProperty) >= limit && limit != 0) {
+                                    currentProperty = idMappings.get(propertyCount).getProperty();
+                                    previousProperty = currentProperty;
 
-                                while ((internalTuple = reader.read()) != null && propertyCount <= idMappings.size() - limit) {
-                                    propertyCount++;
-                                    if (!previousProperty.equals(idMappings.get(propertyCount).getProperty())) {
-                                        break;
+                                    while ((internalTuple = reader.read()) != null && propertyCount < idMappings.size() - 1) {
+                                        propertyCount++;
+                                        if (!previousProperty.equals(idMappings.get(propertyCount).getProperty())) {
+                                            break;
+                                        }
                                     }
                                 }
                             }
+                            internalTuple = reader.read();
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
                         }
-                        internalTuple = reader.read();
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
+
+                        return internalTuple != null;
                     }
 
-                    if (internalTuple != null) {
-                        return true;
-                    } else {
-                        return false;
-                    }
-                }
-
-                @Override
-                public KvinTuple next() {
-                    if (internalTuple != null) {
-                        KvinTuple tuple = internalTupleToKvinTuple(internalTuple);
-                        propertyCount++;
-                        return tuple;
-                    } else {
-                        return null;
-                    }
-                }
-
-                private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) {
-                    Object value = null;
-                    if (internalTuple.value_int != null) {
-                        value = internalTuple.value_int;
-                    } else if (internalTuple.value_long != null) {
-                        value = internalTuple.value_long;
-                    } else if (internalTuple.value_float != null) {
-                        value = internalTuple.value_float;
-                    } else if (internalTuple.value_double != null) {
-                        value = internalTuple.value_double;
-                    } else if (internalTuple.value_string != null) {
-                        value = internalTuple.value_string;
-                    } else if (internalTuple.value_bool != null) {
-                        value = internalTuple.value_bool == 1;
-                    } else if (internalTuple.value_object != null) {
-                        value = decodeRecord(internalTuple.value_object);
+                    @Override
+                    public KvinTuple next() {
+                        if (internalTuple != null) {
+                            KvinTuple tuple = internalTupleToKvinTuple(internalTuple);
+                            propertyCount++;
+                            return tuple;
+                        } else {
+                            return null;
+                        }
                     }
 
-                    if (currentProperty == null) {
-                        currentProperty = idMappings.get(propertyCount).getProperty();
-                        previousProperty = currentProperty;
-                    } else if (!idMappings.get(propertyCount).getProperty().equals(previousProperty)) {
-                        currentProperty = idMappings.get(propertyCount).getProperty();
-                        previousProperty = idMappings.get(propertyCount).getProperty();
-                        itemPropertyCount.clear();
+                    private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) {
+                        Object value = null;
+                        if (internalTuple.value_int != null) {
+                            value = internalTuple.value_int;
+                        } else if (internalTuple.value_long != null) {
+                            value = internalTuple.value_long;
+                        } else if (internalTuple.value_float != null) {
+                            value = internalTuple.value_float;
+                        } else if (internalTuple.value_double != null) {
+                            value = internalTuple.value_double;
+                        } else if (internalTuple.value_string != null) {
+                            value = internalTuple.value_string;
+                        } else if (internalTuple.value_bool != null) {
+                            value = internalTuple.value_bool == 1;
+                        } else if (internalTuple.value_object != null) {
+                            value = decodeRecord(internalTuple.value_object);
+                        }
+
+                        if (currentProperty == null) {
+                            currentProperty = idMappings.get(propertyCount).getProperty();
+                            previousProperty = currentProperty;
+                        } else if (!idMappings.get(propertyCount).getProperty().equals(previousProperty)) {
+                            currentProperty = idMappings.get(propertyCount).getProperty();
+                            previousProperty = idMappings.get(propertyCount).getProperty();
+                            itemPropertyCount.clear();
+                        }
+
+                        if (itemPropertyCount.containsKey(idMappings.get(propertyCount).getProperty())) {
+                            String property = idMappings.get(propertyCount).getProperty();
+                            Integer count = itemPropertyCount.get(property) + 1;
+                            itemPropertyCount.put(property, count);
+                        } else {
+                            itemPropertyCount.put(idMappings.get(propertyCount).getProperty(), 1);
+                        }
+
+                        return new KvinTuple(URIs.createURI(idMappings.get(propertyCount).getItem()), URIs.createURI(idMappings.get(propertyCount).getProperty()), URIs.createURI(idMappings.get(propertyCount).getContext()), internalTuple.time, internalTuple.seqNr, value);
+
                     }
 
-                    if (itemPropertyCount.containsKey(idMappings.get(propertyCount).getProperty())) {
-                        String property = idMappings.get(propertyCount).getProperty();
-                        Integer count = itemPropertyCount.get(property) + 1;
-                        itemPropertyCount.put(property, count);
-                    } else {
-                        itemPropertyCount.put(idMappings.get(propertyCount).getProperty(), 1);
+                    @Override
+                    public void close() {
+                        super.close();
                     }
-
-                    return new KvinTuple(URIs.createURI(idMappings.get(propertyCount).getItem()), URIs.createURI(idMappings.get(propertyCount).getProperty()), URIs.createURI(idMappings.get(propertyCount).getContext()), internalTuple.time, internalTuple.seqNr, value);
-
-                }
-
-                @Override
-                public void close() {
-                    super.close();
-                }
-            };
+                };
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -428,44 +387,45 @@ public class KvinParquet implements Kvin {
         try {
             // filters
             ArrayList<Mapping> idMappings = getIdMapping(item, null, null);
-            FilterPredicate filter = eq(FilterApi.intColumn("item_id"), idMappings.get(0).getItem_id());
+            FilterPredicate filter = generateFilterPredicates(idMappings, 0);
 
             // data reader
-            ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(file, new Configuration()))
+            try (ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(file, new Configuration()))
                     .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
                     .withFilter(FilterCompat.get(filter))
-                    .build();
+                    .build()) {
 
-            return new NiceIterator<>() {
-                KvinTupleInternal internalTuple;
-                int propertyCount = 0;
+                return new NiceIterator<>() {
+                    KvinTupleInternal internalTuple;
+                    int propertyCount = 0;
 
-                @Override
-                public boolean hasNext() {
-                    try {
-                        internalTuple = reader.read();
-                        return internalTuple != null ? true : false;
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
+                    @Override
+                    public boolean hasNext() {
+                        try {
+                            internalTuple = reader.read();
+                            return internalTuple != null;
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
                     }
-                }
 
-                @Override
-                public URI next() {
-                    URI property = getKvinTupleProperty(internalTuple);
-                    propertyCount++;
-                    return property;
-                }
+                    @Override
+                    public URI next() {
+                        URI property = getKvinTupleProperty();
+                        propertyCount++;
+                        return property;
+                    }
 
-                private URI getKvinTupleProperty(KvinTupleInternal internalTuple) {
-                    return URIs.createURI(idMappings.get(propertyCount).getProperty());
-                }
+                    private URI getKvinTupleProperty() {
+                        return URIs.createURI(idMappings.get(propertyCount).getProperty());
+                    }
 
-                @Override
-                public void close() {
-                    super.close();
-                }
-            };
+                    @Override
+                    public void close() {
+                        super.close();
+                    }
+                };
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -482,9 +442,7 @@ public class KvinParquet implements Kvin {
     }
 
     static class KvinTupleInternal {
-        int item_id;
-        int property_id;
-        int context_id;
+        int id;
         Long time;
         Integer seqNr;
         Integer value_int;
@@ -495,28 +453,12 @@ public class KvinParquet implements Kvin {
         Integer value_bool;
         byte[] value_object;
 
-        public int getItem_id() {
-            return item_id;
+        public int getId() {
+            return id;
         }
 
-        public void setItem_id(int item_id) {
-            this.item_id = item_id;
-        }
-
-        public int getProperty_id() {
-            return property_id;
-        }
-
-        public void setProperty_id(int property_id) {
-            this.property_id = property_id;
-        }
-
-        public int getContext_id() {
-            return context_id;
-        }
-
-        public void setContext_id(int context_id) {
-            this.context_id = context_id;
+        public void setId(int id) {
+            this.id = id;
         }
 
         public long getTime() {
@@ -594,36 +536,17 @@ public class KvinParquet implements Kvin {
     }
 
     static class Mapping {
-        Integer item_id;
-
-        Integer property_id;
-        Integer context_id;
+        Integer id;
         String item;
         String property;
         String context;
 
-        public Integer getItem_id() {
-            return item_id;
+        public Integer getId() {
+            return id;
         }
 
-        public void setItem_id(Integer item_id) {
-            this.item_id = item_id;
-        }
-
-        public Integer getProperty_id() {
-            return property_id;
-        }
-
-        public void setProperty_id(Integer property_id) {
-            this.property_id = property_id;
-        }
-
-        public Integer getContext_id() {
-            return context_id;
-        }
-
-        public void setContext_id(Integer context_id) {
-            this.context_id = context_id;
+        public void setId(Integer id) {
+            this.id = id;
         }
 
         public String getItem() {
