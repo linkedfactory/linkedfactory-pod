@@ -451,12 +451,13 @@ public class KvinParquet implements Kvin {
 
     @Override
     public IExtendedIterator<URI> properties(URI item) {
-        Path file = new Path("./target/test.data.parquet");
+
 
         try {
             // filters
             ArrayList<Mapping> idMappings = getIdMapping(item, null, null);
             FilterPredicate filter = generateFilterPredicates(idMappings, 0);
+            Path file = new Path(getFilePath(idMappings));
 
             // data reader
             try (ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(file, new Configuration()))
