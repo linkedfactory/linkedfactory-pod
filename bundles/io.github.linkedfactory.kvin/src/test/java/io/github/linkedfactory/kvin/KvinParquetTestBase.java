@@ -16,7 +16,7 @@ public class KvinParquetTestBase {
         NiceIterator<KvinTuple> iterator = new NiceIterator<>() {
             int tupleCount = 0;
             int propertyCount = 0;
-
+            int chunkCounter = 1;
             int samePropCounter = 0;
             int itemCounter = 0, propertyCounter = 0;
             int currentPropertyCount = 0;
@@ -40,6 +40,7 @@ public class KvinParquetTestBase {
                 }
 
                 URI property = null;
+                // adding multiple property to the same item
                 if (itemCounter == 2 && samePropCounter < 10) {
                     property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propertyCounter + "/measured-point-1");
                     samePropCounter++;
@@ -47,10 +48,16 @@ public class KvinParquetTestBase {
                     property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + ++propertyCounter + "/measured-point-1");
                 }
                 Object value = generateRandomValue();
+                // adding only int as a value in item with id 2
                 if(itemCounter == 2) {
                     value = getRandomInt(500000);
                 }
-                long time = System.currentTimeMillis() / 1000;
+                long time = 1678262948L;
+                // incrementing week on every 50.0000 records
+                if(tupleCount % 1000000 == 0 && tupleCount != 0) {
+                    time = time + (604800 * chunkCounter);
+                    chunkCounter++;
+                }
                 int seqNr = 0;
                 URI context = Kvin.DEFAULT_CONTEXT;
                 tupleCount++;

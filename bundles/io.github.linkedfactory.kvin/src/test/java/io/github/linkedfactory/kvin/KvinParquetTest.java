@@ -8,6 +8,7 @@ import net.enilink.komma.core.URIs;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.FilenameFilter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -21,14 +22,22 @@ public class KvinParquetTest extends KvinParquetTestBase {
         /*File storeDirectory = new File("/tmp/leveldb-test-" + random.nextInt(1000) + "/");
         Kvin store = new KvinLevelDb(storeDirectory);*/
         try {
-            Files.deleteIfExists(Path.of("./target/test.data.parquet"));
-            Files.deleteIfExists(Path.of("./target/test.mapping.parquet"));
+            // deleting existing files
+            File targetFolder = new File("./target");
+            File[] files = targetFolder.listFiles(new FilenameFilter() {
+                @Override
+                public boolean accept(File file, String name) {
+                    return name.matches("(.*)\\.parquet") || name.matches("(.*)\\.parquet.crc");
+                }
+            });
+            for (File f : files) {
+                f.delete();
+            }
+            Files.deleteIfExists(Path.of("./target/data.mapping.parquet"));
 
             kvinParquet.put(generateRandomKvinTuples(5000000, 500, 10));
 
-            File dataFile = new File("./target/test.data.parquet");
-            File mappingFile = new File("./target/test.mapping.parquet");
-            assertEquals(dataFile.exists(), true);
+            File mappingFile = new File("./target/data.mapping.parquet");
             assertEquals(mappingFile.exists(), true);
 
             /*Iterator<KvinTuple> data = generateRandomKvinTuples(5000000, 500, 500);
