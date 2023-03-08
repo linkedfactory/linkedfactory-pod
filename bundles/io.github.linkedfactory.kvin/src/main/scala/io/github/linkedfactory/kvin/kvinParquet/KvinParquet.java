@@ -30,12 +30,34 @@ import java.io.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.*;
 
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
     int idCounter = 0;
+
+    // data file schema
+    Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
+            .name("id").type().nullable().intType().noDefault()
+            .name("time").type().longType().noDefault()
+            .name("seqNr").type().intType().intDefault(0)
+            .name("value_int").type().nullable().intType().noDefault()
+            .name("value_long").type().nullable().longType().noDefault()
+            .name("value_float").type().nullable().floatType().noDefault()
+            .name("value_double").type().nullable().doubleType().noDefault()
+            .name("value_string").type().nullable().stringType().noDefault()
+            .name("value_bool").type().nullable().intType().noDefault()
+            .name("value_object").type().nullable().bytesType().noDefault().endRecord();
+
+    // mapping file schema
+    Schema mappingSchema = SchemaBuilder.record("Mapping").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
+            .name("id").type().intType().noDefault()
+            .name("item").type().stringType().noDefault()
+            .name("property").type().stringType().noDefault()
+            .name("context").type().stringType().noDefault().endRecord();
 
     @Override
     public boolean addListener(KvinListener listener) {
@@ -62,39 +84,8 @@ public class KvinParquet implements Kvin {
     }
 
     private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
-        Path dataFile = new Path("./target/test.data.parquet");
-        Path mappingFile = new Path("./target/test.mapping.parquet");
-
-        // data file schema
-        Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
-                .name("id").type().nullable().intType().noDefault()
-                .name("time").type().longType().noDefault()
-                .name("seqNr").type().intType().intDefault(0)
-                .name("value_int").type().nullable().intType().noDefault()
-                .name("value_long").type().nullable().longType().noDefault()
-                .name("value_float").type().nullable().floatType().noDefault()
-                .name("value_double").type().nullable().doubleType().noDefault()
-                .name("value_string").type().nullable().stringType().noDefault()
-                .name("value_bool").type().nullable().intType().noDefault()
-                .name("value_object").type().nullable().bytesType().noDefault().endRecord();
-        // mapping file schema
-        Schema mappingSchema = SchemaBuilder.record("Mapping").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
-                .name("id").type().intType().noDefault()
-                .name("item").type().stringType().noDefault()
-                .name("property").type().stringType().noDefault()
-                .name("context").type().stringType().noDefault().endRecord();
-
-        // mapping writer
-        ParquetWriter<Mapping> parquetMappingWriter = AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(mappingFile, new Configuration()))
-                .withSchema(mappingSchema)
-                .withDictionaryEncoding(true)
-                .withCompressionCodec(CompressionCodecName.SNAPPY)
-                .withRowGroupSize(33554432) // 32 MB
-                .withPageSize(1048576) // 1 MB
-                .withDictionaryPageSize(2097152) // 2 MB
-                .withDataModel(ReflectData.get())
-                .build();
         // data writer
+        Path dataFile = new Path("./target/temp.parquet");
         ParquetWriter<KvinTupleInternal> parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
                 .withSchema(kvinTupleSchema)
                 .withDictionaryEncoding(true)
@@ -105,8 +96,44 @@ public class KvinParquet implements Kvin {
                 .withDataModel(ReflectData.get())
                 .build();
 
+        // mapping writer
+        Path mappingFile = new Path("./target/data.mapping.parquet");
+        ParquetWriter<Mapping> parquetMappingWriter = AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(mappingFile, new Configuration()))
+                .withSchema(mappingSchema)
+                .withDictionaryEncoding(true)
+                .withCompressionCodec(CompressionCodecName.SNAPPY)
+                .withRowGroupSize(33554432) // 32 MB
+                .withPageSize(1048576) // 1 MB
+                .withDictionaryPageSize(2097152) // 2 MB
+                .withDataModel(ReflectData.get())
+                .build();
+
+        Long nextChunkTimestamp = null;
+
         for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
+
+            if (nextChunkTimestamp == null) nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
+
+            if (tuple.time >= nextChunkTimestamp) {
+                //renaming existing file with max id
+                renameFile(dataFile, idCounter);
+                parquetDataWriter.close();
+
+                nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
+
+                dataFile = new Path("./target/temp.parquet");
+                parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
+                        .withSchema(kvinTupleSchema)
+                        .withDictionaryEncoding(true)
+                        .withCompressionCodec(CompressionCodecName.SNAPPY)
+                        .withRowGroupSize(33554432) // 32 MB
+                        .withPageSize(1048576) // 1 MB
+                        .withDictionaryPageSize(2097152) // 2 MB
+                        .withDataModel(ReflectData.get())
+                        .build();
+            }
+
             internalTuple.setId(generateId());
             internalTuple.setTime(tuple.time);
             internalTuple.setSeqNr(tuple.seqNr);
@@ -132,8 +159,18 @@ public class KvinParquet implements Kvin {
             parquetMappingWriter.write(mapping);
             parquetDataWriter.write(internalTuple);
         }
+        renameFile(dataFile, idCounter);
         parquetMappingWriter.close();
         parquetDataWriter.close();
+    }
+
+    private long getNextChunkTimestamp(long currentTimestamp) {
+        return currentTimestamp + 604800;
+    }
+
+    private void renameFile(Path file, int newName) throws IOException {
+        java.nio.file.Path currentFile = Paths.get(file.toString());
+        Files.move(currentFile, currentFile.resolveSibling(newName + ".parquet"));
     }
 
     private int generateId() {
