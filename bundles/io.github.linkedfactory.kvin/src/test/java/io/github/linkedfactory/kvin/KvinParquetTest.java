@@ -5,6 +5,8 @@ import io.github.linkedfactory.kvin.leveldb.KvinLevelDb;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import org.apache.commons.io.FileUtils;
+import org.hsqldb.lib.FileUtil;
 import org.junit.Test;
 
 import java.io.File;
@@ -23,21 +25,10 @@ public class KvinParquetTest extends KvinParquetTestBase {
         Kvin store = new KvinLevelDb(storeDirectory);*/
         try {
             // deleting existing files
-            File targetFolder = new File("./target");
-            File[] files = targetFolder.listFiles(new FilenameFilter() {
-                @Override
-                public boolean accept(File file, String name) {
-                    return name.matches("(.*)\\.parquet") || name.matches("(.*)\\.parquet.crc");
-                }
-            });
-            for (File f : files) {
-                f.delete();
-            }
-            Files.deleteIfExists(Path.of("./target/data.mapping.parquet"));
-
+            FileUtils.deleteDirectory(new File("./target/archive"));
             kvinParquet.put(generateRandomKvinTuples(5000000, 500, 10));
 
-            File mappingFile = new File("./target/data.mapping.parquet");
+            File mappingFile = new File("./target/archive/data.mapping.parquet");
             assertEquals(mappingFile.exists(), true);
 
             /*Iterator<KvinTuple> data = generateRandomKvinTuples(5000000, 500, 500);
@@ -55,8 +46,8 @@ public class KvinParquetTest extends KvinParquetTestBase {
     @Test
     public void shouldDoFetch() {
         try {
-            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
-            URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 0 + "/measured-point-1");
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1550);
+            URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 16 + "/measured-point-1");
             long limit = 0;
 
             //IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 1677678374, 1677678274, limit, 100, "avg");
