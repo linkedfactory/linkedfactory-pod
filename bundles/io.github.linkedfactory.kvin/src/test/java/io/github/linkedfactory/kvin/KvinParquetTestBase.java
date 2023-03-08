@@ -22,6 +22,8 @@ public class KvinParquetTestBase {
             int currentPropertyCount = 0;
             boolean isLoopingProperties = false;
             URI currentItem = null;
+            long time = 1678262948L;
+
 
             @Override
             public boolean hasNext() {
@@ -37,6 +39,12 @@ public class KvinParquetTestBase {
                     itemCounter++;
                     propertyCounter = 0;
                     currentItem = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemCounter);
+
+                    // incrementing week after n items
+                    if (itemCounter % 25 == 0 && itemCounter != 0) {
+                        time = time + (604800 * chunkCounter);
+                        chunkCounter++;
+                    }
                 }
 
                 URI property = null;
@@ -49,14 +57,8 @@ public class KvinParquetTestBase {
                 }
                 Object value = generateRandomValue();
                 // adding only int as a value in item with id 2
-                if(itemCounter == 2) {
+                if (itemCounter == 2) {
                     value = getRandomInt(500000);
-                }
-                long time = 1678262948L;
-                // incrementing week on every 50.0000 records
-                if(tupleCount % 1000000 == 0 && tupleCount != 0) {
-                    time = time + (604800 * chunkCounter);
-                    chunkCounter++;
                 }
                 int seqNr = 0;
                 URI context = Kvin.DEFAULT_CONTEXT;

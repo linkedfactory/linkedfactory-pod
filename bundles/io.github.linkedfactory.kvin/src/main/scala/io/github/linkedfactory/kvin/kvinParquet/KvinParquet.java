@@ -37,8 +37,10 @@ import java.util.*;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
+    final int ROW_GROUP_SIZE = 10485760;  // 10 MB
+    final int PAGE_SIZE = 6144; // 6 KB
+    final int DICT_PAGE_SIZE = 5242880; // 5 MB
     int idCounter = 0;
-
     // data file schema
     Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
             .name("id").type().nullable().intType().noDefault()
@@ -85,30 +87,31 @@ public class KvinParquet implements Kvin {
 
     private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
         // data writer
-        Path dataFile = new Path("./target/temp.parquet");
+        Path dataFile = new Path("./target/archive", "temp.parquet");
         ParquetWriter<KvinTupleInternal> parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
                 .withSchema(kvinTupleSchema)
                 .withDictionaryEncoding(true)
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
-                .withRowGroupSize(33554432) // 32 MB
-                .withPageSize(1048576) // 1 MB
-                .withDictionaryPageSize(2097152) // 2 MB
+                .withRowGroupSize(ROW_GROUP_SIZE)
+                .withPageSize(PAGE_SIZE)
+                .withDictionaryPageSize(DICT_PAGE_SIZE)
                 .withDataModel(ReflectData.get())
                 .build();
 
         // mapping writer
-        Path mappingFile = new Path("./target/data.mapping.parquet");
+        Path mappingFile = new Path("./target/archive", "data.mapping.parquet");
         ParquetWriter<Mapping> parquetMappingWriter = AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(mappingFile, new Configuration()))
                 .withSchema(mappingSchema)
                 .withDictionaryEncoding(true)
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
-                .withRowGroupSize(33554432) // 32 MB
-                .withPageSize(1048576) // 1 MB
-                .withDictionaryPageSize(2097152) // 2 MB
+                .withRowGroupSize(ROW_GROUP_SIZE)
+                .withPageSize(PAGE_SIZE)
+                .withDictionaryPageSize(DICT_PAGE_SIZE)
                 .withDataModel(ReflectData.get())
                 .build();
 
         Long nextChunkTimestamp = null;
+        int min = 1;
 
         for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
@@ -117,19 +120,20 @@ public class KvinParquet implements Kvin {
 
             if (tuple.time >= nextChunkTimestamp) {
                 //renaming existing file with max id
-                renameFile(dataFile, idCounter);
+                renameFile(dataFile, min, idCounter);
                 parquetDataWriter.close();
 
+                min = idCounter + 1;
                 nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
 
-                dataFile = new Path("./target/temp.parquet");
+                dataFile = new Path("./target/archive", "temp.parquet");
                 parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
                         .withSchema(kvinTupleSchema)
                         .withDictionaryEncoding(true)
                         .withCompressionCodec(CompressionCodecName.SNAPPY)
-                        .withRowGroupSize(33554432) // 32 MB
-                        .withPageSize(1048576) // 1 MB
-                        .withDictionaryPageSize(2097152) // 2 MB
+                        .withRowGroupSize(ROW_GROUP_SIZE)
+                        .withPageSize(PAGE_SIZE)
+                        .withDictionaryPageSize(DICT_PAGE_SIZE)
                         .withDataModel(ReflectData.get())
                         .build();
             }
@@ -159,7 +163,7 @@ public class KvinParquet implements Kvin {
             parquetMappingWriter.write(mapping);
             parquetDataWriter.write(internalTuple);
         }
-        renameFile(dataFile, idCounter);
+        renameFile(dataFile, min, idCounter);
         parquetMappingWriter.close();
         parquetDataWriter.close();
     }
@@ -168,9 +172,9 @@ public class KvinParquet implements Kvin {
         return currentTimestamp + 604800;
     }
 
-    private void renameFile(Path file, int newName) throws IOException {
+    private void renameFile(Path file, int min, int max) throws IOException {
         java.nio.file.Path currentFile = Paths.get(file.toString());
-        Files.move(currentFile, currentFile.resolveSibling(newName + ".parquet"));
+        Files.move(currentFile, currentFile.resolveSibling(min + "_" + max + "_" + ".parquet"));
     }
 
     private int generateId() {
@@ -179,7 +183,7 @@ public class KvinParquet implements Kvin {
 
     private ArrayList<Mapping> getIdMapping(URI item, URI property, URI context) throws IOException {
         ArrayList<Mapping> mappings = new ArrayList<>();
-        Path file = new Path("./target/test.mapping.parquet");
+        Path file = new Path("./target/archive/data.mapping.parquet");
         FilterPredicate filter = null;
         if (item != null && property != null) {
             filter = and(eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString())), eq(FilterApi.binaryColumn("property"), Binary.fromString(property.toString())));
@@ -294,14 +298,19 @@ public class KvinParquet implements Kvin {
     }
 
     private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
-        Path file = new Path("./target/test.data.parquet");
 
         try {
             // filters
             ArrayList<Mapping> idMappings = getIdMapping(item, property, context);
+
+            if (idMappings.size() == 0) {
+                return NiceIterator.emptyIterator();
+            }
+
             FilterPredicate filter = generateFetchFilter(idMappings);
+            Path dataFile = new Path(getFilePath(idMappings));
             // data reader
-            try (ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(file, new Configuration()))
+            try (ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(dataFile, new Configuration()))
                     .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
                     .withFilter(FilterCompat.get(filter))
                     .build()) {
@@ -395,6 +404,29 @@ public class KvinParquet implements Kvin {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private String getFilePath(ArrayList<Mapping> idMappings) {
+        int id = idMappings.get(0).getId();
+        File folder = new File("./target/archive/");
+        File[] dataFiles = folder.listFiles();
+        File matchedFile = null;
+
+        if (dataFiles != null) {
+            for (File file : dataFiles) {
+                try {
+                    String[] idMinMaxData = file.getName().split("_");
+                    int min = Integer.valueOf(idMinMaxData[0]);
+                    int max = Integer.valueOf(idMinMaxData[1]);
+                    if (id >= min && id <= max) {
+                        matchedFile = file;
+                        break;
+                    }
+                } catch (RuntimeException exception) {
+                }
+            }
+        }
+        return matchedFile.getPath();
     }
 
     @Override
