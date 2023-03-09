@@ -27,12 +27,12 @@ import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.io.api.Binary;
 
 import java.io.*;
-import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.sql.Timestamp;
 import java.util.*;
 
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
@@ -43,6 +43,7 @@ public class KvinParquet implements Kvin {
     final int DICT_PAGE_SIZE = 5242880; // 5 MB
     final int PAGE_ROW_COUNT_LIMIT = 20000;
     int idCounter = 0;
+
     // data file schema
     Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
             .name("id").type().nullable().intType().noDefault()
@@ -89,58 +90,46 @@ public class KvinParquet implements Kvin {
 
     private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
         // data writer
-        Path dataFile = new Path("./target/archive", "temp.parquet");
-        ParquetWriter<KvinTupleInternal> parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
-                .withSchema(kvinTupleSchema)
-                .withDictionaryEncoding(true)
-                .withCompressionCodec(CompressionCodecName.SNAPPY)
-                .withRowGroupSize(ROW_GROUP_SIZE)
-                .withPageSize(PAGE_SIZE)
-                .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
-                .withDictionaryPageSize(DICT_PAGE_SIZE)
-                .withDataModel(ReflectData.get())
-                .build();
+        Path dataFile = null;
+        ParquetWriter<KvinTupleInternal> parquetDataWriter = null;
 
         // mapping writer
-        Path mappingFile = new Path("./target/archive", "data.mapping.parquet");
-        ParquetWriter<Mapping> parquetMappingWriter = AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(mappingFile, new Configuration()))
-                .withSchema(mappingSchema)
-                .withDictionaryEncoding(true)
-                .withCompressionCodec(CompressionCodecName.SNAPPY)
-                .withRowGroupSize(ROW_GROUP_SIZE)
-                .withPageSize(PAGE_SIZE)
-                .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
-                .withDictionaryPageSize(DICT_PAGE_SIZE)
-                .withDataModel(ReflectData.get())
-                .build();
+        Path mappingFile = null;
+        ParquetWriter<Mapping> parquetMappingWriter = null;
 
         Long nextChunkTimestamp = null;
-        int min = 1;
+        Calendar prevDate = null;
+        int fileMin = 1;
+        int folderMin = 1;
 
         for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
 
             if (nextChunkTimestamp == null) nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
+            if (dataFile == null) {
+                dataFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
+                parquetDataWriter = getParquetDataWriter(dataFile);
+            }
+            if (mappingFile == null) {
+                mappingFile = new Path("./target/archive/", "data.mapping.parquet");
+                parquetMappingWriter = getParquetMappingWriter(mappingFile);
+            }
 
             if (tuple.time >= nextChunkTimestamp) {
                 //renaming existing file with max id
-                renameFile(dataFile, min, idCounter);
+                renameFile(dataFile, fileMin, idCounter);
                 parquetDataWriter.close();
 
-                min = idCounter + 1;
+                fileMin = idCounter + 1;
                 nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
 
-                dataFile = new Path("./target/archive", "temp.parquet");
-                parquetDataWriter = AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
-                        .withSchema(kvinTupleSchema)
-                        .withDictionaryEncoding(true)
-                        .withCompressionCodec(CompressionCodecName.SNAPPY)
-                        .withRowGroupSize(ROW_GROUP_SIZE)
-                        .withPageSize(PAGE_SIZE)
-                        .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
-                        .withDictionaryPageSize(DICT_PAGE_SIZE)
-                        .withDataModel(ReflectData.get())
-                        .build();
+                if (prevDate.get(Calendar.YEAR) != getDate(tuple.time).get(Calendar.YEAR)) {
+                    renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
+                    folderMin = idCounter + 1;
+                }
+
+                dataFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
+                parquetDataWriter = getParquetDataWriter(dataFile);
             }
 
             internalTuple.setId(generateId());
@@ -167,10 +156,39 @@ public class KvinParquet implements Kvin {
             // writing mapping and data
             parquetMappingWriter.write(mapping);
             parquetDataWriter.write(internalTuple);
+            prevDate = getDate(tuple.time);
+
         }
-        renameFile(dataFile, min, idCounter);
+        renameFile(dataFile, fileMin, idCounter);
+        renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
         parquetMappingWriter.close();
         parquetDataWriter.close();
+    }
+
+    private ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
+        return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
+                .withSchema(kvinTupleSchema)
+                .withDictionaryEncoding(true)
+                .withCompressionCodec(CompressionCodecName.SNAPPY)
+                .withRowGroupSize(ROW_GROUP_SIZE)
+                .withPageSize(PAGE_SIZE)
+                .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
+                .withDictionaryPageSize(DICT_PAGE_SIZE)
+                .withDataModel(ReflectData.get())
+                .build();
+    }
+
+    private ParquetWriter<Mapping> getParquetMappingWriter(Path dataFile) throws IOException {
+        return AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
+                .withSchema(mappingSchema)
+                .withDictionaryEncoding(true)
+                .withCompressionCodec(CompressionCodecName.SNAPPY)
+                .withRowGroupSize(ROW_GROUP_SIZE)
+                .withPageSize(PAGE_SIZE)
+                .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
+                .withDictionaryPageSize(DICT_PAGE_SIZE)
+                .withDataModel(ReflectData.get())
+                .build();
     }
 
     private long getNextChunkTimestamp(long currentTimestamp) {
@@ -180,6 +198,19 @@ public class KvinParquet implements Kvin {
     private void renameFile(Path file, int min, int max) throws IOException {
         java.nio.file.Path currentFile = Paths.get(file.toString());
         Files.move(currentFile, currentFile.resolveSibling(min + "_" + max + "_" + ".parquet"));
+    }
+
+    private void renameFolder(Path file, int min, int max, int year) throws IOException {
+        java.nio.file.Path currentFolder = Paths.get(file.getParent().toString());
+        Files.move(currentFolder, currentFolder.resolveSibling(min + "_" + max + "_" + year));
+    }
+
+    private Calendar getDate(long timestamp) {
+        Timestamp ts = new Timestamp(timestamp * 1000);
+        Date date = new java.sql.Date(ts.getTime());
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(date);
+        return calendar;
     }
 
     private int generateId() {
@@ -430,21 +461,31 @@ public class KvinParquet implements Kvin {
 
     private ArrayList<Path> getFilePath(ArrayList<Mapping> idMappings) {
 
-        File folder = new File("./target/archive/");
-        File[] files = folder.listFiles();
+        File archiveFolder = new File("./target/archive");
+        File[] yearWiseFolders = archiveFolder.listFiles();
         ArrayList<Path> matchedFiles = new ArrayList<>();
 
-        if (files != null) {
+        if (yearWiseFolders != null) {
             for (Mapping mapping : idMappings) {
-                for (File file : files) {
+                for (File folder : yearWiseFolders) {
                     try {
-                        String[] idMinMaxData = file.getName().split("_");
-                        int min = Integer.valueOf(idMinMaxData[0]);
-                        int max = Integer.valueOf(idMinMaxData[1]);
-                        if (mapping.getId() >= min && mapping.getId() <= max) {
-                            Path path = new Path(file.getPath());
-                            if (!matchedFiles.contains(path)) matchedFiles.add(path);
-                            break;
+                        String[] FolderIdMinMaxData = folder.getName().split("_");
+                        int folderMin = Integer.valueOf(FolderIdMinMaxData[0]);
+                        int folderMax = Integer.valueOf(FolderIdMinMaxData[1]);
+                        if (mapping.getId() >= folderMin && mapping.getId() <= folderMax) {
+                            for (File file : new File(folder.getPath()).listFiles()) {
+                                try {
+                                    String[] fileIdMinMaxData = file.getName().split("_");
+                                    int fileMin = Integer.valueOf(fileIdMinMaxData[0]);
+                                    int fileMax = Integer.valueOf(fileIdMinMaxData[1]);
+                                    if (mapping.getId() >= fileMin && mapping.getId() <= fileMax) {
+                                        Path path = new Path(file.getPath());
+                                        if (!matchedFiles.contains(path)) matchedFiles.add(path);
+                                        break;
+                                    }
+                                } catch (RuntimeException exception) {
+                                }
+                            }
                         }
                     } catch (RuntimeException exception) {
                     }
