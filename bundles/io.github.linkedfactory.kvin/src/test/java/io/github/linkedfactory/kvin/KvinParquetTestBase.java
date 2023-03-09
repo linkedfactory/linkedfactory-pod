@@ -46,7 +46,7 @@ public class KvinParquetTestBase {
                     currentItem = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemCounter);
 
                     // incrementing week after n items
-                    if (itemCounter % 50 == 0 && itemCounter != 0) {
+                    if (itemCounter % 25 == 0 && itemCounter != 0) {
                         time = time + (604800 * chunkCounter);
                         chunkCounter++;
                     }
@@ -54,10 +54,10 @@ public class KvinParquetTestBase {
 
                 URI property = null;
                 // adding multiple property to the same item
-                if (itemCounter == 2 && samePropCounter < 10) {
+                if (itemCounter == 2 && samePropCounter < 20) {
                     property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propertyCounter + "/measured-point-1");
                     samePropCounter++;
-                    if (samePropCounter == 5) {
+                    if (samePropCounter == 10 || samePropCounter == 20) {
                         time = time + (604800 * chunkCounter);
                         chunkCounter++;
                     }

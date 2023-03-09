@@ -352,6 +352,10 @@ public class KvinParquet implements Kvin {
 
                     if (internalTuple == null && readerCount >= readers.size() - 1) {
                         return false;
+                    } else if (internalTuple == null && readerCount <= readers.size() - 1 && itemPropertyCount.get(currentProperty) >= limit && limit != 0) {
+                        readerCount++;
+                        reader = readers.get(readerCount);
+                        return hasNext();
                     } else if (internalTuple == null && readerCount <= readers.size() - 1) {
                         readerCount++;
                         reader = readers.get(readerCount);
