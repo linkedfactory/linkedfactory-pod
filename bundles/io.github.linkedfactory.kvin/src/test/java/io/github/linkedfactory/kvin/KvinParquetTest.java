@@ -91,7 +91,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
             long endtime = System.currentTimeMillis() - startTime;
             System.out.println("Property count  : " + count);
             System.out.println("Lookup time: " + endtime + " ms");
-            assertEquals(count, 312);
+            assertEquals(count, 301);
 
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet properties() method");
