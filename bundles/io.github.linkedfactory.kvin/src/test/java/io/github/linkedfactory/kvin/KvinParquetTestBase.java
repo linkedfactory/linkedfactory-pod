@@ -9,8 +9,13 @@ import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class KvinParquetTestBase {
-    final int seed = 200;
-    Random random = new Random(seed);
+    final long seed = 200L;
+    private Random random;
+
+    public KvinParquetTestBase() {
+        random = new Random();
+        random.setSeed(seed);
+    }
 
     public NiceIterator<KvinTuple> generateRandomKvinTuples(int sampleSize, int itemPool, int propertyPool) {
         NiceIterator<KvinTuple> iterator = new NiceIterator<>() {
@@ -41,7 +46,7 @@ public class KvinParquetTestBase {
                     currentItem = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemCounter);
 
                     // incrementing week after n items
-                    if (itemCounter % 25 == 0 && itemCounter != 0) {
+                    if (itemCounter % 50 == 0 && itemCounter != 0) {
                         time = time + (604800 * chunkCounter);
                         chunkCounter++;
                     }
@@ -52,6 +57,10 @@ public class KvinParquetTestBase {
                 if (itemCounter == 2 && samePropCounter < 10) {
                     property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propertyCounter + "/measured-point-1");
                     samePropCounter++;
+                    if (samePropCounter == 5) {
+                        time = time + (604800 * chunkCounter);
+                        chunkCounter++;
+                    }
                 } else {
                     property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + ++propertyCounter + "/measured-point-1");
                 }

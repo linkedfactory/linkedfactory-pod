@@ -46,8 +46,8 @@ public class KvinParquetTest extends KvinParquetTestBase {
     @Test
     public void shouldDoFetch() {
         try {
-            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1550);
-            URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 16 + "/measured-point-1");
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
+            URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 0 + "/measured-point-1");
             long limit = 0;
 
             //IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 1677678374, 1677678274, limit, 100, "avg");
@@ -76,7 +76,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
     @Test
     public void shouldFetchProperties() {
         try {
-            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1550);
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
 
             IExtendedIterator<URI> properties = kvinParquet.properties(item);
 
@@ -85,13 +85,13 @@ public class KvinParquetTest extends KvinParquetTestBase {
             long startTime = System.currentTimeMillis();
             while (properties.hasNext()) {
                 URI p = properties.next();
-                System.out.println(p.toString());
+                //System.out.println(p.toString());
                 count++;
             }
             long endtime = System.currentTimeMillis() - startTime;
             System.out.println("Property count  : " + count);
             System.out.println("Lookup time: " + endtime + " ms");
-            assertEquals(count, 450);
+            assertEquals(count, 312);
 
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet properties() method");
