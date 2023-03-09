@@ -118,6 +118,7 @@ public class KvinHttp implements Kvin {
             );
             httpPost.setEntity(requestPayload);
             CloseableHttpResponse response = httpClient.execute(httpPost);
+            HttpEntity entity = response.getEntity();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
