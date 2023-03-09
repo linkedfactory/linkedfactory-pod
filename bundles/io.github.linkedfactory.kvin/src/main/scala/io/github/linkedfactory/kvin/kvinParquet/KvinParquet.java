@@ -27,6 +27,7 @@ import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.io.api.Binary;
 
 import java.io.*;
+import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -37,9 +38,10 @@ import java.util.*;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
-    final int ROW_GROUP_SIZE = 10485760;  // 10 MB
+    final int ROW_GROUP_SIZE = 8388608;  // 8 MB
     final int PAGE_SIZE = 6144; // 6 KB
     final int DICT_PAGE_SIZE = 5242880; // 5 MB
+    final int PAGE_ROW_COUNT_LIMIT = 20000;
     int idCounter = 0;
     // data file schema
     Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
@@ -94,6 +96,7 @@ public class KvinParquet implements Kvin {
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
                 .withRowGroupSize(ROW_GROUP_SIZE)
                 .withPageSize(PAGE_SIZE)
+                .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
                 .withDictionaryPageSize(DICT_PAGE_SIZE)
                 .withDataModel(ReflectData.get())
                 .build();
@@ -106,6 +109,7 @@ public class KvinParquet implements Kvin {
                 .withCompressionCodec(CompressionCodecName.SNAPPY)
                 .withRowGroupSize(ROW_GROUP_SIZE)
                 .withPageSize(PAGE_SIZE)
+                .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
                 .withDictionaryPageSize(DICT_PAGE_SIZE)
                 .withDataModel(ReflectData.get())
                 .build();
@@ -133,6 +137,7 @@ public class KvinParquet implements Kvin {
                         .withCompressionCodec(CompressionCodecName.SNAPPY)
                         .withRowGroupSize(ROW_GROUP_SIZE)
                         .withPageSize(PAGE_SIZE)
+                        .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
                         .withDictionaryPageSize(DICT_PAGE_SIZE)
                         .withDataModel(ReflectData.get())
                         .build();
@@ -308,125 +313,141 @@ public class KvinParquet implements Kvin {
             }
 
             FilterPredicate filter = generateFetchFilter(idMappings);
-            Path dataFile = new Path(getFilePath(idMappings));
+            ArrayList<Path> dataFiles = getFilePath(idMappings);
+            ArrayList<ParquetReader<KvinTupleInternal>> readers = new ArrayList<>();
             // data reader
-            try (ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(dataFile, new Configuration()))
-                    .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
-                    .withFilter(FilterCompat.get(filter))
-                    .build()) {
+            for (Path path : dataFiles) {
+                readers.add(AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(path, new Configuration()))
+                        .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
+                        .withFilter(FilterCompat.get(filter))
+                        .build());
+            }
+            return new NiceIterator<>() {
+                KvinTupleInternal internalTuple;
+                ParquetReader<KvinTupleInternal> reader = readers.get(0);
+                HashMap<String, Integer> itemPropertyCount = new HashMap<>();
+                int propertyCount = 0, readerCount = 0;
+                String currentProperty, previousProperty;
 
-                return new NiceIterator<>() {
-                    KvinTupleInternal internalTuple;
-                    HashMap<String, Integer> itemPropertyCount = new HashMap<>();
-                    int propertyCount = 0;
-                    String currentProperty, previousProperty;
+                @Override
+                public boolean hasNext() {
+                    try {
+                        if (itemPropertyCount.size() > 0) {
+                            if (itemPropertyCount.get(currentProperty) >= limit && limit != 0) {
+                                currentProperty = idMappings.get(propertyCount).getProperty();
+                                previousProperty = currentProperty;
 
-                    @Override
-                    public boolean hasNext() {
-                        try {
-                            if (itemPropertyCount.size() > 0) {
-                                if (itemPropertyCount.get(currentProperty) >= limit && limit != 0) {
-                                    currentProperty = idMappings.get(propertyCount).getProperty();
-                                    previousProperty = currentProperty;
-
-                                    while ((internalTuple = reader.read()) != null && propertyCount < idMappings.size() - 1) {
-                                        propertyCount++;
-                                        if (!previousProperty.equals(idMappings.get(propertyCount).getProperty())) {
-                                            break;
-                                        }
+                                while ((internalTuple = reader.read()) != null && propertyCount < idMappings.size() - 1) {
+                                    propertyCount++;
+                                    if (!previousProperty.equals(idMappings.get(propertyCount).getProperty())) {
+                                        break;
                                     }
                                 }
                             }
+                        }
+                        internalTuple = reader.read();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+
+                    if (internalTuple == null && readerCount >= readers.size() - 1) {
+                        return false;
+                    } else if (internalTuple == null && readerCount <= readers.size() - 1) {
+                        readerCount++;
+                        reader = readers.get(readerCount);
+                        try {
                             internalTuple = reader.read();
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
+                    }
+                    return true;
+                }
 
-                        return internalTuple != null;
+                @Override
+                public KvinTuple next() {
+                    if (internalTuple != null) {
+                        KvinTuple tuple = internalTupleToKvinTuple(internalTuple);
+                        propertyCount++;
+                        return tuple;
+                    } else {
+                        return null;
+                    }
+                }
+
+                private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) {
+                    Object value = null;
+                    if (internalTuple.value_int != null) {
+                        value = internalTuple.value_int;
+                    } else if (internalTuple.value_long != null) {
+                        value = internalTuple.value_long;
+                    } else if (internalTuple.value_float != null) {
+                        value = internalTuple.value_float;
+                    } else if (internalTuple.value_double != null) {
+                        value = internalTuple.value_double;
+                    } else if (internalTuple.value_string != null) {
+                        value = internalTuple.value_string;
+                    } else if (internalTuple.value_bool != null) {
+                        value = internalTuple.value_bool == 1;
+                    } else if (internalTuple.value_object != null) {
+                        value = decodeRecord(internalTuple.value_object);
                     }
 
-                    @Override
-                    public KvinTuple next() {
-                        if (internalTuple != null) {
-                            KvinTuple tuple = internalTupleToKvinTuple(internalTuple);
-                            propertyCount++;
-                            return tuple;
-                        } else {
-                            return null;
-                        }
+                    if (currentProperty == null) {
+                        currentProperty = idMappings.get(propertyCount).getProperty();
+                        previousProperty = currentProperty;
+                    } else if (!idMappings.get(propertyCount).getProperty().equals(previousProperty)) {
+                        currentProperty = idMappings.get(propertyCount).getProperty();
+                        previousProperty = idMappings.get(propertyCount).getProperty();
+                        itemPropertyCount.clear();
                     }
 
-                    private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) {
-                        Object value = null;
-                        if (internalTuple.value_int != null) {
-                            value = internalTuple.value_int;
-                        } else if (internalTuple.value_long != null) {
-                            value = internalTuple.value_long;
-                        } else if (internalTuple.value_float != null) {
-                            value = internalTuple.value_float;
-                        } else if (internalTuple.value_double != null) {
-                            value = internalTuple.value_double;
-                        } else if (internalTuple.value_string != null) {
-                            value = internalTuple.value_string;
-                        } else if (internalTuple.value_bool != null) {
-                            value = internalTuple.value_bool == 1;
-                        } else if (internalTuple.value_object != null) {
-                            value = decodeRecord(internalTuple.value_object);
-                        }
-
-                        if (currentProperty == null) {
-                            currentProperty = idMappings.get(propertyCount).getProperty();
-                            previousProperty = currentProperty;
-                        } else if (!idMappings.get(propertyCount).getProperty().equals(previousProperty)) {
-                            currentProperty = idMappings.get(propertyCount).getProperty();
-                            previousProperty = idMappings.get(propertyCount).getProperty();
-                            itemPropertyCount.clear();
-                        }
-
-                        if (itemPropertyCount.containsKey(idMappings.get(propertyCount).getProperty())) {
-                            String property = idMappings.get(propertyCount).getProperty();
-                            Integer count = itemPropertyCount.get(property) + 1;
-                            itemPropertyCount.put(property, count);
-                        } else {
-                            itemPropertyCount.put(idMappings.get(propertyCount).getProperty(), 1);
-                        }
-
-                        return new KvinTuple(URIs.createURI(idMappings.get(propertyCount).getItem()), URIs.createURI(idMappings.get(propertyCount).getProperty()), URIs.createURI(idMappings.get(propertyCount).getContext()), internalTuple.time, internalTuple.seqNr, value);
-
+                    if (itemPropertyCount.containsKey(idMappings.get(propertyCount).getProperty())) {
+                        String property = idMappings.get(propertyCount).getProperty();
+                        Integer count = itemPropertyCount.get(property) + 1;
+                        itemPropertyCount.put(property, count);
+                    } else {
+                        itemPropertyCount.put(idMappings.get(propertyCount).getProperty(), 1);
                     }
 
-                    @Override
-                    public void close() {
-                        super.close();
-                    }
-                };
-            }
+                    return new KvinTuple(URIs.createURI(idMappings.get(propertyCount).getItem()), URIs.createURI(idMappings.get(propertyCount).getProperty()), URIs.createURI(idMappings.get(propertyCount).getContext()), internalTuple.time, internalTuple.seqNr, value);
+
+                }
+
+                @Override
+                public void close() {
+                    super.close();
+                }
+            };
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private String getFilePath(ArrayList<Mapping> idMappings) {
-        int id = idMappings.get(0).getId();
-        File folder = new File("./target/archive/");
-        File[] dataFiles = folder.listFiles();
-        File matchedFile = null;
+    private ArrayList<Path> getFilePath(ArrayList<Mapping> idMappings) {
 
-        if (dataFiles != null) {
-            for (File file : dataFiles) {
-                try {
-                    String[] idMinMaxData = file.getName().split("_");
-                    int min = Integer.valueOf(idMinMaxData[0]);
-                    int max = Integer.valueOf(idMinMaxData[1]);
-                    if (id >= min && id <= max) {
-                        matchedFile = file;
-                        break;
+        File folder = new File("./target/archive/");
+        File[] files = folder.listFiles();
+        ArrayList<Path> matchedFiles = new ArrayList<>();
+
+        if (files != null) {
+            for (Mapping mapping : idMappings) {
+                for (File file : files) {
+                    try {
+                        String[] idMinMaxData = file.getName().split("_");
+                        int min = Integer.valueOf(idMinMaxData[0]);
+                        int max = Integer.valueOf(idMinMaxData[1]);
+                        if (mapping.getId() >= min && mapping.getId() <= max) {
+                            Path path = new Path(file.getPath());
+                            if (!matchedFiles.contains(path)) matchedFiles.add(path);
+                            break;
+                        }
+                    } catch (RuntimeException exception) {
                     }
-                } catch (RuntimeException exception) {
                 }
             }
         }
-        return matchedFile.getPath();
+        return matchedFiles;
     }
 
     @Override
@@ -452,50 +473,63 @@ public class KvinParquet implements Kvin {
     @Override
     public IExtendedIterator<URI> properties(URI item) {
 
-
         try {
             // filters
             ArrayList<Mapping> idMappings = getIdMapping(item, null, null);
             FilterPredicate filter = generateFilterPredicates(idMappings, 0);
-            Path file = new Path(getFilePath(idMappings));
+            ArrayList<Path> dataFiles = getFilePath(idMappings);
+            ArrayList<ParquetReader<KvinTupleInternal>> readers = new ArrayList<>();
 
             // data reader
-            try (ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(file, new Configuration()))
-                    .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
-                    .withFilter(FilterCompat.get(filter))
-                    .build()) {
-
-                return new NiceIterator<>() {
-                    KvinTupleInternal internalTuple;
-                    int propertyCount = 0;
-
-                    @Override
-                    public boolean hasNext() {
-                        try {
-                            internalTuple = reader.read();
-                            return internalTuple != null;
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-
-                    @Override
-                    public URI next() {
-                        URI property = getKvinTupleProperty();
-                        propertyCount++;
-                        return property;
-                    }
-
-                    private URI getKvinTupleProperty() {
-                        return URIs.createURI(idMappings.get(propertyCount).getProperty());
-                    }
-
-                    @Override
-                    public void close() {
-                        super.close();
-                    }
-                };
+            for (Path path : dataFiles) {
+                readers.add(AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(path, new Configuration()))
+                        .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
+                        .withFilter(FilterCompat.get(filter))
+                        .build());
             }
+
+            return new NiceIterator<>() {
+                KvinTupleInternal internalTuple;
+                ParquetReader<KvinTupleInternal> reader = readers.get(0);
+                int propertyCount = 0, readerCount = 0;
+
+                @Override
+                public boolean hasNext() {
+                    try {
+                        internalTuple = reader.read();
+                        if (internalTuple == null && readerCount >= readers.size() - 1) {
+                            return false;
+                        } else if (internalTuple == null && readerCount <= readers.size() - 1) {
+                            readerCount++;
+                            reader = readers.get(readerCount);
+                            try {
+                                internalTuple = reader.read();
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                    return true;
+                }
+
+                @Override
+                public URI next() {
+                    URI property = getKvinTupleProperty();
+                    propertyCount++;
+                    return property;
+                }
+
+                private URI getKvinTupleProperty() {
+                    return URIs.createURI(idMappings.get(propertyCount).getProperty());
+                }
+
+                @Override
+                public void close() {
+                    super.close();
+                }
+            };
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
