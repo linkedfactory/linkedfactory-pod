@@ -26,7 +26,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
         try {
             // deleting existing files
             FileUtils.deleteDirectory(new File("./target/archive"));
-            kvinParquet.put(generateRandomKvinTuples(5000000, 500, 10));
+            kvinParquet.put(generateRandomKvinTuples(100000000, 500, 10));
 
             File mappingFile = new File("./target/archive/data.mapping.parquet");
             assertEquals(mappingFile.exists(), true);
@@ -46,8 +46,8 @@ public class KvinParquetTest extends KvinParquetTestBase {
     @Test
     public void shouldDoFetch() {
         try {
-            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
-            URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 0 + "/measured-point-1");
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 20000);
+            URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 15 + "/measured-point-1");
             long limit = 0;
 
             //IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 1677678374, 1677678274, limit, 100, "avg");
@@ -76,7 +76,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
     @Test
     public void shouldFetchProperties() {
         try {
-            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 30000);
 
             IExtendedIterator<URI> properties = kvinParquet.properties(item);
 

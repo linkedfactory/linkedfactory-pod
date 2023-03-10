@@ -46,7 +46,7 @@ public class KvinParquetTestBase {
                     currentItem = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemCounter);
 
                     // incrementing week after n items
-                    if (itemCounter % 2000 == 0 && itemCounter != 0) {
+                    if (itemCounter % 50000 == 0 && itemCounter != 0) {
                         time = time + (604800 * chunkCounter);
                         chunkCounter++;
                     }
