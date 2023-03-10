@@ -38,7 +38,7 @@ import java.util.*;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
-    final int ROW_GROUP_SIZE = 8388608;  // 8 MB
+    final int ROW_GROUP_SIZE = 5242880;  // 5 MB
     final int PAGE_SIZE = 8192; // 8 KB
     final int DICT_PAGE_SIZE = 3145728; // 3 MB
     final int PAGE_ROW_COUNT_LIMIT = 20000;
@@ -111,12 +111,12 @@ public class KvinParquet implements Kvin {
                 parquetDataWriter = getParquetDataWriter(dataFile);
             }
             if (mappingFile == null) {
-                mappingFile = new Path("./target/archive/", "data.mapping.parquet");
+                mappingFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "data.mapping.parquet");
                 parquetMappingWriter = getParquetMappingWriter(mappingFile);
             }
 
             if (tuple.time >= nextChunkTimestamp) {
-                //renaming existing file with max id
+                //renaming existing data file with max id
                 renameFile(dataFile, fileMin, idCounter);
                 parquetDataWriter.close();
 
@@ -126,6 +126,10 @@ public class KvinParquet implements Kvin {
                 if (prevDate.get(Calendar.YEAR) != getDate(tuple.time).get(Calendar.YEAR)) {
                     renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
                     folderMin = idCounter + 1;
+
+                    parquetMappingWriter.close();
+                    mappingFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "data.mapping.parquet");
+                    parquetMappingWriter = getParquetMappingWriter(mappingFile);
                 }
 
                 dataFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
@@ -225,23 +229,40 @@ public class KvinParquet implements Kvin {
 
     private ArrayList<Mapping> getIdMapping(URI item, URI property, URI context) throws IOException {
         ArrayList<Mapping> mappings = new ArrayList<>();
-        Path file = new Path("./target/archive/data.mapping.parquet");
-        FilterPredicate filter = null;
-        if (item != null && property != null) {
-            filter = and(eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString())), eq(FilterApi.binaryColumn("property"), Binary.fromString(property.toString())));
-        } else if (item != null) {
-            filter = eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString()));
-        }
-        try (ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(file, new Configuration()))
-                .withDataModel(new ReflectData(Mapping.class.getClassLoader()))
-                .withFilter(FilterCompat.get(filter))
-                .build()) {
+        File[] folders = new File("./target/archive/").listFiles();
+        Arrays.sort(folders, (file1, file2) -> {
+            Integer firstFileYear = Integer.valueOf(file1.getName().split("_")[2]);
+            Integer secondFileYear = Integer.valueOf(file2.getName().split("_")[2]);
+            return firstFileYear.compareTo(secondFileYear);
+        });
+        int prevMappingCount = 0;
+        boolean checkForOverlappingRead = false;
 
-            Mapping mapping;
-            while ((mapping = reader.read()) != null) {
-                mappings.add(mapping);
+        for (File folder : folders) {
+            Path mappingFile = new Path(folder.getPath() + "/data.mapping.parquet");
+            FilterPredicate filter = null;
+            int currentMappingCount = 0;
+            if (item != null && property != null) {
+                filter = and(eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString())), eq(FilterApi.binaryColumn("property"), Binary.fromString(property.toString())));
+            } else if (item != null) {
+                filter = eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString()));
+            }
+            try (ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(mappingFile, new Configuration()))
+                    .withDataModel(new ReflectData(Mapping.class.getClassLoader()))
+                    .withFilter(FilterCompat.get(filter))
+                    .build()) {
+
+                Mapping mapping;
+                while ((mapping = reader.read()) != null) {
+                    currentMappingCount++;
+                    mappings.add(mapping);
+                }
+                if (currentMappingCount > 0) checkForOverlappingRead = true;
+                if (prevMappingCount == 0 && currentMappingCount == 0 && checkForOverlappingRead) break;
+                prevMappingCount = currentMappingCount;
             }
         }
+
         return mappings;
     }
 
