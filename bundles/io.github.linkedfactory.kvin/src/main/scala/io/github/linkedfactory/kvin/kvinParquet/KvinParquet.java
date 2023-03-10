@@ -41,7 +41,7 @@ public class KvinParquet implements Kvin {
     final int ROW_GROUP_SIZE = 5242880;  // 5 MB
     final int PAGE_SIZE = 8192; // 8 KB
     final int DICT_PAGE_SIZE = 3145728; // 3 MB
-    final int PAGE_ROW_COUNT_LIMIT = 20000;
+    final int PAGE_ROW_COUNT_LIMIT = 30000;
     int idCounter = 0;
 
     // data file schema

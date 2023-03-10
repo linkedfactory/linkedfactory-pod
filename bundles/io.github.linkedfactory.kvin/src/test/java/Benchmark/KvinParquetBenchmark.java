@@ -1,51 +1,35 @@
-package io.github.linkedfactory.kvin;
+package Benchmark;
 
+import io.github.linkedfactory.kvin.Kvin;
+import io.github.linkedfactory.kvin.KvinParquetTestBase;
+import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.kvinParquet.KvinParquet;
-import io.github.linkedfactory.kvin.leveldb.KvinLevelDb;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
-import org.hsqldb.lib.FileUtil;
-import org.junit.Test;
+import org.junit.Assert;
+import org.openjdk.jmh.annotations.*;
 
 import java.io.File;
-import java.io.FilenameFilter;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.*;
 
-public class KvinParquetTest extends KvinParquetTestBase {
+@State(Scope.Benchmark)
+@Fork(value = 1)
+@Warmup(iterations = 3, time = 10, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 3, time = 10, timeUnit = TimeUnit.MILLISECONDS)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
+public class KvinParquetBenchmark {
     Kvin kvinParquet = new KvinParquet();
-
-    @Test
-    public void shouldDoSimplePut() {
-        /*File storeDirectory = new File("/tmp/leveldb-test-" + random.nextInt(1000) + "/");
-        Kvin store = new KvinLevelDb(storeDirectory);*/
-        try {
-            // deleting existing files
-            FileUtils.deleteDirectory(new File("./target/archive"));
-            kvinParquet.put(generateRandomKvinTuples(100000000, 500, 10));
-
-            /*Iterator<KvinTuple> data = generateRandomKvinTuples(5000000, 500, 500);
-            while(data.hasNext()) {
-                store.put(data.next());
-            }*/
-
-        } catch (Exception e) {
-            fail("Something went wrong while testing KvinParquet put() method");
-        } finally {
-            //store.close();
-        }
-    }
-
-    @Test
+    @Benchmark
     public void shouldDoFetch() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 50000);
             URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 5 + "/measured-point-1");
             long limit = 0;
+            long startTime = System.currentTimeMillis();
 
             //IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 1677678374, 1677678274, limit, 100, "avg");
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
@@ -53,31 +37,29 @@ public class KvinParquetTest extends KvinParquetTestBase {
             /*KvinLevelDb store = new KvinLevelDb(new File("/tmp/leveldb-test-329"));
             IExtendedIterator<KvinTuple> tuples = store.fetch(item, property, null, limit);*/
 
-            assertNotNull(tuples);
+            Assert.assertNotNull(tuples);
             int count = 0;
-            long startTime = System.currentTimeMillis();
             while (tuples.hasNext()) {
                 KvinTuple t = tuples.next();
-                System.out.println(t.toString());
+                //System.out.println(t.toString());
                 count++;
             }
             long endtime = System.currentTimeMillis() - startTime;
-            System.out.println("Record count  : " + count);
+            //System.out.println("Record count  : " + count);
             System.out.println("Lookup time: " + endtime + " ms");
 
         } catch (Exception e) {
-            fail("Something went wrong while testing KvinParquet fetch() method");
+            Assert.fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
 
-    @Test
     public void shouldFetchProperties() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 30000);
 
             IExtendedIterator<URI> properties = kvinParquet.properties(item);
 
-            assertNotNull(properties);
+            Assert.assertNotNull(properties);
             int count = 0;
             long startTime = System.currentTimeMillis();
             while (properties.hasNext()) {
@@ -91,7 +73,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
             //assertEquals(count, 414);
 
         } catch (Exception e) {
-            fail("Something went wrong while testing KvinParquet properties() method");
+            Assert.fail("Something went wrong while testing KvinParquet properties() method");
         }
     }
 }
