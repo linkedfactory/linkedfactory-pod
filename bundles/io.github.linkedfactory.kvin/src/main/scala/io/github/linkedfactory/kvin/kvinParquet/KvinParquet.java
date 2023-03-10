@@ -39,8 +39,8 @@ import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
     final int ROW_GROUP_SIZE = 8388608;  // 8 MB
-    final int PAGE_SIZE = 6144; // 6 KB
-    final int DICT_PAGE_SIZE = 5242880; // 5 MB
+    final int PAGE_SIZE = 8192; // 8 KB
+    final int DICT_PAGE_SIZE = 3145728; // 3 MB
     final int PAGE_ROW_COUNT_LIMIT = 20000;
     int idCounter = 0;
 
@@ -166,10 +166,13 @@ public class KvinParquet implements Kvin {
     }
 
     private ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
+        Configuration writerConf = new Configuration();
+        writerConf.setInt("parquet.zstd.compressionLevel", 12);
         return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
                 .withSchema(kvinTupleSchema)
+                .withConf(writerConf)
                 .withDictionaryEncoding(true)
-                .withCompressionCodec(CompressionCodecName.SNAPPY)
+                .withCompressionCodec(CompressionCodecName.ZSTD)
                 .withRowGroupSize(ROW_GROUP_SIZE)
                 .withPageSize(PAGE_SIZE)
                 .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
@@ -179,10 +182,13 @@ public class KvinParquet implements Kvin {
     }
 
     private ParquetWriter<Mapping> getParquetMappingWriter(Path dataFile) throws IOException {
+        Configuration writerConf = new Configuration();
+        writerConf.setInt("parquet.zstd.compressionLevel", 12);
         return AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
                 .withSchema(mappingSchema)
+                .withConf(writerConf)
                 .withDictionaryEncoding(true)
-                .withCompressionCodec(CompressionCodecName.SNAPPY)
+                .withCompressionCodec(CompressionCodecName.ZSTD)
                 .withRowGroupSize(ROW_GROUP_SIZE)
                 .withPageSize(PAGE_SIZE)
                 .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
