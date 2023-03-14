@@ -1,4 +1,4 @@
-package Benchmark;
+package io.github.linkedfactory.kvin.Benchmark;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinParquetTestBase;
@@ -14,28 +14,43 @@ import org.openjdk.jmh.annotations.*;
 import java.io.File;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.Assert.fail;
+
 
 @State(Scope.Benchmark)
 @Fork(value = 1)
-@Warmup(iterations = 3, time = 10, timeUnit = TimeUnit.MILLISECONDS)
-@Measurement(iterations = 3, time = 10, timeUnit = TimeUnit.MILLISECONDS)
+@Warmup(iterations = 3, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 1, time = 500, timeUnit = TimeUnit.MILLISECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
-public class KvinParquetBenchmark {
+public class KvinParquetBenchmark extends KvinParquetTestBase {
     Kvin kvinParquet = new KvinParquet();
-    @Benchmark
-    public void shouldDoFetch() {
+    @Param({"10000", "12000", "14000", "22000", "28000", "36000", "42000", "50000"})
+    private int itemIds;
+
+    // run this method to add benchmark data
+    public void benchmarkWriteOperation() {
+
         try {
-            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 50000);
+            // deleting existing files
+            FileUtils.deleteDirectory(new File("./target/archive"));
+            kvinParquet.put(generateRandomKvinTuples(100000000, 500, 10));
+
+        } catch (Exception e) {
+            fail("Something went wrong while testing KvinParquet put() method");
+        }
+    }
+
+    @Benchmark
+    public void benchmarkSingleTupleRead() {
+        try {
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemIds);
             URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 5 + "/measured-point-1");
             long limit = 0;
             long startTime = System.currentTimeMillis();
 
             //IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 1677678374, 1677678274, limit, 100, "avg");
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
-
-            /*KvinLevelDb store = new KvinLevelDb(new File("/tmp/leveldb-test-329"));
-            IExtendedIterator<KvinTuple> tuples = store.fetch(item, property, null, limit);*/
 
             Assert.assertNotNull(tuples);
             int count = 0;
@@ -46,16 +61,17 @@ public class KvinParquetBenchmark {
             }
             long endtime = System.currentTimeMillis() - startTime;
             //System.out.println("Record count  : " + count);
-            System.out.println("Lookup time: " + endtime + " ms");
+            //System.out.println("Lookup time: " + endtime + " ms");
 
         } catch (Exception e) {
             Assert.fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
 
-    public void shouldFetchProperties() {
+    @Benchmark
+    public void benchmarkPropertiesRead() {
         try {
-            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 30000);
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemIds);
 
             IExtendedIterator<URI> properties = kvinParquet.properties(item);
 
@@ -68,8 +84,8 @@ public class KvinParquetBenchmark {
                 count++;
             }
             long endtime = System.currentTimeMillis() - startTime;
-            System.out.println("Property count  : " + count);
-            System.out.println("Lookup time: " + endtime + " ms");
+            //System.out.println("Property count  : " + count);
+            //System.out.println("Lookup time: " + endtime + " ms");
             //assertEquals(count, 414);
 
         } catch (Exception e) {

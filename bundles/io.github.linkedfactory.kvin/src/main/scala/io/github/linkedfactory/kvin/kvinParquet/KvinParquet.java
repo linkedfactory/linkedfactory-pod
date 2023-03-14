@@ -548,6 +548,9 @@ public class KvinParquet implements Kvin {
         try {
             // filters
             ArrayList<Mapping> idMappings = getIdMapping(item, null, null);
+            if (idMappings.size() == 0) {
+                return NiceIterator.emptyIterator();
+            }
             FilterPredicate filter = generateFilterPredicates(idMappings, 0);
             ArrayList<Path> dataFiles = getFilePath(idMappings);
             ArrayList<ParquetReader<KvinTupleInternal>> readers = new ArrayList<>();
