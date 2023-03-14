@@ -38,10 +38,14 @@ import java.util.*;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
+    // parquet file writer config
     final int ROW_GROUP_SIZE = 5242880;  // 5 MB
     final int PAGE_SIZE = 8192; // 8 KB
     final int DICT_PAGE_SIZE = 3145728; // 3 MB
     final int PAGE_ROW_COUNT_LIMIT = 30000;
+    final int ZSTD_COMPRESSION_LEVEL = 12; // 1 - 22
+
+    // global id counter
     int idCounter = 0;
 
     // data file schema
@@ -115,14 +119,16 @@ public class KvinParquet implements Kvin {
                 parquetMappingWriter = getParquetMappingWriter(mappingFile);
             }
 
+            // shredding file on week change
             if (tuple.time >= nextChunkTimestamp) {
-                //renaming existing data file with max id
+                //renaming existing data file with max, min ids
                 renameFile(dataFile, fileMin, idCounter);
                 parquetDataWriter.close();
 
                 fileMin = idCounter + 1;
                 nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
 
+                // handling year change
                 if (prevDate.get(Calendar.YEAR) != getDate(tuple.time).get(Calendar.YEAR)) {
                     renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
                     folderMin = idCounter + 1;
@@ -136,6 +142,7 @@ public class KvinParquet implements Kvin {
                 parquetDataWriter = getParquetDataWriter(dataFile);
             }
 
+            // building tuple
             internalTuple.setId(generateId());
             internalTuple.setTime(tuple.time);
             internalTuple.setSeqNr(tuple.seqNr);
@@ -151,7 +158,7 @@ public class KvinParquet implements Kvin {
             } else {
                 internalTuple.setValue_object(null);
             }
-            // generating mapping
+            // building mapping
             Mapping mapping = new Mapping();
             mapping.setId(internalTuple.getId());
             mapping.setItem(tuple.item.toString());
@@ -171,7 +178,7 @@ public class KvinParquet implements Kvin {
 
     private ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
         Configuration writerConf = new Configuration();
-        writerConf.setInt("parquet.zstd.compressionLevel", 12);
+        writerConf.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
         return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
                 .withSchema(kvinTupleSchema)
                 .withConf(writerConf)
@@ -187,7 +194,7 @@ public class KvinParquet implements Kvin {
 
     private ParquetWriter<Mapping> getParquetMappingWriter(Path dataFile) throws IOException {
         Configuration writerConf = new Configuration();
-        writerConf.setInt("parquet.zstd.compressionLevel", 12);
+        writerConf.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
         return AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
                 .withSchema(mappingSchema)
                 .withConf(writerConf)
@@ -202,6 +209,7 @@ public class KvinParquet implements Kvin {
     }
 
     private long getNextChunkTimestamp(long currentTimestamp) {
+        // adds 1 week to the given timestamp
         return currentTimestamp + 604800;
     }
 
@@ -228,6 +236,7 @@ public class KvinParquet implements Kvin {
     }
 
     private ArrayList<Mapping> getIdMapping(URI item, URI property, URI context) throws IOException {
+        // scanning and sorting (by year) archive folders
         ArrayList<Mapping> mappings = new ArrayList<>();
         File[] folders = new File("./target/archive/").listFiles();
         Arrays.sort(folders, (file1, file2) -> {
@@ -238,6 +247,7 @@ public class KvinParquet implements Kvin {
         int prevMappingCount = 0;
         boolean checkForOverlappingRead = false;
 
+        // finding ids of item & relevant properties
         for (File folder : folders) {
             Path mappingFile = new Path(folder.getPath() + "/data.mapping.parquet");
             FilterPredicate filter = null;
@@ -262,11 +272,11 @@ public class KvinParquet implements Kvin {
                 prevMappingCount = currentMappingCount;
             }
         }
-
         return mappings;
     }
 
     private FilterPredicate generateFetchFilter(ArrayList<Mapping> mappings) {
+        // generates nested filter with the found ids in mapping
         int mappingSize = mappings.size();
         FilterPredicate filter = null;
         if (mappingSize > 0) {
@@ -373,7 +383,8 @@ public class KvinParquet implements Kvin {
             FilterPredicate filter = generateFetchFilter(idMappings);
             ArrayList<Path> dataFiles = getFilePath(idMappings);
             ArrayList<ParquetReader<KvinTupleInternal>> readers = new ArrayList<>();
-            // data reader
+
+            // data readers
             for (Path path : dataFiles) {
                 readers.add(AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(path, new Configuration()))
                         .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
@@ -391,6 +402,7 @@ public class KvinParquet implements Kvin {
                 public boolean hasNext() {
                     try {
                         if (itemPropertyCount.size() > 0) {
+                            // skipping properties if limit is reached
                             if (itemPropertyCount.get(currentProperty) >= limit && limit != 0) {
                                 currentProperty = idMappings.get(propertyCount).getProperty();
                                 previousProperty = currentProperty;
@@ -455,6 +467,7 @@ public class KvinParquet implements Kvin {
                         value = decodeRecord(internalTuple.value_object);
                     }
 
+                    // checking for property change
                     if (currentProperty == null) {
                         currentProperty = idMappings.get(propertyCount).getProperty();
                         previousProperty = currentProperty;
@@ -464,6 +477,7 @@ public class KvinParquet implements Kvin {
                         itemPropertyCount.clear();
                     }
 
+                    // updating item property count
                     if (itemPropertyCount.containsKey(idMappings.get(propertyCount).getProperty())) {
                         String property = idMappings.get(propertyCount).getProperty();
                         Integer count = itemPropertyCount.get(property) + 1;
@@ -492,6 +506,7 @@ public class KvinParquet implements Kvin {
         File[] yearWiseFolders = archiveFolder.listFiles();
         ArrayList<Path> matchedFiles = new ArrayList<>();
 
+        // matching ids with relevant parquet files
         if (yearWiseFolders != null) {
             for (Mapping mapping : idMappings) {
                 for (File folder : yearWiseFolders) {
@@ -555,7 +570,7 @@ public class KvinParquet implements Kvin {
             ArrayList<Path> dataFiles = getFilePath(idMappings);
             ArrayList<ParquetReader<KvinTupleInternal>> readers = new ArrayList<>();
 
-            // data reader
+            // data readers
             for (Path path : dataFiles) {
                 readers.add(AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(path, new Configuration()))
                         .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))

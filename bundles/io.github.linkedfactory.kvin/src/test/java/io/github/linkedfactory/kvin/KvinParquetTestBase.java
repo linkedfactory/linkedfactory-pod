@@ -60,7 +60,7 @@ public class KvinParquetTestBase {
                     if (samePropCounter == 10) {
                         time = time + (604800 * chunkCounter);
                         chunkCounter++;
-                    }else if(samePropCounter == 20) {
+                    } else if (samePropCounter == 20) {
                         time = time + 31536000;
                         chunkCounter++;
                     }

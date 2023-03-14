@@ -13,6 +13,7 @@ import static org.junit.Assert.*;
 
 public class KvinParquetTest extends KvinParquetTestBase {
     Kvin kvinParquet = new KvinParquet();
+
     @Test
     public void shouldDoSimplePut() {
         try {
