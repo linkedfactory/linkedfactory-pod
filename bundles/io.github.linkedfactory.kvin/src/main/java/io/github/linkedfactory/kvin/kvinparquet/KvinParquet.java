@@ -1,4 +1,4 @@
-package io.github.linkedfactory.kvin.kvinParquet;
+package io.github.linkedfactory.kvin.kvinparquet;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinListener;
@@ -49,7 +49,7 @@ public class KvinParquet implements Kvin {
     int idCounter = 0;
 
     // data file schema
-    Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
+    Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinparquet.KvinParquet").fields()
             .name("id").type().nullable().intType().noDefault()
             .name("time").type().longType().noDefault()
             .name("seqNr").type().intType().intDefault(0)
@@ -62,7 +62,7 @@ public class KvinParquet implements Kvin {
             .name("value_object").type().nullable().bytesType().noDefault().endRecord();
 
     // mapping file schema
-    Schema mappingSchema = SchemaBuilder.record("Mapping").namespace("io.github.linkedfactory.kvin.kvinParquet.KvinParquet").fields()
+    Schema mappingSchema = SchemaBuilder.record("Mapping").namespace("io.github.linkedfactory.kvin.kvinparquet.KvinParquet").fields()
             .name("id").type().intType().noDefault()
             .name("item").type().stringType().noDefault()
             .name("property").type().stringType().noDefault()
