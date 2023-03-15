@@ -1,9 +1,9 @@
-package io.github.linkedfactory.kvin.Benchmark;
+package io.github.linkedfactory.kvin.kvinparquet.benchmark;
 
 import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.KvinParquetTestBase;
+import io.github.linkedfactory.kvin.kvinparquet.KvinParquetTestBase;
 import io.github.linkedfactory.kvin.KvinTuple;
-import io.github.linkedfactory.kvin.kvinParquet.KvinParquet;
+import io.github.linkedfactory.kvin.kvinparquet.KvinParquet;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -19,8 +19,8 @@ import static org.junit.Assert.fail;
 
 @State(Scope.Benchmark)
 @Fork(value = 1)
-@Warmup(iterations = 3, time = 500, timeUnit = TimeUnit.MILLISECONDS)
-@Measurement(iterations = 1, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Warmup(iterations = 1, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 public class KvinParquetBenchmark extends KvinParquetTestBase {
@@ -41,7 +41,6 @@ public class KvinParquetBenchmark extends KvinParquetTestBase {
         }
     }
 
-    @Benchmark
     public void benchmarkSingleTupleRead() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemIds);
@@ -67,7 +66,6 @@ public class KvinParquetBenchmark extends KvinParquetTestBase {
             Assert.fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
-
     @Benchmark
     public void benchmarkPropertiesRead() {
         try {

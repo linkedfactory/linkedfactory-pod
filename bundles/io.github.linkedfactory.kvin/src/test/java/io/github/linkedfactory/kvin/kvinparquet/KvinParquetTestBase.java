@@ -1,5 +1,8 @@
-package io.github.linkedfactory.kvin;
+package io.github.linkedfactory.kvin.kvinparquet;
 
+import io.github.linkedfactory.kvin.Kvin;
+import io.github.linkedfactory.kvin.KvinTuple;
+import io.github.linkedfactory.kvin.Record;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
