@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service.rdf4j;
 
 import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.kvinHttp.KvinHttp;
+import io.github.linkedfactory.kvin.kvinhttp.KvinHttp;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
@@ -15,9 +15,6 @@ import com.google.inject.Key;
 
 import net.enilink.komma.model.IModelSet;
 
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
-import java.net.URL;
 import java.util.Optional;
 
 @Component

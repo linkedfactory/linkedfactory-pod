@@ -16,7 +16,7 @@
 package io.github.linkedfactory.kvin;
 
 import com.google.inject.Guice;
-import io.github.linkedfactory.kvin.kvinHttp.KvinHttp;
+import io.github.linkedfactory.kvin.kvinhttp.KvinHttp;
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.kvin.util.JsonFormatParser;
 import io.github.linkedfactory.service.KvinService;

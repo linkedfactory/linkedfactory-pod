@@ -1,4 +1,4 @@
-package io.github.linkedfactory.kvin.kvinHttp;
+package io.github.linkedfactory.kvin.kvinhttp;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
