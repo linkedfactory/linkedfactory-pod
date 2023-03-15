@@ -41,6 +41,7 @@ public class KvinParquetBenchmark extends KvinParquetTestBase {
         }
     }
 
+    @Benchmark
     public void benchmarkSingleTupleRead() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemIds);
@@ -66,6 +67,7 @@ public class KvinParquetBenchmark extends KvinParquetTestBase {
             Assert.fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
+
     @Benchmark
     public void benchmarkPropertiesRead() {
         try {

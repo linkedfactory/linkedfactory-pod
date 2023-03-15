@@ -21,7 +21,7 @@ public class KvinParquetTestBase {
     }
 
     public NiceIterator<KvinTuple> generateRandomKvinTuples(int sampleSize, int itemPool, int propertyPool) {
-        NiceIterator<KvinTuple> iterator = new NiceIterator<>() {
+        return new NiceIterator<>() {
             int tupleCount = 0;
             int propertyCount = 0;
             int chunkCounter = 1;
@@ -90,8 +90,6 @@ public class KvinParquetTestBase {
                 super.close();
             }
         };
-
-        return iterator;
 
     }
 

@@ -83,13 +83,13 @@ public class KvinParquetTest extends KvinParquetTestBase {
             int count = 0;
             long startTime = System.currentTimeMillis();
             while (properties.hasNext()) {
-                URI p = properties.next();
+                properties.next();
                 count++;
             }
             long endtime = System.currentTimeMillis() - startTime;
             System.out.println("Property count  : " + count);
             System.out.println("Lookup time: " + endtime + " ms");
-            assertEquals(count > 0, true);
+            assertTrue(count > 0);
 
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet properties() method");
