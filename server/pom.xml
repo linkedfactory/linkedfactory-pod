@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project
+		xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+		xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<modelVersion>4.0.0</modelVersion>
+
+	<name>LinkedFactory Server</name>
+
+	<parent>
+		<groupId>io.github.linkedfactory</groupId>
+		<artifactId>linkedfactory-parent</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+		<relativePath>..</relativePath>
+	</parent>
+
+	<artifactId>linkedFactory-server</artifactId>
+	<packaging>karaf-assembly</packaging>
+
+	<scm>
+		<connection>${linkedfactory.scm.connection}</connection>
+		<developerConnection>${linkedfactory.scm.developerConnection}</developerConnection>
+		<url>${linkedfactory.scm.url}</url>
+	</scm>
+
+	<dependencies>
+		<dependency>
+			<groupId>org.apache.karaf.features</groupId>
+			<artifactId>framework</artifactId>
+			<version>${karaf.version}</version>
+			<type>kar</type>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.karaf.features</groupId>
+			<artifactId>standard</artifactId>
+			<classifier>features</classifier>
+			<version>${karaf.version}</version>
+			<type>xml</type>
+		</dependency>
+		<dependency>
+			<groupId>net.enilink.platform</groupId>
+			<artifactId>net.enilink.platform.karaf.feature</artifactId>
+			<version>${enilink.version}</version>
+			<classifier>features</classifier>
+			<type>xml</type>
+		</dependency>
+
+		<dependency>
+			<groupId>io.github.linkedfactory</groupId>
+			<artifactId>io.github.linkedfactory.feature</artifactId>
+			<version>${project.version}</version>
+			<classifier>features</classifier>
+			<type>xml</type>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.karaf.tooling</groupId>
+				<artifactId>karaf-maven-plugin</artifactId>
+				<extensions>true</extensions>
+				<configuration>
+					<finalName>${project.artifactId}</finalName>
+					<startupFeatures>
+						<feature>eventadmin</feature>
+					</startupFeatures>
+					<bootFeatures>
+						<feature>wrap</feature>
+						<feature>aries-blueprint</feature>
+						<feature>shell</feature>
+						<feature>feature</feature>
+						<feature>jaas</feature>
+						<feature>jaas-deployer</feature>
+						<feature>ssh</feature>
+						<feature>bundle</feature>
+						<feature>config</feature>
+						<feature>deployer</feature>
+						<feature>feature</feature>
+						<feature>management</feature>
+						<feature>diagnostic</feature>
+						<feature>instance</feature>
+						<feature>kar</feature>
+						<feature>log</feature>
+						<feature>package</feature>
+						<feature>service</feature>
+						<feature>system</feature>
+
+						<feature>scr</feature>
+						<!-- Use Felix HTTP instead of Pax Web for HTTP Service and HTTP White as
+						Pax Web has several bugs if bundles are refreshed -->
+						<feature>felix-http</feature>
+
+						<!-- Service Wrapper to integrate with operating system -->
+						<feature>service-wrapper</feature>
+
+						<feature>net.enilink.platform.karaf.feature</feature>
+						<feature>io.github.linkedfactory.feature</feature>
+					</bootFeatures>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+</project>
