@@ -42,14 +42,14 @@ public class KvinParquetTestBase {
             public KvinTuple next() {
                 isLoopingProperties = currentPropertyCount < propertyCount;
                 if (!isLoopingProperties) {
-                    propertyCount = getRandomInt(500);
+                    propertyCount = getRandomInt(5);
                     currentPropertyCount = 0;
                     itemCounter++;
                     propertyCounter = 0;
                     currentItem = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemCounter);
 
                     // incrementing week after n items
-                    if (itemCounter % 50000 == 0 && itemCounter != 0) {
+                    if (itemCounter % 5 == 0 && itemCounter != 0) {
                         time = time + (604800 * chunkCounter);
                         chunkCounter++;
                     }
@@ -79,8 +79,8 @@ public class KvinParquetTestBase {
                 URI context = Kvin.DEFAULT_CONTEXT;
                 tupleCount++;
                 currentPropertyCount++;
-                if (tupleCount % 10000 == 0) {
-                    System.out.println("wrote " + tupleCount + " tuples");
+                if (tupleCount % 10 == 0) {
+                    //System.out.println("wrote " + tupleCount + " tuples");
                 }
                 return new KvinTuple(currentItem, property, context, time, seqNr, value);
             }
