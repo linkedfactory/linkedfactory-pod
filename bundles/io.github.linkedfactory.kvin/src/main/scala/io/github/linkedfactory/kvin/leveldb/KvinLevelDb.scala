@@ -32,23 +32,38 @@ import java.util.concurrent.locks.{ReadWriteLock, ReentrantReadWriteLock}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
+sealed trait EntryType {
+  def id: Int
+
+  def reverse: Int = id + 1
+}
+
+object EntryType {
+  object SubjectToId extends EntryType {
+    val id = 1
+  }
+
+  object PropertyToId extends EntryType {
+    val id = 3
+  }
+
+  object ResourceToId extends EntryType {
+    val id = 5
+  }
+
+  object ContextToId extends EntryType {
+    val id = 7
+  }
+
+  object SPCtoId extends EntryType {
+    val id = 9
+  }
+}
+
 /**
  * Indirect mapping of (item, property) -> ID and (ID, time, sequence-nr) -> value.
  */
 class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
-  sealed trait EntryType {
-    def id: Int
-    def reverse: Int = id + 1
-  }
-
-  object EntryType {
-    object SubjectToId extends EntryType { val id = 1 }
-    object PropertyToId extends EntryType { val id = 3 }
-    object ResourceToId extends EntryType { val id = 5 }
-    object ContextToId extends EntryType { val id = 7 }
-    object SPCtoId extends EntryType { val id = 9 }
-  }
-
   val idKey: Array[Byte] = bytes("__NEXT_ID\u0000")
 
   val locks: Striped[ReadWriteLock] = Striped.readWriteLock(64)
@@ -82,6 +97,10 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   val values: DB = factory.open(new File(path, "values"), createOptions(true))
 
   val listeners = new CopyOnWriteArraySet[KvinListener]
+
+  def getIdStore(): DB = ids
+
+  def getValueStore(): DB = values
 
   override def addListener(listener: KvinListener): Boolean = {
     listeners.add(listener)
@@ -414,7 +433,12 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     }
   }
 
-  def readLock[T](lock: ReadWriteLock)(block: => T): T = try { lock.readLock.lock(); block } finally { lock.readLock.unlock() }
+  def readLock[T](lock: ReadWriteLock)(block: => T): T = try {
+    lock.readLock.lock();
+    block
+  } finally {
+    lock.readLock.unlock()
+  }
 
   override def put(entries: KvinTuple*): Unit = {
     if (entries.length > 5) {
@@ -523,8 +547,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         System.arraycopy(refId, 0, refData, 1, refId.length)
         refData
       case _ => Values.encode(value match {
-        case bi : BigInt => bi.bigInteger
-        case bd : BigDecimal => bd.bigDecimal
+        case bi: BigInt => bi.bigInteger
+        case bd: BigDecimal => bd.bigDecimal
         case other => other
       })
     }

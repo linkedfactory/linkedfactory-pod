@@ -47,6 +47,7 @@ public class KvinParquet implements Kvin {
 
     // global id counter
     int idCounter = 0;
+    String archiveLocation;
 
     // data file schema
     Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinparquet.KvinParquet").fields()
@@ -67,6 +68,13 @@ public class KvinParquet implements Kvin {
             .name("item").type().stringType().noDefault()
             .name("property").type().stringType().noDefault()
             .name("context").type().stringType().noDefault().endRecord();
+
+    public KvinParquet() {
+    }
+
+    public KvinParquet(String archiveLocation) {
+        this.archiveLocation = archiveLocation;
+    }
 
     @Override
     public boolean addListener(KvinListener listener) {
@@ -111,11 +119,11 @@ public class KvinParquet implements Kvin {
 
             if (nextChunkTimestamp == null) nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
             if (dataFile == null) {
-                dataFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
+                dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
                 parquetDataWriter = getParquetDataWriter(dataFile);
             }
             if (mappingFile == null) {
-                mappingFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "data.mapping.parquet");
+                mappingFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "data.mapping.parquet");
                 parquetMappingWriter = getParquetMappingWriter(mappingFile);
             }
 
@@ -134,11 +142,11 @@ public class KvinParquet implements Kvin {
                     folderMin = idCounter + 1;
 
                     parquetMappingWriter.close();
-                    mappingFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "data.mapping.parquet");
+                    mappingFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "data.mapping.parquet");
                     parquetMappingWriter = getParquetMappingWriter(mappingFile);
                 }
 
-                dataFile = new Path("./target/archive/" + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
+                dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
                 parquetDataWriter = getParquetDataWriter(dataFile);
             }
 
@@ -238,7 +246,7 @@ public class KvinParquet implements Kvin {
     private ArrayList<Mapping> getIdMapping(URI item, URI property, URI context) throws IOException {
         // scanning and sorting (by year) archive folders
         ArrayList<Mapping> mappings = new ArrayList<>();
-        File[] folders = new File("./target/archive/").listFiles();
+        File[] folders = new File(archiveLocation).listFiles();
         Arrays.sort(folders, (file1, file2) -> {
             Integer firstFileYear = Integer.valueOf(file1.getName().split("_")[2]);
             Integer secondFileYear = Integer.valueOf(file2.getName().split("_")[2]);
@@ -502,7 +510,7 @@ public class KvinParquet implements Kvin {
 
     private ArrayList<Path> getFilePath(ArrayList<Mapping> idMappings) {
 
-        File archiveFolder = new File("./target/archive");
+        File archiveFolder = new File(archiveLocation);
         File[] yearWiseFolders = archiveFolder.listFiles();
         ArrayList<Path> matchedFiles = new ArrayList<>();
 
@@ -512,24 +520,24 @@ public class KvinParquet implements Kvin {
                 for (File folder : yearWiseFolders) {
                     try {
                         String[] FolderIdMinMaxData = folder.getName().split("_");
-                        int folderMin = Integer.valueOf(FolderIdMinMaxData[0]);
-                        int folderMax = Integer.valueOf(FolderIdMinMaxData[1]);
+                        int folderMin = Integer.parseInt(FolderIdMinMaxData[0]);
+                        int folderMax = Integer.parseInt(FolderIdMinMaxData[1]);
                         if (mapping.getId() >= folderMin && mapping.getId() <= folderMax) {
                             for (File file : new File(folder.getPath()).listFiles()) {
                                 try {
                                     String[] fileIdMinMaxData = file.getName().split("_");
-                                    int fileMin = Integer.valueOf(fileIdMinMaxData[0]);
-                                    int fileMax = Integer.valueOf(fileIdMinMaxData[1]);
+                                    int fileMin = Integer.parseInt(fileIdMinMaxData[0]);
+                                    int fileMax = Integer.parseInt(fileIdMinMaxData[1]);
                                     if (mapping.getId() >= fileMin && mapping.getId() <= fileMax) {
                                         Path path = new Path(file.getPath());
                                         if (!matchedFiles.contains(path)) matchedFiles.add(path);
                                         break;
                                     }
-                                } catch (RuntimeException exception) {
+                                } catch (RuntimeException ignored) {
                                 }
                             }
                         }
-                    } catch (RuntimeException exception) {
+                    } catch (RuntimeException ignored) {
                     }
                 }
             }
