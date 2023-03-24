@@ -71,11 +71,13 @@
 			<groupId>org.openjdk.jmh</groupId>
 			<artifactId>jmh-core</artifactId>
 			<version>1.35</version>
+			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.openjdk.jmh</groupId>
 			<artifactId>jmh-generator-annprocess</artifactId>
 			<version>1.35</version>
+			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>net.enilink.komma</groupId>
@@ -140,6 +142,14 @@
 
 	<build>
 		<plugins>
+			<!-- skip Java compilation as it is already executed via Scala plugin -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<skip>true</skip>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-dependency-plugin</artifactId>
