@@ -60,6 +60,15 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     }
   }
 
+  object SPCtoId extends EntryType {
+    val id = 9
+  }
+}
+
+/**
+ * Indirect mapping of (item, property) -> ID and (ID, time, sequence-nr) -> value.
+ */
+class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   val idKey: Array[Byte] = bytes("__NEXT_ID\u0000")
 
   val locks: Striped[ReadWriteLock] = Striped.readWriteLock(64)
@@ -93,6 +102,10 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   val values: DB = factory.open(new File(path, "values"), createOptions(true))
 
   val listeners = new CopyOnWriteArraySet[KvinListener]
+
+  def getIdStore(): DB = ids
+
+  def getValueStore(): DB = values
 
   override def addListener(listener: KvinListener): Boolean = {
     listeners.add(listener)
