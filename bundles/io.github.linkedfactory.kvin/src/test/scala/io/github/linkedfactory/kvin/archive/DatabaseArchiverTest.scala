@@ -1,7 +1,7 @@
 package io.github.linkedfactory.kvin.archive
 
 import io.github.linkedfactory.kvin.KvinTuple
-import io.github.linkedfactory.kvin.kvinparquet.{KvinParquet, KvinParquetTestBase}
+import io.github.linkedfactory.kvin.parquet.{KvinParquet, KvinParquetTestBase}
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
 import net.enilink.commons.iterator.NiceIterator
 import org.apache.commons.io.FileUtils
@@ -34,7 +34,7 @@ class DatabaseArchiverTest {
   }
 
   def addTestData(): Unit = {
-    val data: NiceIterator[KvinTuple] = new KvinParquetTestBase().generateRandomKvinTuples(50, 500, 10)
+    val data: NiceIterator[KvinTuple] = KvinParquetTestBase.generateRandomKvinTuples(50, 500, 10)
     while (data.hasNext) {
       databaseStore.put(data.next)
     }

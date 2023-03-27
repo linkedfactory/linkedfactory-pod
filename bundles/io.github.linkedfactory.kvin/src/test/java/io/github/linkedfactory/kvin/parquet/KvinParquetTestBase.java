@@ -1,4 +1,4 @@
-package io.github.linkedfactory.kvin.kvinparquet;
+package io.github.linkedfactory.kvin.parquet;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
@@ -12,15 +12,10 @@ import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class KvinParquetTestBase {
-    final long seed = 200L;
-    private Random random;
+    final static long seed = 200L;
+    private static Random random =  new Random(seed);
 
-    public KvinParquetTestBase() {
-        random = new Random();
-        random.setSeed(seed);
-    }
-
-    public NiceIterator<KvinTuple> generateRandomKvinTuples(int sampleSize, int itemPool, int propertyPool) {
+    public static NiceIterator<KvinTuple> generateRandomKvinTuples(int sampleSize, int itemPool, int propertyPool) {
         return new NiceIterator<>() {
             int tupleCount = 0;
             int propertyCount = 0;
@@ -93,7 +88,7 @@ public class KvinParquetTestBase {
 
     }
 
-    private Object generateRandomValue() {
+    private static Object generateRandomValue() {
         String[] dataTypes = {"int", "long", "float", "double", "string", "boolean", "record", "uri"};
         Object value = null;
         switch (dataTypes[ThreadLocalRandom.current().nextInt(dataTypes.length)]) {
@@ -125,11 +120,11 @@ public class KvinParquetTestBase {
         return value;
     }
 
-    private String getRandomString(int stringLength) {
+    private static String getRandomString(int stringLength) {
         return RandomStringUtils.random(stringLength, true, false);
     }
 
-    private int getRandomInt(int max) {
+    private static int getRandomInt(int max) {
         return random.nextInt(max);
     }
 }

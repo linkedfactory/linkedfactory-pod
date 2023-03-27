@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service.rdf4j;
 
 import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.kvinhttp.KvinHttp;
+import io.github.linkedfactory.kvin.http.KvinHttp;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;

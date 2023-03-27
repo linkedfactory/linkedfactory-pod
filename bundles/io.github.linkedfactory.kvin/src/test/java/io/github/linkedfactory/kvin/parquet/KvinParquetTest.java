@@ -1,4 +1,4 @@
-package io.github.linkedfactory.kvin.kvinparquet;
+package io.github.linkedfactory.kvin.parquet;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
@@ -24,15 +24,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
     public static void setup() throws IOException {
         tempDir = Files.createTempDirectory("archive").toFile();
         kvinParquet = new KvinParquet(tempDir.getAbsolutePath() + "/");
-    }
 
-    @AfterClass
-    public static void cleanup() throws IOException {
-        FileUtils.deleteDirectory(new File(tempDir.getPath()));
-    }
-
-    @Test
-    public void shouldDoSimplePut() {
         try {
             kvinParquet.put(generateRandomKvinTuples(50, 500, 10));
             assertTrue(new File(tempDir.getPath()).listFiles().length > 0);
@@ -40,6 +32,11 @@ public class KvinParquetTest extends KvinParquetTestBase {
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet put() method");
         }
+    }
+
+    @AfterClass
+    public static void cleanup() throws IOException {
+        FileUtils.deleteDirectory(new File(tempDir.getPath()));
     }
 
     @Test
@@ -53,8 +50,8 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
             assertNotNull(tuples);
             assertTrue(tuples.toList().size() > 0);
-
         } catch (Exception e) {
+            e.printStackTrace(System.err);
             fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
@@ -67,8 +64,8 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
             assertNotNull(properties);
             assertTrue(properties.toList().size() > 0);
-
         } catch (Exception e) {
+            e.printStackTrace(System.err);
             fail("Something went wrong while testing KvinParquet properties() method");
         }
     }

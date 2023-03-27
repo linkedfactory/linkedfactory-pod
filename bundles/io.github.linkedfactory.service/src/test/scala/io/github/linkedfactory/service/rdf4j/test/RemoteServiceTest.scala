@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service.rdf4j.test
 
-import io.github.linkedfactory.kvin.kvinhttp.KvinHttp
+import io.github.linkedfactory.kvin.http.KvinHttp
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.kvin.util.JsonFormatParser
 import io.github.linkedfactory.kvin.{Kvin, KvinTuple}

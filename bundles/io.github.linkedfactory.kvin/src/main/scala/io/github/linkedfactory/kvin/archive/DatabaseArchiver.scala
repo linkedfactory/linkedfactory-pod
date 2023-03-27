@@ -1,7 +1,7 @@
 package io.github.linkedfactory.kvin.archive
 
 import io.github.linkedfactory.kvin.KvinTuple
-import io.github.linkedfactory.kvin.kvinparquet.KvinParquet
+import io.github.linkedfactory.kvin.parquet.KvinParquet
 import io.github.linkedfactory.kvin.leveldb.Utils.RichBuffer
 import io.github.linkedfactory.kvin.leveldb.{EntryType, KvinLevelDb, KvinLevelDbBase}
 import net.enilink.commons.iterator.NiceIterator
