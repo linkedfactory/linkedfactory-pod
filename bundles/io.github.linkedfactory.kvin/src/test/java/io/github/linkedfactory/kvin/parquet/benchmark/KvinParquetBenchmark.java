@@ -1,9 +1,9 @@
-package io.github.linkedfactory.kvin.kvinparquet.benchmark;
+package io.github.linkedfactory.kvin.parquet.benchmark;
 
 import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.kvinparquet.KvinParquetTestBase;
+import io.github.linkedfactory.kvin.parquet.KvinParquetTestBase;
 import io.github.linkedfactory.kvin.KvinTuple;
-import io.github.linkedfactory.kvin.kvinparquet.KvinParquet;
+import io.github.linkedfactory.kvin.parquet.KvinParquet;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;

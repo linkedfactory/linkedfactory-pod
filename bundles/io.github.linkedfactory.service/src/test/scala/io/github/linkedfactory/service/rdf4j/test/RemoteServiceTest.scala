@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service.rdf4j.test
 
-import io.github.linkedfactory.kvin.kvinHttp.KvinHttp
+import io.github.linkedfactory.kvin.http.KvinHttp
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.kvin.util.JsonFormatParser
 import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
@@ -31,7 +31,6 @@ import org.eclipse.rdf4j.sail.memory.MemoryStore
 import org.junit.{After, Assert, Before, Test}
 
 import java.io.{ByteArrayInputStream, File}
-import java.net.{MalformedURLException, URISyntaxException, URL}
 import java.nio.charset.StandardCharsets
 import scala.util.Random
 

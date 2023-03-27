@@ -1,4 +1,4 @@
-package io.github.linkedfactory.kvin.kvinparquet;
+package io.github.linkedfactory.kvin.parquet;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinListener;
@@ -49,8 +49,10 @@ public class KvinParquet implements Kvin {
     int idCounter = 0;
     String archiveLocation;
 
+    final static ReflectData reflectData = new ReflectData(KvinParquet.class.getClassLoader());
+
     // data file schema
-    Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace("io.github.linkedfactory.kvin.kvinparquet.KvinParquet").fields()
+    Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace(KvinParquet.class.getName()).fields()
             .name("id").type().nullable().intType().noDefault()
             .name("time").type().longType().noDefault()
             .name("seqNr").type().intType().intDefault(0)
@@ -63,7 +65,7 @@ public class KvinParquet implements Kvin {
             .name("value_object").type().nullable().bytesType().noDefault().endRecord();
 
     // mapping file schema
-    Schema mappingSchema = SchemaBuilder.record("Mapping").namespace("io.github.linkedfactory.kvin.kvinparquet.KvinParquet").fields()
+    Schema mappingSchema = SchemaBuilder.record("Mapping").namespace(KvinParquet.class.getName()).fields()
             .name("id").type().intType().noDefault()
             .name("item").type().stringType().noDefault()
             .name("property").type().stringType().noDefault()
@@ -196,7 +198,7 @@ public class KvinParquet implements Kvin {
                 .withPageSize(PAGE_SIZE)
                 .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
                 .withDictionaryPageSize(DICT_PAGE_SIZE)
-                .withDataModel(ReflectData.get())
+                .withDataModel(reflectData)
                 .build();
     }
 
@@ -212,7 +214,7 @@ public class KvinParquet implements Kvin {
                 .withPageSize(PAGE_SIZE)
                 .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
                 .withDictionaryPageSize(DICT_PAGE_SIZE)
-                .withDataModel(ReflectData.get())
+                .withDataModel(reflectData)
                 .build();
     }
 
@@ -266,7 +268,7 @@ public class KvinParquet implements Kvin {
                 filter = eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString()));
             }
             try (ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(mappingFile, new Configuration()))
-                    .withDataModel(new ReflectData(Mapping.class.getClassLoader()))
+                    .withDataModel(reflectData)
                     .withFilter(FilterCompat.get(filter))
                     .build()) {
 
@@ -395,7 +397,7 @@ public class KvinParquet implements Kvin {
             // data readers
             for (Path path : dataFiles) {
                 readers.add(AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(path, new Configuration()))
-                        .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
+                        .withDataModel(reflectData)
                         .withFilter(FilterCompat.get(filter))
                         .build());
             }
@@ -581,7 +583,7 @@ public class KvinParquet implements Kvin {
             // data readers
             for (Path path : dataFiles) {
                 readers.add(AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(path, new Configuration()))
-                        .withDataModel(new ReflectData(KvinTupleInternal.class.getClassLoader()))
+                        .withDataModel(reflectData)
                         .withFilter(FilterCompat.get(filter))
                         .build());
             }
@@ -643,7 +645,7 @@ public class KvinParquet implements Kvin {
 
     }
 
-    static class KvinTupleInternal {
+    public static class KvinTupleInternal {
         int id;
         Long time;
         Integer seqNr;
@@ -737,7 +739,7 @@ public class KvinParquet implements Kvin {
 
     }
 
-    static class Mapping {
+    public static class Mapping {
         Integer id;
         String item;
         String property;

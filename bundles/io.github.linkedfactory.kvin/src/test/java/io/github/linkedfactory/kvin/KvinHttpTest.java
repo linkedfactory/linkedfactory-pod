@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.kvin;
 
-import io.github.linkedfactory.kvin.kvinHttp.KvinHttp;
+import io.github.linkedfactory.kvin.http.KvinHttp;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;

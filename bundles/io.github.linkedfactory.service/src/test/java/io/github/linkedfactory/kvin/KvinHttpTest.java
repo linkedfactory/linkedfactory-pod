@@ -16,7 +16,11 @@
 package io.github.linkedfactory.kvin;
 
 import com.google.inject.Guice;
+<<<<<<< HEAD
 import io.github.linkedfactory.kvin.kvinHttp.KvinHttp;
+=======
+import io.github.linkedfactory.kvin.http.KvinHttp;
+>>>>>>> 6fba1b3... Moved http and parquet implementations to new packages.
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.kvin.util.JsonFormatParser;
 import io.github.linkedfactory.service.KvinService;
