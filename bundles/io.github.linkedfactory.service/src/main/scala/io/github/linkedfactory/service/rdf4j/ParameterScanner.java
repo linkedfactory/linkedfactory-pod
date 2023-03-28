@@ -15,6 +15,7 @@ class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
 		Var interval;
 		Var aggregationFunction;
 		Var time;
+		Var seqNr;
 	}
 
 	Map<Var, Parameters> parameterIndex = new HashMap<>();
@@ -80,6 +81,9 @@ class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
 			} else if (KVIN.TIME.equals(pValue)) {
 				// <> kvin:time ?time
 				getParameters(sp.getSubjectVar()).time = o;
+			} else if (KVIN.SEQNR.equals(pValue)) {
+				// <> kvin:seqNr ?seqNr
+				getParameters(sp.getSubjectVar()).seqNr = o;
 			} else {
 				// normal statement
 				remove = false;

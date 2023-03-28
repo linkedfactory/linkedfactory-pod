@@ -14,4 +14,5 @@ public interface KVIN {
 
 	IRI VALUE = SimpleValueFactory.getInstance().createIRI(KVIN + "value");
 	IRI TIME = SimpleValueFactory.getInstance().createIRI(KVIN + "time");
+	IRI SEQNR = SimpleValueFactory.getInstance().createIRI(KVIN + "seqNr");
 }
