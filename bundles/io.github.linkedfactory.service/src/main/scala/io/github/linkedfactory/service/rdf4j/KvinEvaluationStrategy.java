@@ -108,6 +108,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 				QueryBindingSet newBs = new QueryBindingSet(bs);
 				if (KVIN.VALUE.equals(predValue)) {
 					Var valueVar = stmt.getObjectVar();
+					Value valueVarValue = getVarValue(valueVar, bs);
 
 					Value rdfValue;
 					if (tuple.value instanceof Record) {
@@ -118,10 +119,13 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 						rdfValue = toRdfValue(tuple.value);
 					}
 
-					if (!valueVar.isConstant()) {
+					if (valueVarValue == null) {
 						newBs.addBinding(valueVar.getName(), rdfValue);
+						return new SingletonIteration<>(newBs);
+					} else if (valueVarValue.equals(rdfValue)) {
+						return new SingletonIteration<>(newBs);
 					}
-					return new SingletonIteration<>(newBs);
+					return new EmptyIteration<>();
 				} else if (KVIN.TIME.equals(predValue)) {
 					Var timeVar = stmt.getObjectVar();
 					Value timeVarValue = getVarValue(timeVar, bs);
