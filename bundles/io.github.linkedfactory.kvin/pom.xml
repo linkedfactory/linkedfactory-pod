@@ -28,6 +28,11 @@
 			<version>0.4</version>
 		</dependency>
 		<dependency>
+			<groupId>org.rocksdb</groupId>
+			<artifactId>rocksdbjni</artifactId>
+			<version>8.0.0</version>
+		</dependency>
+		<dependency>
 			<groupId>org.influxdb</groupId>
 			<artifactId>influxdb-java</artifactId>
 			<version>2.10</version>
@@ -105,7 +110,7 @@
 
 						<configuration>
 							<includeGroupIds>
-								org.iq80.leveldb,org.iq80.snappy,io.github.pcmind,org.influxdb,com.squareup.okhttp3,com.squareup.okio
+								org.iq80.leveldb,org.iq80.snappy,io.github.pcmind,org.influxdb,com.squareup.okhttp3,com.squareup.okio,org.rocksdb
 							</includeGroupIds>
 						</configuration>
 					</execution>

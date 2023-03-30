@@ -5,5 +5,6 @@ lib/okhttp.jar,\
 lib/okio.jar,\
 lib/leveldb-api.jar,\
 lib/leveldb.jar,\
-lib/snappy.jar
+lib/snappy.jar,\
+lib/rocksdbjni.jar
 Import-Package: com.google.common.*;version="[25,40)", net.enilink.*, org.slf4j, scala.*, org.apache.http.*, com.fasterxml.jackson.*

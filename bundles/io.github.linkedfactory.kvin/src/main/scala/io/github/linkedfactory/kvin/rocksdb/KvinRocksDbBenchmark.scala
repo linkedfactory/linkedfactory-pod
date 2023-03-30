@@ -13,15 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.github.linkedfactory.kvin.leveldb
+package io.github.linkedfactory.kvin.rocksdb
 
 import io.github.linkedfactory.kvin.benchmark.KvinBenchmarkBase
 
 import java.io.File
 
 /**
- * Simple benchmark for the LevelDB-based time series store.
+ * Simple benchmark for the RocksDB-based time series store.
  */
-object KvinLevelDbBenchmark extends KvinBenchmarkBase {
-  override def createStore = new KvinLevelDb(new File("/tmp/kvin-test-" + System.currentTimeMillis + "/"))
+object KvinRocksDbBenchmark extends KvinBenchmarkBase {
+  override def createStore = new KvinRocksDb(new File("/tmp/kvin-test-" + System.currentTimeMillis + "/"))
 }
