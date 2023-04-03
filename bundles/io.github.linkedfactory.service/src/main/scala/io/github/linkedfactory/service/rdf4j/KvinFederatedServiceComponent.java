@@ -37,11 +37,10 @@ public class KvinFederatedServiceComponent {
                             protected FederatedService createService(String serviceUrl)
                                     throws QueryEvaluationException {
                                 if (serviceUrl.equals("kvin:")) {
-                                    return new KvinFederatedService(kvin);
-                                } else  if (getKvinServiceUrl(serviceUrl).isPresent()) {
+                                    return new KvinFederatedService(kvin, false);
+                                } else if (getKvinServiceUrl(serviceUrl).isPresent()) {
                                     String url = getKvinServiceUrl(serviceUrl).get();
-                                    kvin = new KvinHttp(url);
-                                    return new KvinFederatedService(kvin);
+                                    return new KvinFederatedService(new KvinHttp(url), true);
                                 }
                                 return null;
                             }

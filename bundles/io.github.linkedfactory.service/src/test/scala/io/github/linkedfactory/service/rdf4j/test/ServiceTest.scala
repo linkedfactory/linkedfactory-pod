@@ -105,20 +105,19 @@ class ServiceTest {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
-    val vf = repository.getValueFactory
     try {
       val time = START_TIME + 20
 
       val baseUri = "http://example.org/"
       val queryStr = s"""select * where { 
   service <kvin:> { 
-    <item-1> <property:value> [ <kvin:value> ?v1_value ; <kvin:time> ?time ; <kvin:to> $time ] .
+    <item-1> <property:value> [ <kvin:time> ?time ; <kvin:to> $time ; <kvin:value> ?v1_value ] .
     <item-2> <property:value> [ <kvin:time> ?time ; <kvin:value> ?v2_value ] .
   }
 }"""
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, baseUri)
 
-      val dataByItemAndTime = data.groupBy(_.item).mapValues(_.groupBy(_.time))
+      val dataByItemAndTime = data.groupBy(_.item).view.mapValues(_.groupBy(_.time))
 
       val r = query.evaluate
       while (r.hasNext) {
@@ -156,7 +155,7 @@ class ServiceTest {
 }"""
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, baseUri)
 
-      val dataByItemAndTime = data.groupBy(_.item).mapValues(_.groupBy(_.time))
+      val dataByItemAndTime = data.groupBy(_.item).view.mapValues(_.groupBy(_.time))
 
       val r = query.evaluate
       while (r.hasNext) {
@@ -185,7 +184,8 @@ class ServiceTest {
       val uri = itemUri(nr)
       for (i <- 1 to values) yield {
         val value = rand.nextDouble * rand.nextInt(100)
-        val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, value)
+        val seqNr = i % 1000
+        val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, seqNr, value)
         store.put(tuple)
         time += 10
         tuple
@@ -211,7 +211,7 @@ class ServiceTest {
 
     sailRepository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
       override def createService(url: String) = {
-        val service = new KvinFederatedService(store)
+        val service = new KvinFederatedService(store, false)
         service
       }
     })

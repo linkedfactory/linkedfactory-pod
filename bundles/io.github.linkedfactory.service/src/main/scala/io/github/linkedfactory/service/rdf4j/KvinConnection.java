@@ -1,9 +1,9 @@
 package io.github.linkedfactory.service.rdf4j;
 
+import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
 import java.util.Map;
 import java.util.WeakHashMap;
 
-import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;

@@ -1,4 +1,7 @@
-package io.github.linkedfactory.service.rdf4j;
+package io.github.linkedfactory.service.rdf4j.query;
+
+import io.github.linkedfactory.service.rdf4j.BGPCollector;
+import io.github.linkedfactory.service.rdf4j.KVIN;
 
 import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.model.Value;
@@ -7,19 +10,24 @@ import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
 
 import java.util.*;
 
-class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
-	static class Parameters {
-		Var from;
-		Var to;
-		Var limit;
-		Var interval;
-		Var aggregationFunction;
-		Var time;
-		Var seqNr;
+public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
+	public static class Parameters implements Cloneable {
+		public Var from;
+		public Var to;
+		public Var limit;
+		public Var interval;
+		public Var aggregationFunction;
+		public Var time;
+		public Var seqNr;
+
+		@Override
+		protected Parameters clone() throws CloneNotSupportedException {
+			return (Parameters) super.clone();
+		}
 	}
 
-	Map<Var, Parameters> parameterIndex = new HashMap<>();
-	Map<Var, List<StatementPattern>> referencedBy = new HashMap<>();
+	public final Map<Var, Parameters> parameterIndex = new HashMap<>();
+	public final Map<Var, List<StatementPattern>> referencedBy = new HashMap<>();
 
 	/**
 	 * Extracts the parameters from the given <code>expr</code>.

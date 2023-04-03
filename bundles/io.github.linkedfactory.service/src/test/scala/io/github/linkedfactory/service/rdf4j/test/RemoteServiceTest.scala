@@ -111,11 +111,11 @@ class RemoteServiceTest {
               val jsonParser = new JsonFormatParser(new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8)))
               jsonParser.parse
             }
-          })
+          }, true)
           kvinHttpInstance.count = kvinHttpInstance.count + 1
           return service
         }
-        val service = new KvinFederatedService(store)
+        val service = new KvinFederatedService(store, false)
         service
       }
     })
