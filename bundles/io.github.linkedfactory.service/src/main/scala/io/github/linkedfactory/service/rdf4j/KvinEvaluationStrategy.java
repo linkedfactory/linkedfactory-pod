@@ -3,13 +3,24 @@ package io.github.linkedfactory.service.rdf4j;
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
-import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
 import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.query.KvinFetchEvaluationStep;
+import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.ArrayDeque;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
-import org.eclipse.rdf4j.common.iteration.*;
+import org.eclipse.rdf4j.common.iteration.CloseableIteration;
+import org.eclipse.rdf4j.common.iteration.EmptyIteration;
+import org.eclipse.rdf4j.common.iteration.Iteration;
+import org.eclipse.rdf4j.common.iteration.IterationWrapper;
+import org.eclipse.rdf4j.common.iteration.SingletonIteration;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
@@ -20,6 +31,8 @@ import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.Join;
 import org.eclipse.rdf4j.query.algebra.LeftJoin;
+import org.eclipse.rdf4j.query.algebra.Projection;
+import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
@@ -30,14 +43,8 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext.Minimal;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
+import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
 import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
-
-import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
@@ -215,8 +222,8 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
     @Override
     protected QueryEvaluationStep prepare(LeftJoin join, QueryEvaluationContext context) throws QueryEvaluationException {
-        if (join.getRightArg() instanceof KvinFetch ||
-            join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch) {
+        if (containsFetch(join.getLeftArg()) && (join.getRightArg() instanceof KvinFetch ||
+            join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch)) {
             return bindingSet -> new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet,
                 true);
         }
@@ -226,12 +233,36 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
     @Override
     protected QueryEvaluationStep prepare(Join join, QueryEvaluationContext context) throws QueryEvaluationException {
         return bindingSet -> {
-            if (join.getRightArg() instanceof KvinFetch ||
-                join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch) {
+            if (containsFetch(join.getLeftArg()) && (join.getRightArg() instanceof KvinFetch ||
+                join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch)) {
                 return new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, false);
             }
             return new KvinJoinIterator(KvinEvaluationStrategy.this, join, bindingSet);
         };
+    }
+
+    protected boolean containsFetch(TupleExpr t) {
+        TupleExpr n = t;
+        ArrayDeque queue = null;
+        do {
+            if (n instanceof KvinFetch) {
+                return true;
+            }
+
+            if (n instanceof Projection && ((Projection) n).isSubquery() || n instanceof Service) {
+                return false;
+            }
+
+            List<TupleExpr> children = TupleExprs.getChildren(n);
+            if (!children.isEmpty()) {
+                if (queue == null) {
+                    queue = new ArrayDeque();
+                }
+                queue.addAll(children);
+            }
+            n = queue != null ? (TupleExpr) queue.poll() : null;
+        } while (n != null);
+        return false;
     }
 
     @Override
