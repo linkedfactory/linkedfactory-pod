@@ -154,8 +154,7 @@ public class KvinHttpTest extends Mockito {
     }
 
     @Test
-    public void shouldDoFetch() {
-        try {
+    public void shouldDoFetch() throws IOException {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/machine1/sensor1");
             URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/value");
             long limit = 0;
@@ -187,11 +186,6 @@ public class KvinHttpTest extends Mockito {
                 index++;
             }
             assertEquals(index, 6);
-
-
-        } catch (Exception e) {
-            fail("Something went wrong while testing KvinHttp fetch() method");
-        }
     }
 
     @Test
