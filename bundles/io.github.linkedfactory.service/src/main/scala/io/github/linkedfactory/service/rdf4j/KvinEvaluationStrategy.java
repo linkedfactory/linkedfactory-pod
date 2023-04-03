@@ -19,6 +19,7 @@ import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.Join;
+import org.eclipse.rdf4j.query.algebra.LeftJoin;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
@@ -213,16 +214,23 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
     }
 
     @Override
+    protected QueryEvaluationStep prepare(LeftJoin join, QueryEvaluationContext context) throws QueryEvaluationException {
+        if (join.getRightArg() instanceof KvinFetch ||
+            join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch) {
+            return bindingSet -> new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet,
+                true);
+        }
+        return super.prepare(join, context);
+    }
+
+    @Override
     protected QueryEvaluationStep prepare(Join join, QueryEvaluationContext context) throws QueryEvaluationException {
-        return new QueryEvaluationStep() {
-            @Override
-            public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
-                if (join.getLeftArg() instanceof KvinFetch && (join.getRightArg() instanceof KvinFetch ||
-                    join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch)) {
-                    return new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, true);
-                }
-                return new KvinJoinIterator(KvinEvaluationStrategy.this, join, bindingSet);
+        return bindingSet -> {
+            if (join.getRightArg() instanceof KvinFetch ||
+                join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch) {
+                return new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, false);
             }
+            return new KvinJoinIterator(KvinEvaluationStrategy.this, join, bindingSet);
         };
     }
 

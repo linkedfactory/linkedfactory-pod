@@ -17,7 +17,6 @@ import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
 public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException> {
 
     ParameterScanner scanner;
-    Map<Var, List<KvinPattern>> patternsByTime = new HashMap<>();
 
     public KvinFetchOptimizer(ParameterScanner scanner) {
         this.scanner = scanner;
@@ -39,6 +38,7 @@ public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException
 
     @Override
     public void meet(Join node) throws RDF4JException {
+        Map<Var, List<KvinPattern>> patternsByTime = new HashMap<>();
         List<TupleExpr> joinArgs = new ArrayList<>();
         collectJoinArgs(node, joinArgs);
         for (TupleExpr expr : joinArgs) {
