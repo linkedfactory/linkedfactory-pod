@@ -57,6 +57,10 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 	}
 
 	public Parameters getParameters(Var subject) {
+		return parameterIndex.get(subject);
+	}
+
+	protected Parameters createParameters(Var subject) {
 		Parameters params = parameterIndex.get(subject);
 		if (params == null) {
 			params = new Parameters();
@@ -73,26 +77,31 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 			boolean remove = true;
 			if (KVIN.FROM.equals(pValue) ) {
 				// <> kvin:from 213123123 .
-				getParameters(sp.getSubjectVar()).from =o;
+				createParameters(sp.getSubjectVar()).from =o;
 			} else if (KVIN.TO.equals(pValue) ) {
 				// <> kvin:to 213123123
-				getParameters(sp.getSubjectVar()).to = o;
+				createParameters(sp.getSubjectVar()).to = o;
 			} else if (KVIN.LIMIT.equals(pValue)) {
 				// <> kvin:limit 2
-				getParameters(sp.getSubjectVar()).limit = o;
+				createParameters(sp.getSubjectVar()).limit = o;
 			} else if (KVIN.INTERVAL.equals(pValue)) {
 				// <> kvin:interval 1000
-				getParameters(sp.getSubjectVar()).interval = o;
+				createParameters(sp.getSubjectVar()).interval = o;
 			} else if (KVIN.OP.equals(pValue)) {
 				// <> kvin:op kvin:max
-				getParameters(sp.getSubjectVar()).aggregationFunction = o;
+				createParameters(sp.getSubjectVar()).aggregationFunction = o;
 			} else if (KVIN.TIME.equals(pValue)) {
 				// <> kvin:time ?time
-				getParameters(sp.getSubjectVar()).time = o;
+				createParameters(sp.getSubjectVar()).time = o;
 			} else if (KVIN.SEQNR.equals(pValue)) {
 				// <> kvin:seqNr ?seqNr
-				getParameters(sp.getSubjectVar()).seqNr = o;
+				createParameters(sp.getSubjectVar()).seqNr = o;
 			} else {
+				if (KVIN.VALUE.equals(pValue)) {
+					// ensure that parameters are created if only kvin:value is present
+					createParameters(sp.getSubjectVar());
+				}
+
 				// normal statement
 				remove = false;
 				referencedBy.computeIfAbsent(sp.getObjectVar(), v -> new ArrayList<>()).add(sp);

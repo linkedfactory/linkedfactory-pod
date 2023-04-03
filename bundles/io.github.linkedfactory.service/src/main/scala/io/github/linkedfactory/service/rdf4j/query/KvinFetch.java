@@ -1,32 +1,51 @@
 package io.github.linkedfactory.service.rdf4j.query;
 
+import io.github.linkedfactory.service.rdf4j.query.ParameterScanner.Parameters;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 
 import org.eclipse.rdf4j.query.algebra.AbstractQueryModelNode;
 import org.eclipse.rdf4j.query.algebra.QueryModelVisitor;
+import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
+import org.eclipse.rdf4j.query.algebra.UnaryTupleOperator;
 
-public class KvinFetch extends AbstractQueryModelNode implements TupleExpr {
+public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
+    final ParameterScanner.Parameters params;
 
-    final List<KvinPattern> itemPropertyPatterns;
+    public KvinFetch(StatementPattern stmt, Parameters params) {
+        super(stmt);
+        this.params = params;
+    }
 
-    public KvinFetch(List<KvinPattern> itemPropertyPatterns) {
-        this.itemPropertyPatterns = itemPropertyPatterns;
+    protected void addAdditionalBindingNames(Set<String> names) {
+        if (params.time != null) {
+            names.add(params.time.getName());
+        }
+        if (params.seqNr != null) {
+            names.add(params.seqNr.getName());
+        }
+        if (params.from != null) {
+            names.add(params.from.getName());
+        }
+        if (params.to != null) {
+            names.add(params.to.getName());
+        }
     }
 
     @Override
     public Set<String> getBindingNames() {
         Set<String> bindingNames = new LinkedHashSet(16);
-        itemPropertyPatterns.forEach(p -> bindingNames.addAll(p.getBindingNames()));
+        bindingNames.addAll(getArg().getBindingNames());
+        addAdditionalBindingNames(bindingNames);
         return bindingNames;
     }
 
     @Override
     public Set<String> getAssuredBindingNames() {
         Set<String> assuredBindingNames = new LinkedHashSet(16);
-        itemPropertyPatterns.forEach(p -> assuredBindingNames.addAll(p.getAssuredBindingNames()));
+        assuredBindingNames.addAll(getArg().getAssuredBindingNames());
+        addAdditionalBindingNames(assuredBindingNames);
         return assuredBindingNames;
     }
 
@@ -35,8 +54,8 @@ public class KvinFetch extends AbstractQueryModelNode implements TupleExpr {
         queryModelVisitor.meetOther(this);
     }
 
-    public boolean equals(Object other) {
-        return other instanceof KvinFetch && super.equals(other);
+    public StatementPattern getStatement() {
+        return (StatementPattern) getArg();
     }
 
     @Override

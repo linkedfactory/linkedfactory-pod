@@ -6,6 +6,7 @@ import io.github.linkedfactory.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.query.KvinFetchEvaluationStep;
 import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
+import io.github.linkedfactory.service.rdf4j.query.ParameterScanner.Parameters;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import java.math.BigDecimal;
@@ -213,8 +214,8 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
             }
 
             if (subjectValue != null && subjectValue.isIRI()) {
-                ParameterScanner.Parameters params = scanner.getParameters(stmt.getObjectVar());
-                return new KvinEvaluationUtil(kvin).evaluate(vf, bs, params, stmt);
+                Parameters params = scanner.getParameters(stmt.getObjectVar());
+                return new KvinEvaluationUtil(kvin).evaluate(vf, bs, params == null ? new Parameters() : params, stmt);
             }
         }
         return super.evaluate(stmt, bs);

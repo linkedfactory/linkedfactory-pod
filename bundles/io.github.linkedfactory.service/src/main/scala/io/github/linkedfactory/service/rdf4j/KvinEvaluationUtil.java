@@ -181,6 +181,12 @@ public class KvinEvaluationUtil {
                 if (seqNr != null && seqNrValue == null) {
                     newBs.addBinding(seqNr.getName(), toRdfValue(tuple.seqNr, vf));
                 }
+                if (params.from != null && !bs.hasBinding(params.from.getName())) {
+                    newBs.addBinding(params.from.getName(), toRdfValue(beginFinal, vf));
+                }
+                if (params.to != null && !bs.hasBinding(params.to.getName())) {
+                    newBs.addBinding(params.to.getName(), toRdfValue(endFinal, vf));
+                }
 
                 return newBs;
             }

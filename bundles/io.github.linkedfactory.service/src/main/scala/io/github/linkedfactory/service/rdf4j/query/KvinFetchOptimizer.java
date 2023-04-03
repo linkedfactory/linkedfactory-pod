@@ -1,17 +1,16 @@
 package io.github.linkedfactory.service.rdf4j.query;
 
+import io.github.linkedfactory.service.rdf4j.KVIN;
 import io.github.linkedfactory.service.rdf4j.query.ParameterScanner.Parameters;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 
 import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.query.algebra.Join;
 import org.eclipse.rdf4j.query.algebra.SingletonSet;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
-import org.eclipse.rdf4j.query.algebra.Var;
 import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
 
 public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException> {
@@ -38,26 +37,23 @@ public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException
 
     @Override
     public void meet(Join node) throws RDF4JException {
-        Map<Var, List<KvinPattern>> patternsByTime = new HashMap<>();
+        List<KvinFetch> kvinFetches = new ArrayList<>();
+
         List<TupleExpr> joinArgs = new ArrayList<>();
         collectJoinArgs(node, joinArgs);
-        for (TupleExpr expr : joinArgs) {
+        for (Iterator<TupleExpr> it = joinArgs.iterator(); it.hasNext(); ) {
+            TupleExpr expr = it.next();
             if (expr instanceof StatementPattern) {
                 StatementPattern stmt = (StatementPattern) expr;
                 Parameters params = scanner.getParameters(stmt.getObjectVar());
-                if (params != null && params.time != null) {
-                    patternsByTime.computeIfAbsent(params.time, time -> new ArrayList<>()).add(new KvinPattern(stmt, params));
+                if (params != null) {
+                    stmt.replaceWith(new SingletonSet());
+                    kvinFetches.add(new KvinFetch(stmt, params));
                 }
+                // no need to further inspect this
+                it.remove();
             }
         }
-        List<KvinFetch> kvinFetches = new ArrayList<>();
-        patternsByTime.forEach((time, patterns) -> {
-            KvinFetch timeJoin = new KvinFetch(patterns);
-            kvinFetches.add(timeJoin);
-            for (KvinPattern pattern : patterns) {
-                pattern.getStatement().replaceWith(new SingletonSet());
-            }
-        });
 
         if (!kvinFetches.isEmpty()) {
             // Build new join hierarchy
@@ -75,6 +71,11 @@ public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException
             newNode.setRightArg(node.getRightArg());
 
             node.replaceWith(newNode);
+        }
+
+        // inspect further nodes
+        for (TupleExpr expr : joinArgs) {
+            expr.visit(this);
         }
     }
 

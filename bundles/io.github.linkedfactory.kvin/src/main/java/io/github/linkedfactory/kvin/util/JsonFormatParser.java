@@ -20,32 +20,23 @@ import java.math.BigInteger;
 import java.util.*;
 
 public class JsonFormatParser {
-    final JsonFactory jsonFactory;
+    final static JsonFactory jsonFactory = new JsonFactory();
     final JsonParser jsonParser;
-    final ObjectMapper mapper;
-
-    public JsonFormatParser(InputStream content) {
-        try {
-            jsonFactory = new JsonFactory();
-            mapper = new ObjectMapper()
+    final static ObjectMapper mapper = new ObjectMapper()
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
                 .configure(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN, true);
-            jsonParser = jsonFactory.createParser(content);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+
+    public JsonFormatParser(InputStream content) throws IOException {
+        jsonParser = jsonFactory.createParser(content);
     }
 
     public NiceIterator<KvinTuple> parse() {
-        if (jsonParser == null) {
-            throw new RuntimeException("cannot parse without json string");
-        }
         return new NiceIterator<>() {
             KvinTuple kvinTuple;
-            private String currentItemName = "";
-            private String currentPropertyName = "";
-            private boolean isLoopingProperties = false;
-            private boolean isLoopingPropertyItems = false;
+            String currentItemName;
+            String currentPropertyName;
+            boolean isLoopingProperties = false;
+            boolean isLoopingPropertyItems = false;
 
             @Override
             public boolean hasNext() {
@@ -53,7 +44,7 @@ public class JsonFormatParser {
                     if (kvinTuple == null && isLoopingPropertyItems) {
                         boolean isAddingPropertyItems = addNextPropertyItem(currentItemName, currentPropertyName);
                         if (!isAddingPropertyItems) {
-                            boolean isAddingProperty = addNextProperty(currentItemName);
+                            boolean isAddingProperty = addNextProperty();
                             if (!isAddingProperty) {
                                 addNextItem();
                             }
@@ -61,7 +52,7 @@ public class JsonFormatParser {
                         return isTuplesAlreadyGenerated();
 
                     } else if (kvinTuple == null && isLoopingProperties) {
-                        boolean isAddingProperty = addNextProperty(currentItemName);
+                        boolean isAddingProperty = addNextProperty();
                         if (!isAddingProperty) {
                             addNextItem();
                         }
@@ -87,10 +78,10 @@ public class JsonFormatParser {
             }
 
             private void addNextItem() throws IOException {
-                while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                while (jsonParser.nextToken() != null) {
                     if (jsonParser.getCurrentToken() == JsonToken.FIELD_NAME) {
                         currentItemName = jsonParser.getCurrentName();
-                        addNextProperty(currentItemName);
+                        addNextProperty();
                         if (isTuplesAlreadyGenerated()) {
                             break;
                         }
@@ -98,8 +89,8 @@ public class JsonFormatParser {
                 }
             }
 
-            private boolean addNextProperty(String itemName) throws IOException {
-                while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+            private boolean addNextProperty() throws IOException {
+                while (jsonParser.nextToken() != null) {
                     isLoopingProperties = true;
                     if (jsonParser.getCurrentToken() == JsonToken.FIELD_NAME) {
                         currentPropertyName = jsonParser.getCurrentName();
@@ -112,7 +103,6 @@ public class JsonFormatParser {
                 }
                 if (kvinTuple == null && jsonParser.getCurrentToken() == JsonToken.END_OBJECT) {
                     isLoopingProperties = false;
-                    currentItemName = "";
                 }
                 return isTuplesAlreadyGenerated();
             }
@@ -131,7 +121,6 @@ public class JsonFormatParser {
                 }
                 if (kvinTuple == null && jsonParser.getCurrentToken() == JsonToken.END_ARRAY) {
                     isLoopingPropertyItems = false;
-                    currentPropertyName = "";
                 }
                 return isTuplesAlreadyGenerated();
             }
