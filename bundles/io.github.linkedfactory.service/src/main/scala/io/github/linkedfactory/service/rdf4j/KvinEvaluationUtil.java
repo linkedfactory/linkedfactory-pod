@@ -165,8 +165,8 @@ public class KvinEvaluationUtil {
                 KvinTuple tuple = it.next();
                 QueryBindingSet newBs = new QueryBindingSet(bs);
 
-                Value objectValue = objectVar.isConstant() ? objectVar.getValue() : new BNodeWithValue(tuple);
-                if (!objectVar.isConstant()) {
+                if (!objectVar.isConstant() && !bs.hasBinding(objectVar.getName())) {
+                    Value objectValue = new BNodeWithValue(tuple);
                     newBs.addBinding(objectVar.getName(), objectValue);
                 }
                 if (!predVar.isConstant()) {

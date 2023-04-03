@@ -150,7 +150,7 @@ class ServiceTest {
       val queryStr = s"""select * where {
   service <kvin:> {
     <item-1> <property:value> [ <kvin:value> ?v1_value ; <kvin:time> ?time ; <kvin:to> $time ] .
-    <item-2> <property:value> [ <kvin:to> ?time ; <kvin:limit> 1 ; <kvin:value> ?v2_value ] .
+    <item-2> <property:value> [ <kvin:value> ?v2_value ; <kvin:limit> 1 ; <kvin:to> ?time ] .
   }
 }"""
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, baseUri)
