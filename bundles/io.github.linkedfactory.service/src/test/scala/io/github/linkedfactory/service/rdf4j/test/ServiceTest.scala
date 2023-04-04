@@ -144,7 +144,7 @@ class ServiceTest {
     val conn = repository.getConnection
     val vf = repository.getValueFactory
     try {
-      val time = START_TIME + 20
+      val time = START_TIME + 50
 
       val baseUri = "http://example.org/"
       val queryStr = s"""select * where {

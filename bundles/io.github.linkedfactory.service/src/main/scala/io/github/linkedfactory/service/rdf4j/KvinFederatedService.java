@@ -5,7 +5,6 @@ import io.github.linkedfactory.service.rdf4j.query.KvinFetchOptimizer;
 import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
 import io.github.linkedfactory.service.rdf4j.query.QueryJoinOptimizer;
 import io.github.linkedfactory.service.rdf4j.query.QueryModelPruner;
-import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
 
 import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.common.iteration.*;
@@ -15,13 +14,11 @@ import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.Service;
-import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryOptimizer;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.EvaluationStatistics;
 import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
 
 import java.util.*;

@@ -57,9 +57,10 @@ public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException
 
         if (!kvinFetches.isEmpty()) {
             // Build new join hierarchy
-            TupleExpr root = kvinFetches.get(0);
-            for (int i = 1; i < kvinFetches.size(); i++) {
-                root = new Join(kvinFetches.get(i), root);
+            int i = kvinFetches.size() - 1;
+            TupleExpr root = kvinFetches.get(i--);
+            while (i >= 0) {
+                root = new Join(kvinFetches.get(i--), root);
             }
 
             Join newLeft = new Join();
