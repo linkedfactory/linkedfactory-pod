@@ -11,20 +11,6 @@ import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
 import java.util.*;
 
 public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
-	public static class Parameters implements Cloneable {
-		public Var from;
-		public Var to;
-		public Var limit;
-		public Var interval;
-		public Var aggregationFunction;
-		public Var time;
-		public Var seqNr;
-
-		@Override
-		protected Parameters clone() throws CloneNotSupportedException {
-			return (Parameters) super.clone();
-		}
-	}
 
 	public final Map<Var, Parameters> parameterIndex = new HashMap<>();
 	public final Map<Var, List<StatementPattern>> referencedBy = new HashMap<>();
@@ -96,6 +82,9 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 			} else if (KVIN.SEQNR.equals(pValue)) {
 				// <> kvin:seqNr ?seqNr
 				createParameters(sp.getSubjectVar()).seqNr = o;
+			} else if (KVIN.INDEX.equals(pValue)) {
+				// <> kvin:index ?index
+				createParameters(sp.getSubjectVar()).index = o;
 			} else {
 				if (KVIN.VALUE.equals(pValue)) {
 					// ensure that parameters are created if only kvin:value is present

@@ -6,11 +6,7 @@ import io.github.linkedfactory.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.query.KvinFetchEvaluationStep;
 import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
-import io.github.linkedfactory.service.rdf4j.query.ParameterScanner.Parameters;
-import net.enilink.komma.core.URI;
-import net.enilink.komma.core.URIs;
-import java.math.BigDecimal;
-import java.math.BigInteger;
+import io.github.linkedfactory.service.rdf4j.query.Parameters;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
@@ -22,8 +18,6 @@ import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.common.iteration.Iteration;
 import org.eclipse.rdf4j.common.iteration.IterationWrapper;
 import org.eclipse.rdf4j.common.iteration.SingletonIteration;
-import org.eclipse.rdf4j.model.IRI;
-import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleBNode;
@@ -46,6 +40,7 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
 import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
+import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.*;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
@@ -59,46 +54,6 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
         this.kvin = kvin;
         this.scanner = scanner;
         this.vf = vf;
-    }
-
-    public static long getLongValue(Var var, BindingSet bs, long defaultValue) {
-        if (var == null) {
-            return defaultValue;
-        }
-        Value v = getVarValue(var, bs);
-        if (v instanceof Literal) {
-            return ((Literal) v).longValue();
-        }
-        return defaultValue;
-    }
-
-    static Value toRdfValue(Object value, ValueFactory vf) {
-        Value rdfValue;
-        if (value instanceof URI) {
-            rdfValue = vf.createIRI(value.toString());
-        } else if (value instanceof Double) {
-            rdfValue = vf.createLiteral((Double) value);
-        } else if (value instanceof Float) {
-            rdfValue = vf.createLiteral((Float) value);
-        } else if (value instanceof Integer) {
-            rdfValue = vf.createLiteral((Integer) value);
-        } else if (value instanceof Long) {
-            rdfValue = vf.createLiteral((Long) value);
-        } else if (value instanceof BigDecimal) {
-            rdfValue = vf.createLiteral((BigDecimal) value);
-        } else if (value instanceof BigInteger) {
-            rdfValue = vf.createLiteral((BigInteger) value);
-        } else {
-            rdfValue = vf.createLiteral(value.toString());
-        }
-        return rdfValue;
-    }
-
-    public static net.enilink.komma.core.URI toKommaUri(Value value) {
-        if (value instanceof IRI) {
-            return URIs.createURI(value.toString());
-        }
-        return null;
     }
 
     @Override

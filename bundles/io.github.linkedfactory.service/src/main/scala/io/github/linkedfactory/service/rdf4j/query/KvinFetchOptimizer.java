@@ -1,7 +1,5 @@
 package io.github.linkedfactory.service.rdf4j.query;
 
-import io.github.linkedfactory.service.rdf4j.KVIN;
-import io.github.linkedfactory.service.rdf4j.query.ParameterScanner.Parameters;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;

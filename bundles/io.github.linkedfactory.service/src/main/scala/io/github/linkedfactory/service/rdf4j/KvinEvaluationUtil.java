@@ -3,15 +3,19 @@ package io.github.linkedfactory.service.rdf4j;
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.BNodeWithValue;
-import io.github.linkedfactory.service.rdf4j.query.ParameterScanner.Parameters;
+import io.github.linkedfactory.service.rdf4j.query.Parameters;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.LinkedList;
+import java.util.NoSuchElementException;
 
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
+import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
@@ -25,10 +29,47 @@ import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import static io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.*;
 
 public class KvinEvaluationUtil {
+
     private final Kvin kvin;
 
     public KvinEvaluationUtil(Kvin kvin) {
         this.kvin = kvin;
+    }
+
+    public static long getLongValue(Value v, long defaultValue) {
+        if (v instanceof Literal) {
+            return ((Literal) v).longValue();
+        }
+        return defaultValue;
+    }
+
+    static Value toRdfValue(Object value, ValueFactory vf) {
+        Value rdfValue;
+        if (value instanceof URI) {
+            rdfValue = vf.createIRI(value.toString());
+        } else if (value instanceof Double) {
+            rdfValue = vf.createLiteral((Double) value);
+        } else if (value instanceof Float) {
+            rdfValue = vf.createLiteral((Float) value);
+        } else if (value instanceof Integer) {
+            rdfValue = vf.createLiteral((Integer) value);
+        } else if (value instanceof Long) {
+            rdfValue = vf.createLiteral((Long) value);
+        } else if (value instanceof BigDecimal) {
+            rdfValue = vf.createLiteral((BigDecimal) value);
+        } else if (value instanceof BigInteger) {
+            rdfValue = vf.createLiteral((BigInteger) value);
+        } else {
+            rdfValue = vf.createLiteral(value.toString());
+        }
+        return rdfValue;
+    }
+
+    public static net.enilink.komma.core.URI toKommaUri(Value value) {
+        if (value instanceof IRI) {
+            return URIs.createURI(value.toString());
+        }
+        return null;
     }
 
     public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(ValueFactory vf,
@@ -61,14 +102,26 @@ public class KvinEvaluationUtil {
             pred = URIs.createURI(pred.toString().substring(2));
         }
 
-        long begin = getLongValue(params.from, bs, 0L);
-        long end = getLongValue(params.to, bs, KvinTuple.TIME_MAX_VALUE);
-        long limit = getLongValue(params.limit, bs, 0);
-        final long interval = getLongValue(params.interval, bs, 0);
+        Value fromValue = getVarValue(params.from, bs);
+        Value toValue = getVarValue(params.to, bs);
+        Value limitValue = getVarValue(params.limit, bs);
+        Value intervalValue = getVarValue(params.interval, bs);
+        Value aggregationFuncValue = getVarValue(params.aggregationFunction, bs);
+
+        // if one of the required parameters is not bound then return an empty iteration
+        if (params.from != null && fromValue == null || params.to != null && toValue == null
+            || params.limit != null && limitValue == null || params.interval != null && intervalValue == null
+            || params.aggregationFunction != null && aggregationFuncValue == null) {
+            return new EmptyIteration<>();
+        }
+
+        long begin = getLongValue(fromValue, 0L);
+        long end = getLongValue(toValue, KvinTuple.TIME_MAX_VALUE);
+        long limit = getLongValue(limitValue, 0);
+        final long interval = getLongValue(intervalValue, 0);
 
         final String aggregationFunc;
         if (params.aggregationFunction != null) {
-            Value aggregationFuncValue = getVarValue(params.aggregationFunction, bs);
             aggregationFunc = aggregationFuncValue instanceof IRI ? ((IRI) aggregationFuncValue).getLocalName() : null;
         } else {
             aggregationFunc = null;
@@ -95,6 +148,7 @@ public class KvinEvaluationUtil {
         Var seqNr = params.seqNr;
         Value seqNrValue = getVarValue(seqNr, bs);
         Integer seqNrValueInt = seqNrValue == null ? null : ((Literal) seqNrValue).intValue();
+        Value indexValue = getVarValue(params.index, bs);
 
         final LinkedList<URI> properties = new LinkedList<>();
         if (pred != null) {
@@ -105,83 +159,97 @@ public class KvinEvaluationUtil {
         }
 
         final long beginFinal = begin, endFinal = end, limitFinal = limit;
-        final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<>() {
+        final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<BindingSet, QueryEvaluationException>() {
             IExtendedIterator<KvinTuple> it;
             IRI currentPropertyIRI;
+            int index;
+            BindingSet next;
 
             @Override
             public boolean hasNext() throws QueryEvaluationException {
-                boolean hasNext = it == null ? false : it.hasNext();
-                if (!hasNext && it != null) {
-                    it.close();
+                if (next != null) {
+                    return true;
                 }
-                if (!hasNext && !properties.isEmpty()) {
+                if (it != null) {
+                    next = computeNext();
+                    if (next == null) {
+                        it.close();
+                    }
+                }
+                if (next == null && !properties.isEmpty()) {
+                    // reset index
+                    index = -1;
+
                     URI currentProperty = properties.remove();
                     if (currentProperty.isRelative()) {
                         currentPropertyIRI = vf.createIRI("r:" + currentProperty);
                     } else {
                         currentPropertyIRI = vf.createIRI(currentProperty.toString());
                     }
+
                     // create iterator with values for current property
-                    it = kvin.fetch(item, currentProperty, context[0], endFinal, beginFinal, limitFinal, interval,
-                        aggregationFunc);
-                    // filters any tuple that does not match the requested seqNr, if any
-                    // this is required because the fetch() method does not filter on a specific seqNr
-                    it = new WrappedIterator<>(it) {
-                        KvinTuple next;
-
-                        @Override
-                        public boolean hasNext() {
-                            if (next == null) {
-                                while (super.hasNext()) {
-                                    KvinTuple tuple = super.next();
-                                    if (seqNrValueInt == null || seqNrValueInt.intValue() == tuple.seqNr) {
-                                        next = tuple;
-                                        break;
-                                    }
-                                }
-                            }
-                            return next != null;
-                        }
-
-                        @Override
-                        public KvinTuple next() {
-                            KvinTuple result = next;
-                            next = null;
-                            return result;
-                        }
-                    };
-
-                    hasNext = it.hasNext();
-                    if (!hasNext) {
+                    it = kvin.fetch(item, currentProperty, context[0], endFinal, beginFinal, limitFinal, interval, aggregationFunc);
+                    next = computeNext();
+                    if (next == null) {
                         it.close();
                     }
                 }
-                return hasNext;
+                return next != null;
             }
 
             @Override
             public BindingSet next() throws QueryEvaluationException {
-                KvinTuple tuple = it.next();
-                QueryBindingSet newBs = new QueryBindingSet(bs);
+                if (next == null) {
+                    throw new NoSuchElementException();
+                }
+                BindingSet result = next;
+                next = null;
+                return result;
+            }
 
-                if (!objectVar.isConstant() && !bs.hasBinding(objectVar.getName())) {
-                    Value objectValue = new BNodeWithValue(tuple);
-                    newBs.addBinding(objectVar.getName(), objectValue);
+            BindingSet computeNext() {
+                if (it == null) {
+                    return null;
                 }
-                if (!predVar.isConstant()) {
-                    newBs.addBinding(predVar.getName(), currentPropertyIRI);
+                while (it.hasNext()) {
+                    KvinTuple tuple = it.next();
+                    // adds a zero-based index to each returned tuple
+                    index++;
+
+                    // filters any tuple that does not match the requested seqNr, if any
+                    if (seqNrValueInt != null && seqNrValueInt.intValue() != tuple.seqNr) {
+                        continue;
+                    }
+
+                    // filters any tuple that does not match the requested index, if any
+                    if (indexValue != null && (!indexValue.isLiteral() || ((Literal) indexValue).intValue() != index)) {
+                        continue;
+                    }
+
+                    QueryBindingSet newBs = new QueryBindingSet(bs);
+                    if (!objectVar.isConstant() && !bs.hasBinding(objectVar.getName())) {
+                        Value objectValue = new BNodeWithValue(tuple);
+                        newBs.addBinding(objectVar.getName(), objectValue);
+                    }
+                    if (!predVar.isConstant()) {
+                        newBs.addBinding(predVar.getName(), currentPropertyIRI);
+                    }
+                    if (time != null && !time.isConstant() && !bs.hasBinding(time.getName())) {
+                        newBs.addBinding(time.getName(), toRdfValue(tuple.time, vf));
+                    }
+                    if (contextVar != null && !contextVar.isConstant()) {
+                        newBs.addBinding(contextVar.getName(), contextValue[0]);
+                    }
+                    if (seqNr != null && seqNrValue == null) {
+                        newBs.addBinding(seqNr.getName(), toRdfValue(tuple.seqNr, vf));
+                    }
+                    if (params.index != null && indexValue == null) {
+                        newBs.addBinding(params.index.getName(), toRdfValue(index, vf));
+                    }
+
+                    return newBs;
                 }
-                if (time != null && !time.isConstant() && !bs.hasBinding(time.getName())) {
-                    newBs.addBinding(time.getName(), toRdfValue(tuple.time, vf));
-                }
-                if (contextVar != null && !contextVar.isConstant()) {
-                    newBs.addBinding(contextVar.getName(), contextValue[0]);
-                }
-                if (seqNr != null && seqNrValue == null) {
-                    newBs.addBinding(seqNr.getName(), toRdfValue(tuple.seqNr, vf));
-                }
-                return newBs;
+                return null;
             }
 
             @Override

@@ -1,17 +1,15 @@
 package io.github.linkedfactory.service.rdf4j.query;
 
-import io.github.linkedfactory.service.rdf4j.query.ParameterScanner.Parameters;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import org.eclipse.rdf4j.query.algebra.AbstractQueryModelNode;
 import org.eclipse.rdf4j.query.algebra.QueryModelVisitor;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.UnaryTupleOperator;
 
 public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
-    final ParameterScanner.Parameters params;
+    final Parameters params;
 
     public KvinFetch(StatementPattern stmt, Parameters params) {
         super(stmt);
@@ -30,6 +28,9 @@ public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
         }
         if (params.to != null) {
             names.add(params.to.getName());
+        }
+        if (params.index != null) {
+            names.add(params.index.getName());
         }
     }
 

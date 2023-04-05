@@ -147,7 +147,7 @@ class ServiceTest {
       val time = START_TIME + 50
 
       val baseUri = "http://example.org/"
-      val queryStr = s"""select * where {
+      val queryStr = s"""select distinct * where {
   service <kvin:> {
     <item-1> <property:value> [ <kvin:value> ?v1_value ; <kvin:time> ?time ; <kvin:to> $time ] .
     <item-2> <property:value> [ <kvin:value> ?v2_value ; <kvin:limit> 1 ; <kvin:to> ?time ] .
@@ -157,12 +157,15 @@ class ServiceTest {
 
       val dataByItemAndTime = data.groupBy(_.item).view.mapValues(_.groupBy(_.time))
 
+      var expectedItem1Values = dataByItemAndTime(itemUri(1)).filter(_._1 <= time)
+
       val r = query.evaluate
       while (r.hasNext) {
         val bs = r.next
         val time = bs.getValue("time").asInstanceOf[Literal].longValue()
 
-        val item1Value = dataByItemAndTime(itemUri(1))(time).head.value
+        val item1Value = expectedItem1Values(time).head.value
+        expectedItem1Values = expectedItem1Values.removed(time)
         val item2Value = dataByItemAndTime(itemUri(2))(time).head.value
 
         Assert.assertEquals(item1Value.asInstanceOf[Double],
@@ -170,6 +173,9 @@ class ServiceTest {
         Assert.assertEquals(item2Value.asInstanceOf[Double],
           bs.getValue("v2_value").asInstanceOf[Literal].doubleValue, 0.001)
       }
+
+      Assert.assertTrue("Expected values should all be returned by query",
+        expectedItem1Values.isEmpty)
     } finally {
       conn.close
     }
