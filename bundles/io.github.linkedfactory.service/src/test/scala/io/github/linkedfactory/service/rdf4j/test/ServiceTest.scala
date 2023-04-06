@@ -16,10 +16,10 @@
 package io.github.linkedfactory.service.rdf4j.test
 
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
+import io.github.linkedfactory.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.service.rdf4j.KvinFederatedService
 import net.enilink.komma.core.URIs
-import org.eclipse.rdf4j.model.Literal
+import org.eclipse.rdf4j.model.{IRI, Literal}
 import org.eclipse.rdf4j.query.QueryLanguage
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver
 import org.eclipse.rdf4j.repository.Repository
@@ -43,7 +43,7 @@ class ServiceTest {
 
   @Test
   def basicTest {
-    addData(10, 10)
+    val data = addData(10, 10)
 
     val conn = repository.getConnection
     val vf = repository.getValueFactory
@@ -51,21 +51,67 @@ class ServiceTest {
       val time = START_TIME + 20
 
       val values = "values ?item { <item-1> <item-2> }"
-      val queryStr = s"select * where { $values service <kvin:> { ?item <property:value> ?v . ?v <kvin:to> $time ; <kvin:limit> 1 . ?v <kvin:value> ?value ; <kvin:time> ?time } }"
+      val queryStr =
+        s"""select * where { $values service <kvin:> {
+           |?item <property:value> ?v . ?v <kvin:to> $time ; <kvin:limit> 1 .
+           |?v <kvin:value> ?value ; <kvin:time> ?time } }""".stripMargin
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, "http://example.org/")
 
-      val start = System.currentTimeMillis
-      val count = 1000
-      for (i <- 0 to count) {
-        val r = query.evaluate
-        while (r.hasNext) {
-          val bs = r.next
-          //if ((i % 100) == 0) println(bs.toString)
-        }
-        r.close
+      val dataByItemAndTime = data.filter(_.time <= time).groupBy(_.item)
+        .view.mapValues(_.groupBy(_.time))
+
+      val r = query.evaluate
+      while (r.hasNext) {
+        val bs = r.next
+        val item = URIs.createURI(bs.getValue("item").toString)
+        val time = bs.getValue("time").asInstanceOf[Literal].longValue()
+
+        val itemValue = dataByItemAndTime(item)(time).head.value
+
+        Assert.assertEquals(itemValue.asInstanceOf[Double],
+          bs.getValue("value").asInstanceOf[Literal].doubleValue, 0.001)
       }
-      val duration = (System.currentTimeMillis - start) / 1000.0
-      println("Queries per second: " + (count / duration))
+      r.close
+    } finally {
+      conn.close
+    }
+  }
+
+  @Test
+  def recordTest {
+    val data = addRecords(2, 10)
+
+    val conn = repository.getConnection
+    val vf = repository.getValueFactory
+    try {
+      val time = START_TIME + 20
+
+      val values = "values ?item { <item-1> <item-2> }"
+      val queryStr =
+        s"""select * where { $values service <kvin:> {
+           |?item <property:value> ?v . ?v <kvin:to> $time ; <kvin:limit> 1 .
+           |?v <kvin:value> ?record ; <kvin:time> ?time .
+           |?record <p:3> [ <p:nested> ?value ]
+           |} }""".stripMargin
+      val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, "http://example.org/")
+
+      val dataByItemAndTime = data.filter(_.time <= time).groupBy(_.item)
+        .view.mapValues(_.groupBy(_.time))
+
+      val r = query.evaluate
+      while (r.hasNext) {
+        val bs = r.next
+        val item = URIs.createURI(bs.getValue("item").toString)
+        val time = bs.getValue("time").asInstanceOf[Literal].longValue()
+
+        val itemValue = dataByItemAndTime(item)(time).head.value
+
+        Assert.assertEquals(itemValue.asInstanceOf[Record]
+          .first(URIs.createURI("p:3")).getValue.asInstanceOf[Record]
+          .first(URIs.createURI("p:nested")).getValue.asInstanceOf[Double],
+          bs.getValue("value").asInstanceOf[Literal].doubleValue, 0.001)
+      }
+      r.close
     } finally {
       conn.close
     }
@@ -73,27 +119,40 @@ class ServiceTest {
 
   @Test
   def testLimit {
-    addData(10, 10)
+    val data = addData(10, 10)
 
     val conn = repository.getConnection
     val vf = repository.getValueFactory
     try {
-      val time = START_TIME + 20
+      val maxLimit = 5
+      // ensure that at least maxLimit values are returned
+      val time = START_TIME + (maxLimit + 1) * 10
 
       val baseUri = "http://example.org/"
-      val values = "values ?item { <item-1> <item-2> }"
-      val queryStr = s"select * where { $values service <kvin:> { ?item <property:value> ?v1 . ?v1 <kvin:value> ?value ; <kvin:time> ?time ; <kvin:to> $time ; <kvin:limit> 1 } }"
+      val itemCount = 2
+      val values = s"values ?item { ${
+        1.to(itemCount).map(i => "<item-" + i + ">").mkString(" ")
+      } }"
+      val queryStr =
+        s"""select distinct * where { $values service <kvin:> {
+           |?item <property:value> ?v1 .
+           |?v1 <kvin:value> ?value ; <kvin:time> ?time ;
+           |<kvin:to> $time ; <kvin:limit> ?limit }
+           |}""".stripMargin
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, baseUri)
 
-      val r = query.evaluate
-      try {
-        for (i <- 1 to 2) {
-          Assert.assertTrue(r.hasNext)
-          r.next
+      for (limit <- 1 to maxLimit) {
+        query.setBinding("limit", vf.createLiteral(limit))
+        val r = query.evaluate
+        try {
+          1.to(itemCount * limit).foreach { _ =>
+            Assert.assertTrue(r.hasNext)
+            r.next
+          }
+          Assert.assertFalse(r.hasNext)
+        } finally {
+          r.close
         }
-        Assert.assertFalse(r.hasNext)
-      } finally {
-        r.close
       }
     } finally {
       conn.close
@@ -190,6 +249,23 @@ class ServiceTest {
       val uri = itemUri(nr)
       for (i <- 1 to values) yield {
         val value = rand.nextDouble * rand.nextInt(100)
+        val seqNr = i % 1000
+        val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, seqNr, value)
+        store.put(tuple)
+        time += 10
+        tuple
+      }
+    }.toList
+  }
+
+  def addRecords(items: Int, values: Int): List[KvinTuple] = {
+    val rand = new Random(seed)
+    (1 until items).flatMap{ nr =>
+      var time = START_TIME
+      val uri = itemUri(nr)
+      for (i <- 1 to values) yield {
+        val value = new Record(URIs.createURI("p:" + i),
+          new Record(URIs.createURI("p:nested"), rand.nextDouble * rand.nextInt(100)))
         val seqNr = i % 1000
         val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, seqNr, value)
         store.put(tuple)

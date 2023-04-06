@@ -19,14 +19,17 @@ import java.util.Set;
 
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
+import org.eclipse.rdf4j.query.algebra.BindingSetAssignment;
 import org.eclipse.rdf4j.query.algebra.Join;
 import org.eclipse.rdf4j.query.algebra.LeftJoin;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
+import org.eclipse.rdf4j.query.algebra.ZeroLengthPath;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryOptimizer;
 import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
 import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
+import org.eclipse.rdf4j.query.algebra.helpers.collectors.StatementPatternCollector;
 
 /**
  * A query optimizer that re-orders nested Joins.
@@ -134,15 +137,60 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 				} else if (fetchJoins != null) {
 					priorityJoins = new Join(priorityJoins, fetchJoins);
 				}
+				if (priorityJoins != null) {
+					boundVars.addAll(priorityJoins.getBindingNames());
+				}
 
+				// Reorder the (recursive) join arguments to a more optimal sequence
+				List<TupleExpr> orderedJoinArgs = new ArrayList<>(joinArgs.size());
+
+				// We order all remaining join arguments based on cardinality and
+				// variable frequency statistics
 				if (joinArgs.size() > 0) {
+					// Build maps of cardinalities and vars per tuple expression
+					Map<TupleExpr, Double> cardinalityMap = new HashMap<>();
+					Map<TupleExpr, List<Var>> varsMap = new HashMap<>();
+
+					for (TupleExpr tupleExpr : joinArgs) {
+						double cardinality = 1.0; //statistics.getCardinality(tupleExpr);
+						tupleExpr.setResultSizeEstimate(Math.max(cardinality, tupleExpr.getResultSizeEstimate()));
+						cardinalityMap.put(tupleExpr, cardinality);
+						if (tupleExpr instanceof ZeroLengthPath) {
+							varsMap.put(tupleExpr, ((ZeroLengthPath) tupleExpr).getVarList());
+						} else {
+							varsMap.put(tupleExpr, getStatementPatternVars(tupleExpr));
+						}
+					}
+
+					// Build map of var frequences
+					Map<Var, Integer> varFreqMap = new HashMap<>();
+					for (List<Var> varList : varsMap.values()) {
+						getVarFreqMap(varList, varFreqMap);
+					}
+
+					// order all other join arguments based on available statistics
+					while (!joinArgs.isEmpty()) {
+						TupleExpr tupleExpr = selectNextTupleExpr(joinArgs, cardinalityMap, varsMap, varFreqMap,
+							boundVars);
+
+						joinArgs.remove(tupleExpr);
+						orderedJoinArgs.add(tupleExpr);
+
+						// Recursively optimize join arguments
+						tupleExpr.visit(this);
+
+						boundVars.addAll(tupleExpr.getBindingNames());
+					}
+				}
+
+				if (orderedJoinArgs.size() > 0) {
 					// Note: generated hierarchy is right-recursive to help the
 					// IterativeEvaluationOptimizer to factor out the left-most join
 					// argument
-					int i = joinArgs.size() - 1;
-					TupleExpr replacement = joinArgs.get(i);
+					int i = orderedJoinArgs.size() - 1;
+					TupleExpr replacement = orderedJoinArgs.get(i);
 					for (i--; i >= 0; i--) {
-						replacement = new Join(joinArgs.get(i), replacement);
+						replacement = new Join(orderedJoinArgs.get(i), replacement);
 					}
 
 					if (priorityJoins != null) {
@@ -158,7 +206,6 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 					if (priorityJoins != null) {
 						optimizePriorityJoin(origBoundVars, priorityJoins);
 					}
-
 				} else {
 					// only subselect/priority joins involved in this query.
 					node.replaceWith(priorityJoins);
@@ -178,6 +225,15 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 			}
 
 			return joinArgs;
+		}
+
+		protected List<Var> getStatementPatternVars(TupleExpr tupleExpr) {
+			List<StatementPattern> stPatterns = StatementPatternCollector.process(tupleExpr);
+			List<Var> varList = new ArrayList<>(stPatterns.size() * 4);
+			for (StatementPattern sp : stPatterns) {
+				sp.getVars(varList);
+			}
+			return varList;
 		}
 
 		protected <M extends Map<Var, Integer>> M getVarFreqMap(List<Var> varList, M varFreqMap) {
@@ -242,7 +298,6 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 		 * @return the optimized ordering of expressions
 		 */
 		protected List<TupleExpr> reorderSubselects(List<TupleExpr> subselects) {
-
 			if (subselects.size() == 1) {
 				return subselects;
 			}
@@ -356,6 +411,91 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 			}
 
 			return selected;
+		}
+
+		/**
+		 * Selects from a list of tuple expressions the next tuple expression that should be evaluated. This method
+		 * selects the tuple expression with highest number of bound variables, preferring variables that have been
+		 * bound in other tuple expressions over variables with a fixed value.
+		 */
+		protected TupleExpr selectNextTupleExpr(List<TupleExpr> expressions, Map<TupleExpr, Double> cardinalityMap,
+			Map<TupleExpr, List<Var>> varsMap, Map<Var, Integer> varFreqMap, Set<String> boundVars) {
+			TupleExpr result = null;
+			double lowestCost = Double.POSITIVE_INFINITY;
+
+			for (TupleExpr tupleExpr : expressions) {
+				// Calculate a score for this tuple expression
+				double cost = getTupleExprCost(tupleExpr, cardinalityMap, varsMap, varFreqMap,
+					boundVars);
+
+				if (cost < lowestCost || result == null) {
+					// More specific path expression found
+					lowestCost = cost;
+					result = tupleExpr;
+				}
+			}
+
+			result.setCostEstimate(lowestCost);
+			return result;
+		}
+
+		protected double getTupleExprCost(TupleExpr tupleExpr, Map<TupleExpr, Double> cardinalityMap,
+			Map<TupleExpr, List<Var>> varsMap, Map<Var, Integer> varFreqMap, Set<String> boundVars) {
+			double cost = cardinalityMap.get(tupleExpr);
+			List<Var> vars = varsMap.get(tupleExpr);
+
+			// Compensate for variables that are bound earlier in the evaluation
+			List<Var> unboundVars = getUnboundVars(vars);
+			if (unboundVars.isEmpty()) {
+				// Prefer patterns with more bound vars
+				List<Var> constantVars = getConstantVars(vars);
+				int nonConstantVarCount = vars.size() - constantVars.size();
+				if (nonConstantVarCount > 0) {
+					cost /= nonConstantVarCount;
+				}
+			} else {
+				// different from the standard QueryJoinOptimizer this always prefers tuple expressions with fewer unbound vars
+				int boundVarsCount = vars.size() - unboundVars.size();
+				if (boundVarsCount > 0) {
+					cost /= 1 + boundVarsCount;
+				}
+			}
+
+			// BindingSetAssignment has a typical constant cost. This cost is not based on statistics so is much more
+			// reliable. If the BindingSetAssignment binds to any of the other variables in the other tuple expressions
+			// to choose from, then the cost of the BindingSetAssignment should be set to 0 since it will always limit
+			// the upper bound of any other costs. This way the BindingSetAssignment will be chosen as the left
+			// argument.
+			if (tupleExpr instanceof BindingSetAssignment) {
+				Set<Var> varsUsedInOtherExpressions = varFreqMap.keySet();
+				for (String assuredBindingName : tupleExpr.getAssuredBindingNames()) {
+					if (varsUsedInOtherExpressions.contains(new Var(assuredBindingName))) {
+						cost = 0;
+						break;
+					}
+				}
+			}
+			return cost;
+		}
+
+		protected List<Var> getConstantVars(Iterable<Var> vars) {
+			List<Var> constantVars = new ArrayList<>();
+			for (Var var : vars) {
+				if (var.hasValue()) {
+					constantVars.add(var);
+				}
+			}
+			return constantVars;
+		}
+
+		protected List<Var> getUnboundVars(Iterable<Var> vars) {
+			List<Var> unboundVars = new ArrayList<>();
+			for (Var var : vars) {
+				if (!var.hasValue() && !this.boundVars.contains(var.getName())) {
+					unboundVars.add(var);
+				}
+			}
+			return unboundVars;
 		}
 	}
 

@@ -122,21 +122,24 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                     }
                     return new EmptyIteration<>();
                 }
-                // TODO support other properties
             }
         } else if (data instanceof Record) {
             Value predValue = getVarValue(stmt.getPredicateVar(), bs);
-            net.enilink.komma.core.URI predicate = toKommaUri(subjectValue);
+            net.enilink.komma.core.URI predicate = toKommaUri(predValue);
             if (predicate != null) {
                 Record r = ((Record) data).first(predicate);
                 if (r != Record.NULL) {
-                    Var valueVar = stmt.getObjectVar();
-                    QueryBindingSet newBs = new QueryBindingSet(bs);
-                    if (!valueVar.isConstant()) {
-                        // TODO recurse if getValue() is also a Record
-                        newBs.addBinding(valueVar.getName(), toRdfValue(r.getValue(), vf));
+                    Var objectVar = stmt.getObjectVar();
+                    Value objectVarValue = getVarValue(objectVar, bs);
+                    Value newValue = toRdfValue(r.getValue(), vf);
+                    if (objectVarValue == null) {
+                        QueryBindingSet newBs = new QueryBindingSet(bs);
+                        newBs.addBinding(objectVar.getName(), newValue);
+                        return new SingletonIteration<>(newBs);
+                    } else if (objectVarValue.equals(newValue)) {
+                        return new SingletonIteration<>(bs);
                     }
-                    return new SingletonIteration<>(newBs);
+                    return new EmptyIteration<>();
                 }
             }
         } else {

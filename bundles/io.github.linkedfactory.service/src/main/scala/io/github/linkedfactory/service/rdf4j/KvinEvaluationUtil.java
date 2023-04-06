@@ -2,6 +2,7 @@ package io.github.linkedfactory.service.rdf4j;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
+import io.github.linkedfactory.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.BNodeWithValue;
 import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.query.Parameters;
@@ -32,7 +33,6 @@ import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
-import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
 
 import static io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.*;
 
@@ -67,6 +67,8 @@ public class KvinEvaluationUtil {
             rdfValue = vf.createLiteral((BigDecimal) value);
         } else if (value instanceof BigInteger) {
             rdfValue = vf.createLiteral((BigInteger) value);
+        } else if (value instanceof Record) {
+            return new BNodeWithValue(value);
         } else {
             rdfValue = vf.createLiteral(value.toString());
         }
