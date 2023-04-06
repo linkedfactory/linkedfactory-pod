@@ -8,8 +8,10 @@ import io.github.linkedfactory.service.rdf4j.query.KvinFetchEvaluationStep;
 import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
 import io.github.linkedfactory.service.rdf4j.query.Parameters;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -67,32 +69,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
         if (subjectValue == null) {
             // this happens for patterns like (:subject :property [ <kvin:value> ?someValue ])
             // where [ <kvin:value> ?someValue ] is evaluated first
-            // referencedBy contains the pattern (:subject :property [...])
-            List<StatementPattern> referencedBy = scanner.referencedBy.get(subjectVar);
-            if (referencedBy != null) {
-                for (StatementPattern reference : referencedBy) {
-                    Value altSubjectValue = getVarValue(reference.getSubjectVar(), bs);
-                    if (altSubjectValue != null) {
-                        return new KvinIterationWrapper<>(evaluate(reference, bs)) {
-                            @Override
-                            public BindingSet next() throws QueryEvaluationException {
-                                BindingSet tempBs = super.next();
-                                // tempBs already contains additional bindings computed by evaluate(reference, bs)
-                                // as a side effect
-                                CloseableIteration<BindingSet, QueryEvaluationException> it = evaluate(stmt, tempBs);
-                                try {
-                                    if (it.hasNext()) {
-                                        return it.next();
-                                    }
-                                    return new EmptyBindingSet();
-                                } finally {
-                                    it.close();
-                                }
-                            }
-                        };
-                    }
-                }
-            }
+            // this case should be handled by correctly defining the evaluation order by reordering the SPARQL AST nodes
             return new EmptyIteration<>();
         }
 
@@ -178,46 +155,39 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
     @Override
     protected QueryEvaluationStep prepare(LeftJoin join, QueryEvaluationContext context) throws QueryEvaluationException {
-        if (containsFetch(join.getLeftArg()) && (join.getRightArg() instanceof KvinFetch ||
-            join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch)) {
-            return bindingSet -> new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet,
-                true);
-        }
-        return super.prepare(join, context);
+        QueryEvaluationStep prepared = super.prepare(join, context);
+        return bindingSet -> {
+            if (useHashJoin(join.getLeftArg(), join.getRightArg(), bindingSet.getBindingNames())) {
+                return new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, true);
+            }
+            return prepared.evaluate(bindingSet);
+        };
     }
 
     @Override
     protected QueryEvaluationStep prepare(Join join, QueryEvaluationContext context) throws QueryEvaluationException {
         return bindingSet -> {
-            if (containsFetch(join.getLeftArg()) && (join.getRightArg() instanceof KvinFetch ||
-                join.getRightArg() instanceof Join && ((Join) join.getRightArg()).getLeftArg() instanceof KvinFetch)) {
+            if (useHashJoin(join.getLeftArg(), join.getRightArg(), bindingSet.getBindingNames())) {
                 return new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, false);
             }
             return new KvinJoinIterator(KvinEvaluationStrategy.this, join, bindingSet);
         };
     }
 
-    protected boolean containsFetch(TupleExpr t) {
-        TupleExpr n = t;
-        ArrayDeque queue = null;
-        do {
-            if (n instanceof KvinFetch) {
-                return true;
-            }
-
-            if (n instanceof Projection && ((Projection) n).isSubquery() || n instanceof Service) {
-                return false;
-            }
-
-            List<TupleExpr> children = TupleExprs.getChildren(n);
-            if (!children.isEmpty()) {
-                if (queue == null) {
-                    queue = new ArrayDeque();
+    boolean useHashJoin(TupleExpr leftArg, TupleExpr rightArg, Set<String> bindingNames) {
+        if (containsFetch(leftArg)) {
+            KvinFetch rightFetch = rightArg instanceof KvinFetch ? (KvinFetch) rightArg : null;
+            while (rightArg instanceof Join && rightFetch == null) {
+                if (((Join) rightArg).getLeftArg() instanceof KvinFetch) {
+                    rightFetch = (KvinFetch) ((Join) rightArg).getLeftArg();
+                } else {
+                    rightArg = ((Join) rightArg).getLeftArg();
                 }
-                queue.addAll(children);
             }
-            n = queue != null ? (TupleExpr) queue.poll() : null;
-        } while (n != null);
+            if (rightFetch != null) {
+                return bindingNames.containsAll(rightFetch.getRequiredBindings());
+            }
+        }
         return false;
     }
 

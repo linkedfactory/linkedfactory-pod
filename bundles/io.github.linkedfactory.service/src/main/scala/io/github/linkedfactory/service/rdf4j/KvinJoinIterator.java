@@ -34,11 +34,12 @@ public class KvinJoinIterator extends LookAheadIteration<BindingSet, QueryEvalua
 		this.strategy = strategy;
 
 		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = strategy.evaluate(join.getLeftArg(), bindings);
-		if (leftIt.hasNext()) {
+		// strictly use lateral joins if left arg contains a KVIN fetch as right arg probably depends on the results
+		if (leftIt.hasNext() || KvinEvaluationUtil.containsFetch(join.getLeftArg())) {
 			joinArg = join.getRightArg();
 		} else {
 			leftIt.close();
-			leftIt =  strategy.evaluate(join.getRightArg(), bindings);
+			leftIt = strategy.evaluate(join.getRightArg(), bindings);
 			joinArg = join.getLeftArg();
 		}
 		rightIter = new EmptyIteration<>();

@@ -2,7 +2,10 @@ package io.github.linkedfactory.service.rdf4j.query;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.algebra.QueryModelVisitor;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
@@ -10,27 +13,31 @@ import org.eclipse.rdf4j.query.algebra.UnaryTupleOperator;
 
 public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
     final Parameters params;
+    final Set<String> requiredBindings;
 
     public KvinFetch(StatementPattern stmt, Parameters params) {
         super(stmt);
         this.params = params;
+        this.requiredBindings = computeRequiredBindings();
     }
 
-    protected void addAdditionalBindingNames(Set<String> names) {
+    protected void addAdditionalBindingNames(Set<String> names, boolean assured) {
         if (params.time != null) {
             names.add(params.time.getName());
         }
         if (params.seqNr != null) {
             names.add(params.seqNr.getName());
         }
-        if (params.from != null) {
-            names.add(params.from.getName());
-        }
-        if (params.to != null) {
-            names.add(params.to.getName());
-        }
         if (params.index != null) {
             names.add(params.index.getName());
+        }
+        if (! assured) {
+            if (params.from != null) {
+                names.add(params.from.getName());
+            }
+            if (params.to != null) {
+                names.add(params.to.getName());
+            }
         }
     }
 
@@ -38,7 +45,7 @@ public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
     public Set<String> getBindingNames() {
         Set<String> bindingNames = new LinkedHashSet(16);
         bindingNames.addAll(getArg().getBindingNames());
-        addAdditionalBindingNames(bindingNames);
+        addAdditionalBindingNames(bindingNames, false);
         return bindingNames;
     }
 
@@ -46,8 +53,18 @@ public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
     public Set<String> getAssuredBindingNames() {
         Set<String> assuredBindingNames = new LinkedHashSet(16);
         assuredBindingNames.addAll(getArg().getAssuredBindingNames());
-        addAdditionalBindingNames(assuredBindingNames);
+        addAdditionalBindingNames(assuredBindingNames, true);
         return assuredBindingNames;
+    }
+
+    public Set<String> getRequiredBindings() {
+        return requiredBindings;
+    }
+
+    Set<String> computeRequiredBindings() {
+        return Stream.of(params.from, params.to, params.interval, params.aggregationFunction)
+            .filter(p -> p != null).map(p -> p.getName()).collect(
+            Collectors.toSet());
     }
 
     @Override

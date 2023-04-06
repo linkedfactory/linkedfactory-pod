@@ -3,6 +3,7 @@ package io.github.linkedfactory.service.rdf4j;
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.query.Parameters;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.WrappedIterator;
@@ -10,7 +11,9 @@ import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayDeque;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
@@ -22,9 +25,14 @@ import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
+import org.eclipse.rdf4j.query.algebra.Projection;
+import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
+import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
+import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
+import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
 
 import static io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.*;
 
@@ -75,6 +83,9 @@ public class KvinEvaluationUtil {
     public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(ValueFactory vf,
         BindingSet bs, Parameters params, StatementPattern stmt) {
         net.enilink.komma.core.URI item = toKommaUri(getVarValue(stmt.getSubjectVar(), bs));
+        if (item == null) {
+            return new EmptyIteration<>();
+        }
 
         // the value of item is already known at this point
         // if item is null then it would have to be fetched from the
@@ -172,9 +183,6 @@ public class KvinEvaluationUtil {
                 }
                 if (it != null) {
                     next = computeNext();
-                    if (next == null) {
-                        it.close();
-                    }
                 }
                 if (next == null && !properties.isEmpty()) {
                     // reset index
@@ -187,12 +195,11 @@ public class KvinEvaluationUtil {
                         currentPropertyIRI = vf.createIRI(currentProperty.toString());
                     }
 
+                    // System.out.println("item=" + item + " property=" + currentProperty + " bindings=" + bs);
+
                     // create iterator with values for current property
                     it = kvin.fetch(item, currentProperty, context[0], endFinal, beginFinal, limitFinal, interval, aggregationFunc);
                     next = computeNext();
-                    if (next == null) {
-                        it.close();
-                    }
                 }
                 return next != null;
             }
@@ -249,6 +256,8 @@ public class KvinEvaluationUtil {
 
                     return newBs;
                 }
+                it.close();
+                it = null;
                 return null;
             }
 
@@ -265,5 +274,29 @@ public class KvinEvaluationUtil {
             }
         };
         return iteration;
+    }
+
+    public static boolean containsFetch(TupleExpr t) {
+        TupleExpr n = t;
+        ArrayDeque queue = null;
+        do {
+            if (n instanceof KvinFetch) {
+                return true;
+            }
+
+            if (n instanceof Projection && ((Projection) n).isSubquery() || n instanceof Service) {
+                return false;
+            }
+
+            List<TupleExpr> children = TupleExprs.getChildren(n);
+            if (!children.isEmpty()) {
+                if (queue == null) {
+                    queue = new ArrayDeque();
+                }
+                queue.addAll(children);
+            }
+            n = queue != null ? (TupleExpr) queue.poll() : null;
+        } while (n != null);
+        return false;
     }
 }
