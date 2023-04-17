@@ -13,6 +13,7 @@ import org.junit.Test;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.Assert.*;
 
@@ -24,6 +25,9 @@ public class KvinParquetTest extends KvinParquetTestBase {
     public static void setup() throws IOException {
         tempDir = Files.createTempDirectory("archive").toFile();
         kvinParquet = new KvinParquet(tempDir.getAbsolutePath() + "/");
+        /*FileUtils.deleteDirectory(new File("./target/archive"));
+        tempDir = new File("./target/archive");
+        kvinParquet = new KvinParquet(tempDir.getAbsolutePath() + "/");*/
 
         try {
             kvinParquet.put(generateRandomKvinTuples(50, 500, 10));
@@ -51,7 +55,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertNotNull(tuples);
             assertTrue(tuples.toList().size() > 0);
         } catch (Exception e) {
-            e.printStackTrace(System.err);
             fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
@@ -65,7 +68,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertNotNull(properties);
             assertTrue(properties.toList().size() > 0);
         } catch (Exception e) {
-            e.printStackTrace(System.err);
             fail("Something went wrong while testing KvinParquet properties() method");
         }
     }

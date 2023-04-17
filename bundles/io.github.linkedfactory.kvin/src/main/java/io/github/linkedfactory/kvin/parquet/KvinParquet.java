@@ -38,19 +38,16 @@ import java.util.*;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
+    final static ReflectData reflectData = new ReflectData(KvinParquet.class.getClassLoader());
     // parquet file writer config
     final int ROW_GROUP_SIZE = 5242880;  // 5 MB
     final int PAGE_SIZE = 8192; // 8 KB
     final int DICT_PAGE_SIZE = 3145728; // 3 MB
     final int PAGE_ROW_COUNT_LIMIT = 30000;
     final int ZSTD_COMPRESSION_LEVEL = 12; // 1 - 22
-
+    String archiveLocation;
     // global id counter
     int idCounter = 0;
-    String archiveLocation;
-
-    final static ReflectData reflectData = new ReflectData(KvinParquet.class.getClassLoader());
-
     // data file schema
     Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace(KvinParquet.class.getName()).fields()
             .name("id").type().nullable().intType().noDefault()
@@ -113,43 +110,65 @@ public class KvinParquet implements Kvin {
 
         Long nextChunkTimestamp = null;
         Calendar prevDate = null;
-        int fileMin = 1;
-        int folderMin = 1;
+        boolean writingToExistingYearFolder = false;
+
+        idCounter = getIdCounter();
+        int fileMin = idCounter == 0 ? 1 : idCounter + 1;
+        int folderMin = idCounter == 0 ? 1 : idCounter + 1;
 
         for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
 
             if (nextChunkTimestamp == null) nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
-            if (dataFile == null) {
-                dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
+            if (dataFile == null && mappingFile == null) {
+                int year = getDate(tuple.time).get(Calendar.YEAR);
+                if (!getExistingYears().contains(year)) {
+                    dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/data.parquet");
+                    mappingFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/mapping.parquet");
+                } else {
+                    File existingYearFolder = getExistingYearFolder(year);
+                    String existingYearFolderPath = existingYearFolder.getAbsolutePath();
+
+                    dataFile = new Path(existingYearFolderPath, "temp/data.parquet");
+                    mappingFile = new Path(existingYearFolderPath, "temp/mapping.parquet");
+                    folderMin = Integer.parseInt(existingYearFolder.getName().split("_")[0]);
+                    writingToExistingYearFolder = true;
+                }
                 parquetDataWriter = getParquetDataWriter(dataFile);
-            }
-            if (mappingFile == null) {
-                mappingFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "data.mapping.parquet");
                 parquetMappingWriter = getParquetMappingWriter(mappingFile);
             }
 
             // shredding file on week change
             if (tuple.time >= nextChunkTimestamp) {
                 //renaming existing data file with max, min ids
-                renameFile(dataFile, fileMin, idCounter);
+                renameFolder(dataFile, fileMin, idCounter);
+                if (writingToExistingYearFolder)
+                    renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
                 parquetDataWriter.close();
+                parquetMappingWriter.close();
 
                 fileMin = idCounter + 1;
                 nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
 
                 // handling year change
                 if (prevDate.get(Calendar.YEAR) != getDate(tuple.time).get(Calendar.YEAR)) {
-                    renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
+                    if (!writingToExistingYearFolder)
+                        renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
                     folderMin = idCounter + 1;
-
-                    parquetMappingWriter.close();
-                    mappingFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "data.mapping.parquet");
-                    parquetMappingWriter = getParquetMappingWriter(mappingFile);
+                    writingToExistingYearFolder = false;
                 }
 
-                dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp.parquet");
+                if (!writingToExistingYearFolder) {
+                    mappingFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/mapping.parquet");
+                    dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/data.parquet");
+                } else {
+                    int year = getDate(tuple.time).get(Calendar.YEAR);
+                    File existingYearFolder = getExistingYearFolder(year);
+                    mappingFile = new Path(existingYearFolder.getAbsolutePath(), "temp/mapping.parquet");
+                    dataFile = new Path(existingYearFolder.getAbsolutePath(), "temp/data.parquet");
+                }
                 parquetDataWriter = getParquetDataWriter(dataFile);
+                parquetMappingWriter = getParquetMappingWriter(mappingFile);
             }
 
             // building tuple
@@ -180,7 +199,7 @@ public class KvinParquet implements Kvin {
             prevDate = getDate(tuple.time);
 
         }
-        renameFile(dataFile, fileMin, idCounter);
+        renameFolder(dataFile, fileMin, idCounter);
         renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
         parquetMappingWriter.close();
         parquetDataWriter.close();
@@ -223,14 +242,55 @@ public class KvinParquet implements Kvin {
         return currentTimestamp + 604800;
     }
 
-    private void renameFile(Path file, int min, int max) throws IOException {
-        java.nio.file.Path currentFile = Paths.get(file.toString());
-        Files.move(currentFile, currentFile.resolveSibling(min + "_" + max + "_" + ".parquet"));
+    private int getIdCounter() {
+        int defaultId = 0;
+        if (new File(archiveLocation).exists()) {
+            File[] yearFolders = new File(archiveLocation).listFiles();
+            if (yearFolders != null && yearFolders.length > 0) {
+                Arrays.sort(yearFolders, (file1, file2) -> {
+                    Integer firstFileYear = Integer.valueOf(file1.getName().split("_")[2]);
+                    Integer secondFileYear = Integer.valueOf(file2.getName().split("_")[2]);
+                    return secondFileYear.compareTo(firstFileYear);
+                });
+                return Integer.parseInt(yearFolders[0].getName().split("_")[1]);
+            }
+        }
+        return defaultId;
+    }
+
+    private void renameFolder(Path file, int min, int max) throws IOException {
+        java.nio.file.Path currentFolder = Paths.get(file.getParent().toString());
+        Files.move(currentFolder, currentFolder.resolveSibling(min + "_" + max));
     }
 
     private void renameFolder(Path file, int min, int max, int year) throws IOException {
-        java.nio.file.Path currentFolder = Paths.get(file.getParent().toString());
+        java.nio.file.Path currentFolder = Paths.get(file.getParent().getParent().toString());
         Files.move(currentFolder, currentFolder.resolveSibling(min + "_" + max + "_" + year));
+    }
+
+    private ArrayList<Integer> getExistingYears() {
+        ArrayList<Integer> existingYears = new ArrayList<>();
+        File[] yearFolders = new File(archiveLocation).listFiles();
+        if (yearFolders != null) {
+            for (File yearFolder : yearFolders) {
+                int year = Integer.parseInt(yearFolder.getName().split("_")[2]);
+                if (!existingYears.contains(year)) existingYears.add(year);
+            }
+        }
+        return existingYears;
+    }
+
+    private File getExistingYearFolder(int existingYear) {
+        File[] yearFolders = new File(archiveLocation).listFiles();
+        File existingYearFolder = null;
+        for (File yearFolder : yearFolders) {
+            int year = Integer.parseInt(yearFolder.getName().split("_")[2]);
+            if (year == existingYear) {
+                existingYearFolder = yearFolder;
+                break;
+            }
+        }
+        return existingYearFolder;
     }
 
     private Calendar getDate(long timestamp) {
@@ -248,38 +308,37 @@ public class KvinParquet implements Kvin {
     private ArrayList<Mapping> getIdMapping(URI item, URI property, URI context) throws IOException {
         // scanning and sorting (by year) archive folders
         ArrayList<Mapping> mappings = new ArrayList<>();
-        File[] folders = new File(archiveLocation).listFiles();
-        Arrays.sort(folders, (file1, file2) -> {
-            Integer firstFileYear = Integer.valueOf(file1.getName().split("_")[2]);
-            Integer secondFileYear = Integer.valueOf(file2.getName().split("_")[2]);
-            return firstFileYear.compareTo(secondFileYear);
-        });
-        int prevMappingCount = 0;
-        boolean checkForOverlappingRead = false;
+        File[] yearFolders = new File(archiveLocation).listFiles();
+        if (yearFolders != null) {
+            Arrays.sort(yearFolders, (file1, file2) -> {
+                Integer firstFileYear = Integer.valueOf(file1.getName().split("_")[2]);
+                Integer secondFileYear = Integer.valueOf(file2.getName().split("_")[2]);
+                return firstFileYear.compareTo(secondFileYear);
+            });
+        } else {
+            return mappings;
+        }
 
         // finding ids of item & relevant properties
-        for (File folder : folders) {
-            Path mappingFile = new Path(folder.getPath() + "/data.mapping.parquet");
-            FilterPredicate filter = null;
-            int currentMappingCount = 0;
-            if (item != null && property != null) {
-                filter = and(eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString())), eq(FilterApi.binaryColumn("property"), Binary.fromString(property.toString())));
-            } else if (item != null) {
-                filter = eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString()));
-            }
-            try (ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(mappingFile, new Configuration()))
-                    .withDataModel(reflectData)
-                    .withFilter(FilterCompat.get(filter))
-                    .build()) {
-
-                Mapping mapping;
-                while ((mapping = reader.read()) != null) {
-                    currentMappingCount++;
-                    mappings.add(mapping);
+        for (File yearFolder : yearFolders) {
+            for (File weekFolder : yearFolder.listFiles()) {
+                Path mappingFile = new Path(weekFolder.getPath() + "/mapping.parquet");
+                FilterPredicate filter = null;
+                if (item != null && property != null) {
+                    filter = and(eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString())), eq(FilterApi.binaryColumn("property"), Binary.fromString(property.toString())));
+                } else if (item != null) {
+                    filter = eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString()));
                 }
-                if (currentMappingCount > 0) checkForOverlappingRead = true;
-                if (prevMappingCount == 0 && currentMappingCount == 0 && checkForOverlappingRead) break;
-                prevMappingCount = currentMappingCount;
+                try (ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(mappingFile, new Configuration()))
+                        .withDataModel(reflectData)
+                        .withFilter(FilterCompat.get(filter))
+                        .build()) {
+
+                    Mapping mapping;
+                    while ((mapping = reader.read()) != null) {
+                        mappings.add(mapping);
+                    }
+                }
             }
         }
         return mappings;
@@ -519,19 +578,19 @@ public class KvinParquet implements Kvin {
         // matching ids with relevant parquet files
         if (yearWiseFolders != null) {
             for (Mapping mapping : idMappings) {
-                for (File folder : yearWiseFolders) {
+                for (File yearFolder : yearWiseFolders) {
                     try {
-                        String[] FolderIdMinMaxData = folder.getName().split("_");
+                        String[] FolderIdMinMaxData = yearFolder.getName().split("_");
                         int folderMin = Integer.parseInt(FolderIdMinMaxData[0]);
                         int folderMax = Integer.parseInt(FolderIdMinMaxData[1]);
                         if (mapping.getId() >= folderMin && mapping.getId() <= folderMax) {
-                            for (File file : new File(folder.getPath()).listFiles()) {
+                            for (File weekFolder : new File(yearFolder.getPath()).listFiles()) {
                                 try {
-                                    String[] fileIdMinMaxData = file.getName().split("_");
-                                    int fileMin = Integer.parseInt(fileIdMinMaxData[0]);
-                                    int fileMax = Integer.parseInt(fileIdMinMaxData[1]);
-                                    if (mapping.getId() >= fileMin && mapping.getId() <= fileMax) {
-                                        Path path = new Path(file.getPath());
+                                    String[] weekFolderIdMinMaxData = weekFolder.getName().split("_");
+                                    int weekFolderMin = Integer.parseInt(weekFolderIdMinMaxData[0]);
+                                    int weekFolderMax = Integer.parseInt(weekFolderIdMinMaxData[1]);
+                                    if (mapping.getId() >= weekFolderMin && mapping.getId() <= weekFolderMax) {
+                                        Path path = new Path(weekFolder.getPath() + "/data.parquet");
                                         if (!matchedFiles.contains(path)) matchedFiles.add(path);
                                         break;
                                     }
