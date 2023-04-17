@@ -1,5 +1,10 @@
 package io.github.linkedfactory.service.rdf4j;
 
+import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.compareAndBind;
+import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.containsFetch;
+import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.toKommaUri;
+import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.toRdfValue;
+
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
@@ -7,19 +12,22 @@ import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.query.KvinFetchEvaluationStep;
 import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
 import io.github.linkedfactory.service.rdf4j.query.Parameters;
-import java.util.ArrayDeque;
-import java.util.Collections;
+import net.enilink.vocab.rdf.RDF;
+import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.common.iteration.Iteration;
 import org.eclipse.rdf4j.common.iteration.IterationWrapper;
 import org.eclipse.rdf4j.common.iteration.SingletonIteration;
+import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleBNode;
@@ -28,8 +36,6 @@ import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.Join;
 import org.eclipse.rdf4j.query.algebra.LeftJoin;
-import org.eclipse.rdf4j.query.algebra.Projection;
-import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
@@ -40,9 +46,6 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext.Minimal;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
-import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
-import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
-import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.*;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
@@ -78,49 +81,18 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
             KvinTuple tuple = (KvinTuple) data;
             Value predValue = getVarValue(stmt.getPredicateVar(), bs);
             if (predValue != null) {
-                QueryBindingSet newBs = new QueryBindingSet(bs);
                 if (KVIN.VALUE.equals(predValue)) {
                     Var valueVar = stmt.getObjectVar();
-                    Value valueVarValue = getVarValue(valueVar, bs);
-
-                    Value rdfValue;
-                    if (tuple.value instanceof Record) {
-                        // value is an event, create a blank node
-                        rdfValue = valueVar.isConstant() ? valueVar.getValue() : new BNodeWithValue(tuple.value);
-                    } else {
-                        // convert value to literal
-                        rdfValue = toRdfValue(tuple.value, vf);
-                    }
-
-                    if (valueVarValue == null) {
-                        newBs.addBinding(valueVar.getName(), rdfValue);
-                        return new SingletonIteration<>(newBs);
-                    } else if (valueVarValue.equals(rdfValue)) {
-                        return new SingletonIteration<>(newBs);
-                    }
-                    return new EmptyIteration<>();
+                    Value rdfValue = toRdfValue(tuple.value, vf);
+                    return compareAndBind(bs, valueVar, rdfValue);
                 } else if (KVIN.TIME.equals(predValue)) {
                     Var timeVar = stmt.getObjectVar();
-                    Value timeVarValue = getVarValue(timeVar, bs);
                     Value timeValue = toRdfValue(tuple.time, vf);
-                    if (timeVarValue == null) {
-                        newBs.addBinding(timeVar.getName(), timeValue);
-                        return new SingletonIteration<>(newBs);
-                    } else if (timeVarValue.equals(timeValue)) {
-                        return new SingletonIteration<>(newBs);
-                    }
-                    return new EmptyIteration<>();
+                    return compareAndBind(bs, timeVar, timeValue);
                 } else if (KVIN.SEQNR.equals(predValue)) {
                     Var seqNrVar = stmt.getObjectVar();
-                    Value seqNrVarValue = getVarValue(seqNrVar, bs);
                     Value seqNrValue = toRdfValue(tuple.seqNr, vf);
-                    if (seqNrVarValue == null) {
-                        newBs.addBinding(seqNrVar.getName(), seqNrValue);
-                        return new SingletonIteration<>(newBs);
-                    } else if (seqNrVarValue.equals(seqNrValue)) {
-                        return new SingletonIteration<>(newBs);
-                    }
-                    return new EmptyIteration<>();
+                    return compareAndBind(bs, seqNrVar, seqNrValue);
                 }
             }
         } else if (data instanceof Record) {
@@ -130,18 +102,46 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                 Record r = ((Record) data).first(predicate);
                 if (r != Record.NULL) {
                     Var objectVar = stmt.getObjectVar();
-                    Value objectVarValue = getVarValue(objectVar, bs);
                     Value newValue = toRdfValue(r.getValue(), vf);
-                    if (objectVarValue == null) {
-                        QueryBindingSet newBs = new QueryBindingSet(bs);
-                        newBs.addBinding(objectVar.getName(), newValue);
-                        return new SingletonIteration<>(newBs);
-                    } else if (objectVarValue.equals(newValue)) {
-                        return new SingletonIteration<>(bs);
-                    }
-                    return new EmptyIteration<>();
+                    return compareAndBind(bs, objectVar, newValue);
                 }
             }
+        } else if (data instanceof Object[] || data instanceof List<?>) {
+            List<?> list = data instanceof Object[] ? Arrays.asList((Object[]) data) : (List<?>) data;
+            Value predValue = getVarValue(stmt.getPredicateVar(), bs);
+            if (predValue == null) {
+                Iterator<?> it = list.iterator();
+                Var variable = stmt.getObjectVar();
+                return new AbstractCloseableIteration<>() {
+                    int i = 0;
+
+                    @Override
+                    public boolean hasNext() throws QueryEvaluationException {
+                        return it.hasNext();
+                    }
+
+                    @Override
+                    public BindingSet next() throws QueryEvaluationException {
+                        QueryBindingSet newBs = new QueryBindingSet(bs);
+                        newBs.addBinding(variable.getName(), toRdfValue(vf.createIRI(RDF.NAMESPACE, "_" + (++i)), vf));
+                        return newBs;
+                    }
+
+                    @Override
+                    public void remove() throws QueryEvaluationException {
+                        throw new UnsupportedOperationException();
+                    }
+                };
+            } else if (predValue.isIRI() && RDF.NAMESPACE.equals(((IRI) predValue).getNamespace())) {
+                String localName = ((IRI) predValue).getLocalName();
+                if (localName.matches("_[0-9]+")) {
+                    int index = Integer.parseInt(localName.substring(1));
+                    if (index > 0 && index <= list.size()) {
+                        return compareAndBind(bs, stmt.getObjectVar(), toRdfValue(list.get(index - 1), vf));
+                    }
+                }
+            }
+            return new EmptyIteration<>();
         } else {
             if (bs.hasBinding(stmt.getObjectVar().getName())) {
                 // bindings where already fully computed via scanner.referencedBy

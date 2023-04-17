@@ -16,10 +16,12 @@ import java.util.ArrayDeque;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
+import org.eclipse.rdf4j.common.iteration.SingletonIteration;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
@@ -68,6 +70,8 @@ public class KvinEvaluationUtil {
         } else if (value instanceof BigInteger) {
             rdfValue = vf.createLiteral((BigInteger) value);
         } else if (value instanceof Record) {
+            return new BNodeWithValue(value);
+        } else if (value instanceof Object[] || value instanceof List<?>) {
             return new BNodeWithValue(value);
         } else {
             rdfValue = vf.createLiteral(value.toString());
@@ -300,5 +304,17 @@ public class KvinEvaluationUtil {
             n = queue != null ? (TupleExpr) queue.poll() : null;
         } while (n != null);
         return false;
+    }
+
+    public static CloseableIteration<BindingSet, QueryEvaluationException>  compareAndBind(BindingSet bs, Var variable, Value valueToBind) {
+        Value varValue = getVarValue(variable, bs);
+        if (varValue == null) {
+            QueryBindingSet newBs = new QueryBindingSet(bs);
+            newBs.addBinding(variable.getName(), valueToBind);
+            return new SingletonIteration<>(newBs);
+        } else if (varValue.equals(valueToBind)) {
+            return new SingletonIteration<>(bs);
+        }
+        return new EmptyIteration<>();
     }
 }
