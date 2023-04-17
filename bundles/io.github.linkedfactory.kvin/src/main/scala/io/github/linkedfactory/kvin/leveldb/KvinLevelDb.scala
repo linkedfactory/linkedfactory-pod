@@ -430,7 +430,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   }
 
   def readLock[T](lock: ReadWriteLock)(block: => T): T = try {
-    lock.readLock.lock(); block
+    lock.readLock.lock();
+    block
   } finally {
     lock.readLock.unlock()
   }
@@ -517,20 +518,33 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     value match {
       case d: Data[_] =>
         val baos = new ByteArrayOutputStream
-        // marker for an object
-        baos.write(Array('O'.toByte))
-        for {
-          element <- d.asScala
-        } {
-          // write the property
-          val p = element.getProperty
-          val pId = toId(p, EntryType.PropertyToId, generate = true)
-          baos.write(pId)
-
-          // write the value
-          baos.write(encode(element.getValue))
-        }
         try {
+          // marker for an object
+          baos.write(Array('O'.toByte))
+          for {
+            element <- d.asScala
+          } {
+            // write the property
+            val p = element.getProperty
+            val pId = toId(p, EntryType.PropertyToId, generate = true)
+            baos.write(pId)
+
+            // write the value
+            baos.write(encode(element.getValue))
+          }
+          baos.toByteArray
+        } finally {
+          baos.close()
+        }
+      case a: Array[_] =>
+        val baos = new ByteArrayOutputStream
+        try {
+          // marker for an array
+          baos.write(Array('['.toByte))
+          val length: Array[Byte] = Array.ofDim(Varint.calcLengthUnsigned(a.length))
+          Varint.writeUnsigned(length, 0, a.length)
+          baos.write(length)
+          a.foreach(e => baos.write(encode(e)))
           baos.toByteArray
         } finally {
           baos.close()
@@ -565,6 +579,14 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           pUriOpt.foreach { pUri => dataObj = dataObj.append(new Record(pUri, value)) }
         }
         dataObj
+      // an array
+      case '[' =>
+        val length = Varint.readUnsigned(b).intValue
+        val values = Array.ofDim[Any](length)
+        for (i <- 0 until length) {
+          values(i) = decode(b)
+        }
+        values
       // a URI reference
       case 'R' =>
         val refId = new Array[Byte](varIntLength(b))
