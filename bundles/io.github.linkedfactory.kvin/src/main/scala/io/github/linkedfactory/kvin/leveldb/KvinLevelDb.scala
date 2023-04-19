@@ -20,7 +20,7 @@ import com.google.common.util.concurrent.Striped
 import io.github.linkedfactory.kvin._
 import io.github.linkedfactory.kvin.leveldb.Utils._
 import io.github.linkedfactory.kvin.util.{AggregatingIterator, Values, Varint}
-import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator, UniqueExtendedIterator}
+import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator, UniqueExtendedIterator, WrappedIterator}
 import net.enilink.komma.core.{URI, URIs}
 import org.iq80.leveldb.impl.Iq80DBFactory.{bytes, factory}
 import org.iq80.leveldb.{CompressionType, DB, DBIterator, Options, Range, WriteBatch, WriteOptions}
@@ -607,20 +607,47 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     Varint.firstToLength(bb.get(bb.position()))
   }
 
-  def fetchInternal(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE, begin: Long = 0L, limit: Long = 0L, interval: Long = 0L): IExtendedIterator[KvinTuple] = {
-    val id = toId(item, property, context, generate = false)
-    if (id == null) NiceIterator.emptyIterator[KvinTuple] else {
-      val idTimePrefix = new Array[Byte](id.length + TIME_BYTES + SEQ_BYTES)
-      val prefixBuffer = ByteBuffer.wrap(idTimePrefix).order(BYTE_ORDER)
-      prefixBuffer.put(id).putInt6(mapTime(end))
+  def fetchInternal(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE,
+                    begin: Long = 0L, limit: Long = 0L, interval: Long = 0L): IExtendedIterator[KvinTuple] = {
+    val currentContext = if (context == null) Kvin.DEFAULT_CONTEXT else context
+    val propertiesIt: IExtendedIterator[URI] = if (property == null) {
+      properties(item)
+    } else {
+      WrappedIterator.create(List(property).asJava.iterator())
+    }
 
+    if (!propertiesIt.hasNext()) NiceIterator.emptyIterator[KvinTuple] else {
       val it = values.iterator
       new StoreIterator[KvinTuple](it) {
+        var currentProperty: URI = null
+        var id: Array[Byte] = null
+        var idTimePrefix: Array[Byte] = null
+        var prefixBuffer: ByteBuffer = null
+
         var intervalSeq: Int = 0
         var count: Long = 0
 
+        def nextProperty(): Unit = {
+          var validProperty = false
+          while (!validProperty && propertiesIt.hasNext) {
+            currentProperty = propertiesIt.next()
+            id = toId(item, currentProperty, context, generate = false)
+            if (id != null) {
+              validProperty = true
+              idTimePrefix = new Array[Byte](id.length + TIME_BYTES + SEQ_BYTES)
+              prefixBuffer = ByteBuffer.wrap(idTimePrefix).order(BYTE_ORDER)
+              prefixBuffer.put(id).putInt6(mapTime(end))
+            }
+          }
+          if (validProperty) {
+            it.seek(idTimePrefix)
+          } else {
+            close()
+          }
+        }
+
         override def init: Unit = {
-          it.seek(idTimePrefix)
+          nextProperty()
         }
 
         override def computeNext: Option[KvinTuple] = {
@@ -641,12 +668,25 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
                 it.seek(idTimePrefix)
 
                 intervalSeq += 1
-                Some(new KvinTuple(item, property, context, intervalStart, intervalSeq, decode(entry.getValue)))
+                Some(new KvinTuple(item, currentProperty, currentContext, intervalStart,
+                  intervalSeq, decode(entry.getValue)))
               } else {
-                Some(new KvinTuple(item, property, context, time, seq, decode(entry.getValue)))
+                Some(new KvinTuple(item, currentProperty, currentContext, time, seq,
+                  decode(entry.getValue)))
               }
-            } else None
-          } else None
+            } else {
+              nextProperty()
+              if (open) computeNext else None
+            }
+          } else {
+            nextProperty()
+            if (open) computeNext else None
+          }
+        }
+
+        override def close(): Unit = {
+          propertiesIt.close()
+          super.close()
         }
       }
     }

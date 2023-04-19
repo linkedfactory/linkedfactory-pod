@@ -79,21 +79,23 @@ abstract class KvinTestBase {
 
   def propertyUri(nr: Int) = URIs.createURI("http://example.org/p" + nr)
 
-  def addData(items: Int, values: Int) {
-    var rand = new Random(seed)
-    for (nr <- 1 to items) {
+  def addData(items: Int, values: Int) : List[KvinTuple] = {
+    val rand = new Random(seed)
+    (1 to items).flatMap{ nr =>
       val uri = itemUri(nr)
-      for (i <- 1 to values) {
+      (1 to values).map { _ =>
         val time = Math.abs(rand.nextInt)
         val value = rand.nextInt
-        store.put(new KvinTuple(uri, valueProperty, null, time, value))
+        val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, value)
+        store.put(tuple)
+        tuple
       }
-    }
+    }.toList
   }
 
   @Test
   def testProperties {
-    var rand = new Random(seed)
+    val rand = new Random(seed)
     for (itemNr <- 1 to 10) {
       val uri = itemUri(itemNr)
       for (propertyNr <- 1 to 5) {
@@ -120,6 +122,15 @@ abstract class KvinTestBase {
     assertEquals(limit, store.fetch(itemUri(1), valueProperty, null, limit).toList.size)
   }
 
+  @Test
+  def testAllProperties {
+    val data = addData(3, 10)
+    val dataByItem = data.groupBy(_.item)
+    assertEquals(dataByItem(itemUri(1)).sortBy(_.time),
+      store.fetch(itemUri(1), null, null, 0)
+        .toList.asScala.sortBy(_.time))
+  }
+
   //@Test
   def testDelete {
     val valueCount = 5
@@ -140,7 +151,7 @@ abstract class KvinTestBase {
 
   @Test
   def testInterval {
-    var rand = new Random(seed)
+    val rand = new Random(seed)
     val points = 100
     val pointDistance: Long = 100
     val startTime: Long = pointDistance * points
