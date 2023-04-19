@@ -105,6 +105,29 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                     Value newValue = toRdfValue(r.getValue(), vf);
                     return compareAndBind(bs, objectVar, newValue);
                 }
+            } else {
+                Iterator<Record> it = ((Record) data).iterator();
+                Var variable = stmt.getObjectVar();
+                return new AbstractCloseableIteration<>() {
+                    @Override
+                    public boolean hasNext() throws QueryEvaluationException {
+                        return it.hasNext();
+                    }
+
+                    @Override
+                    public BindingSet next() throws QueryEvaluationException {
+                        Record r = it.next();
+                        QueryBindingSet newBs = new QueryBindingSet(bs);
+                        newBs.addBinding(stmt.getPredicateVar().getName(), toRdfValue(r.getProperty(), vf));
+                        newBs.addBinding(variable.getName(), toRdfValue(r.getValue(), vf));
+                        return newBs;
+                    }
+
+                    @Override
+                    public void remove() throws QueryEvaluationException {
+                        throw new UnsupportedOperationException();
+                    }
+                };
             }
         } else if (data instanceof Object[] || data instanceof List<?>) {
             List<?> list = data instanceof Object[] ? Arrays.asList((Object[]) data) : (List<?>) data;

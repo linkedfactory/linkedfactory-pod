@@ -288,7 +288,7 @@ class ServiceTest {
 
   def addData(items: Int, values: Int): List[KvinTuple] = {
     val rand = new Random(seed)
-    (1 until items).flatMap{ nr =>
+    (1 to items).flatMap{ nr =>
       var time = START_TIME
       val uri = itemUri(nr)
       for (i <- 1 to values) yield {

@@ -56,7 +56,8 @@ public class KvinEvaluationUtil {
     static Value toRdfValue(Object value, ValueFactory vf) {
         Value rdfValue;
         if (value instanceof URI) {
-            rdfValue = vf.createIRI(value.toString());
+            String valueStr = ((URI) value).isRelative() ? "r:" + value : value.toString();
+            rdfValue = vf.createIRI(valueStr);
         } else if (value instanceof Double) {
             rdfValue = vf.createLiteral((Double) value);
         } else if (value instanceof Float) {
@@ -81,7 +82,13 @@ public class KvinEvaluationUtil {
 
     public static net.enilink.komma.core.URI toKommaUri(Value value) {
         if (value instanceof IRI) {
-            return URIs.createURI(value.toString());
+            String valueStr = value.toString();
+            // -> KVIN should not allow relative URIs in the future
+            // remove scheme for relative URIs
+            if (valueStr.startsWith("r:")) {
+                valueStr = valueStr.substring(2);
+            }
+            return URIs.createURI(valueStr);
         }
         return null;
     }
@@ -112,12 +119,6 @@ public class KvinEvaluationUtil {
         }
         final Value predValue = getVarValue(predVar, bs);
         net.enilink.komma.core.URI pred = toKommaUri(predValue);
-        // TODO this is just a hack to cope with relative URIs
-        // -> KVIN should not allow relative URIs in the future
-        if (pred != null && "r".equals(pred.scheme())) {
-            // remove scheme for relative URIs
-            pred = URIs.createURI(pred.toString().substring(2));
-        }
 
         Value fromValue = getVarValue(params.from, bs);
         Value toValue = getVarValue(params.to, bs);
@@ -167,44 +168,28 @@ public class KvinEvaluationUtil {
         Integer seqNrValueInt = seqNrValue == null ? null : ((Literal) seqNrValue).intValue();
         Value indexValue = getVarValue(params.index, bs);
 
-        final LinkedList<URI> properties = new LinkedList<>();
-        if (pred != null) {
-            properties.add(pred);
-        } else {
-            // fetch properties if not already specified
-            properties.addAll(kvin.properties(item).toList());
-        }
-
         final long beginFinal = begin, endFinal = end, limitFinal = limit;
+        final URI predFinal = pred;
         final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<BindingSet, QueryEvaluationException>() {
             IExtendedIterator<KvinTuple> it;
+            URI currentProperty;
             IRI currentPropertyIRI;
             int index;
             BindingSet next;
+            boolean skipProperty;
 
             @Override
             public boolean hasNext() throws QueryEvaluationException {
                 if (next != null) {
                     return true;
                 }
-                if (it != null) {
-                    next = computeNext();
-                }
-                if (next == null && !properties.isEmpty()) {
-                    // reset index
-                    index = -1;
-
-                    URI currentProperty = properties.remove();
-                    if (currentProperty.isRelative()) {
-                        currentPropertyIRI = vf.createIRI("r:" + currentProperty);
-                    } else {
-                        currentPropertyIRI = vf.createIRI(currentProperty.toString());
-                    }
-
+                if (it == null && !isClosed()) {
                     // System.out.println("item=" + item + " property=" + currentProperty + " bindings=" + bs);
 
-                    // create iterator with values for current property
-                    it = kvin.fetch(item, currentProperty, context[0], endFinal, beginFinal, limitFinal, interval, aggregationFunc);
+                    // create iterator with values for property
+                    it = kvin.fetch(item, predFinal, context[0], endFinal, beginFinal, limitFinal, interval, aggregationFunc);
+                }
+                if (it != null) {
                     next = computeNext();
                 }
                 return next != null;
@@ -221,11 +206,28 @@ public class KvinEvaluationUtil {
             }
 
             BindingSet computeNext() {
-                if (it == null) {
-                    return null;
-                }
                 while (it.hasNext()) {
                     KvinTuple tuple = it.next();
+                    // check if current property is changed
+                    if (! tuple.property.equals(currentProperty)) {
+                        // reset index
+                        index = -1;
+
+                        currentProperty = tuple.property;
+                        if (currentProperty.isRelative()) {
+                            currentPropertyIRI = vf.createIRI("r:" + currentProperty);
+                        } else {
+                            currentPropertyIRI = vf.createIRI(currentProperty.toString());
+                        }
+                        // filters tuples by property if endpoint does not support the filtering by property
+                        skipProperty = predValue != null && !predValue.equals(currentPropertyIRI);
+                    }
+
+                    // filters tuples by property if endpoint does not support the filtering by property
+                    if (skipProperty) {
+                        continue;
+                    }
+
                     // adds a zero-based index to each returned tuple
                     index++;
 
@@ -262,8 +264,7 @@ public class KvinEvaluationUtil {
 
                     return newBs;
                 }
-                it.close();
-                it = null;
+                close();
                 return null;
             }
 
@@ -276,6 +277,7 @@ public class KvinEvaluationUtil {
             protected void handleClose() throws QueryEvaluationException {
                 if (it != null) {
                     it.close();
+                    it = null;
                 }
             }
         };
