@@ -3,6 +3,7 @@ package io.github.linkedfactory.kvin.util;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonParser.Feature;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,7 +21,7 @@ import java.math.BigInteger;
 import java.util.*;
 
 public class JsonFormatParser {
-    final static JsonFactory jsonFactory = new JsonFactory();
+    final static JsonFactory jsonFactory = new JsonFactory().configure(Feature.AUTO_CLOSE_SOURCE, true);
     final JsonParser jsonParser;
     final static ObjectMapper mapper = new ObjectMapper()
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
@@ -131,7 +132,11 @@ public class JsonFormatParser {
 
             @Override
             public void close() {
-                super.close();
+                try {
+                    jsonParser.close();
+                } catch (IOException e) {
+                    // ignore
+                }
             }
         };
     }

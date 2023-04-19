@@ -161,6 +161,8 @@ public class KvinHttpTest extends Mockito {
 
             // mocking settings for http client response
             when(httpResponse.getEntity()).thenReturn(new StringEntity(getResourceFileContent("KvinHttpFetchMethodContent.json")));
+            when(httpResponse.getStatusLine()).thenReturn(statusLine);
+            when(statusLine.getStatusCode()).thenReturn(200);
             when(httpClient.execute(httpGet)).thenReturn(this.httpResponse);
             this.kvinHttp = new KvinHttp("http://samplehost.de") {
                 @Override
@@ -194,7 +196,9 @@ public class KvinHttpTest extends Mockito {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/machine1");
 
             // mocking settings for http client response
-            when(this.httpResponse.getEntity()).thenReturn(new StringEntity(getResourceFileContent("KvinHttpDescendantsMethodContent.json")));
+            when(httpResponse.getEntity()).thenReturn(new StringEntity(getResourceFileContent("KvinHttpDescendantsMethodContent.json")));
+            when(httpResponse.getStatusLine()).thenReturn(statusLine);
+            when(statusLine.getStatusCode()).thenReturn(200);
             when(httpClient.execute(httpGet)).thenReturn(this.httpResponse);
             this.kvinHttp = new KvinHttp("http://samplehost.de") {
                 @Override
@@ -229,7 +233,9 @@ public class KvinHttpTest extends Mockito {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/machine1/sensor1");
 
             // mocking settings for http client response
-            when(this.httpResponse.getEntity()).thenReturn(new StringEntity(getResourceFileContent("KvinHttpPropertiesMethodContent.json")));
+            when(httpResponse.getEntity()).thenReturn(new StringEntity(getResourceFileContent("KvinHttpPropertiesMethodContent.json")));
+            when(httpResponse.getStatusLine()).thenReturn(statusLine);
+            when(statusLine.getStatusCode()).thenReturn(200);
             when(httpClient.execute(httpGet)).thenReturn(this.httpResponse);
             this.kvinHttp = new KvinHttp("http://samplehost.de") {
                 @Override
