@@ -5,6 +5,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import org.eclipse.rdf4j.common.exception.RDF4JException;
+import org.eclipse.rdf4j.query.algebra.Filter;
 import org.eclipse.rdf4j.query.algebra.Join;
 import org.eclipse.rdf4j.query.algebra.SingletonSet;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
@@ -26,6 +27,18 @@ public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException
      */
     public void process(TupleExpr expr) throws RDF4JException {
         expr.visit(this);
+    }
+
+    @Override
+    public void meet(Filter node) throws RDF4JException {
+        TupleExpr arg = node.getArg();
+        if (arg instanceof StatementPattern) {
+            StatementPattern stmt = (StatementPattern) arg;
+            Parameters params = scanner.getParameters(stmt.getObjectVar());
+            if (params != null) {
+                node.setArg(new KvinFetch(stmt, params));
+            }
+        }
     }
 
     /*
