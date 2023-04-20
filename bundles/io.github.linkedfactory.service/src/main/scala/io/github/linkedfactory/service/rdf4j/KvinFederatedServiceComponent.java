@@ -2,6 +2,9 @@ package io.github.linkedfactory.service.rdf4j;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.kvinHttp.KvinHttp;
+import net.enilink.komma.model.IModelSet;
+import java.util.Optional;
+
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
@@ -12,13 +15,6 @@ import org.osgi.service.component.annotations.Reference;
 
 import com.google.inject.Binding;
 import com.google.inject.Key;
-
-import net.enilink.komma.model.IModelSet;
-
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
-import java.net.URL;
-import java.util.Optional;
 
 @Component
 public class KvinFederatedServiceComponent {

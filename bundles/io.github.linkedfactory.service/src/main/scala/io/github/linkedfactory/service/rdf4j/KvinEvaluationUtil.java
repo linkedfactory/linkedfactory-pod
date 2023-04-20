@@ -7,16 +7,13 @@ import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.BNodeWithVal
 import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.query.Parameters;
 import net.enilink.commons.iterator.IExtendedIterator;
-import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayDeque;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Optional;
 
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
@@ -33,7 +30,6 @@ import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
-import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
 
 import static io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.*;
@@ -241,7 +237,7 @@ public class KvinEvaluationUtil {
                         continue;
                     }
 
-                    QueryBindingSet newBs = new QueryBindingSet(bs);
+                    CompositeBindingSet newBs = new CompositeBindingSet(bs);
                     if (!objectVar.isConstant() && !bs.hasBinding(objectVar.getName())) {
                         Value objectValue = new BNodeWithValue(tuple);
                         newBs.addBinding(objectVar.getName(), objectValue);
@@ -311,7 +307,7 @@ public class KvinEvaluationUtil {
     public static CloseableIteration<BindingSet, QueryEvaluationException>  compareAndBind(BindingSet bs, Var variable, Value valueToBind) {
         Value varValue = getVarValue(variable, bs);
         if (varValue == null) {
-            QueryBindingSet newBs = new QueryBindingSet(bs);
+            CompositeBindingSet newBs = new CompositeBindingSet(bs);
             newBs.addBinding(variable.getName(), valueToBind);
             return new SingletonIteration<>(newBs);
         } else if (varValue.equals(valueToBind)) {

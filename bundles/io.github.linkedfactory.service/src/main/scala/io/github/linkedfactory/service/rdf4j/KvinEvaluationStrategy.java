@@ -17,7 +17,6 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -117,7 +116,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                     @Override
                     public BindingSet next() throws QueryEvaluationException {
                         Record r = it.next();
-                        QueryBindingSet newBs = new QueryBindingSet(bs);
+                        CompositeBindingSet newBs = new CompositeBindingSet(bs);
                         newBs.addBinding(stmt.getPredicateVar().getName(), toRdfValue(r.getProperty(), vf));
                         newBs.addBinding(variable.getName(), toRdfValue(r.getValue(), vf));
                         return newBs;
@@ -181,26 +180,30 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
     @Override
     protected QueryEvaluationStep prepare(LeftJoin join, QueryEvaluationContext context) throws QueryEvaluationException {
-        QueryEvaluationStep prepared = super.prepare(join, context);
-        return bindingSet -> {
-            if (useHashJoin(join.getLeftArg(), join.getRightArg(), bindingSet.getBindingNames())) {
-                return new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, true);
-            }
-            return prepared.evaluate(bindingSet);
-        };
+        if (useHashJoin(join.getLeftArg(), join.getRightArg())) {
+            return bindingSet -> new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, true);
+        } else {
+            return super.prepare(join, context);
+        }
     }
 
     @Override
     protected QueryEvaluationStep prepare(Join join, QueryEvaluationContext context) throws QueryEvaluationException {
-        return bindingSet -> {
-            if (useHashJoin(join.getLeftArg(), join.getRightArg(), bindingSet.getBindingNames())) {
-                return new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, false);
-            }
-            return new KvinJoinIterator(KvinEvaluationStrategy.this, join, bindingSet);
-        };
+        QueryEvaluationStep leftPrepared = precompile(join.getLeftArg(), context);
+        QueryEvaluationStep rightPrepared = precompile(join.getRightArg(), context);
+        if (useHashJoin(join.getLeftArg(), join.getRightArg())) {
+            String[] joinAttributes = HashJoinIteration.hashJoinAttributeNames(join);
+            return bindingSet -> new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
+        } else {
+            // strictly use lateral joins if left arg contains a KVIN fetch as right arg probably depends on the results
+            boolean lateral = containsFetch(join.getLeftArg());
+            return bindingSet -> new KvinJoinIterator(KvinEvaluationStrategy.this,
+                leftPrepared, rightPrepared, join, bindingSet, lateral
+            );
+        }
     }
 
-    boolean useHashJoin(TupleExpr leftArg, TupleExpr rightArg, Set<String> bindingNames) {
+    boolean useHashJoin(TupleExpr leftArg, TupleExpr rightArg) {
         if (containsFetch(leftArg)) {
             KvinFetch rightFetch = rightArg instanceof KvinFetch ? (KvinFetch) rightArg : null;
             while (rightArg instanceof Join && rightFetch == null) {
@@ -211,10 +214,14 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                 }
             }
             if (rightFetch != null) {
-                return bindingNames.containsAll(rightFetch.getRequiredBindings());
+                return leftArg.getAssuredBindingNames().containsAll(rightFetch.getRequiredBindings());
             }
         }
         return false;
+    }
+
+    protected QueryEvaluationStep prepare(StatementPattern node, QueryEvaluationContext context) throws QueryEvaluationException {
+        return bindingSet -> evaluate(node, bindingSet);
     }
 
     @Override
