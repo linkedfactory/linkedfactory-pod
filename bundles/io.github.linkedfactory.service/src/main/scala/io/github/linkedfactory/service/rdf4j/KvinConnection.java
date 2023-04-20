@@ -4,8 +4,11 @@ import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.BNodeWithValue;
+import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.ILiteral;
+import net.enilink.komma.core.IReference;
 import net.enilink.komma.core.URI;
+import net.enilink.komma.core.URIs;
 import net.enilink.komma.literals.LiteralConverter;
 import net.enilink.komma.rdf4j.RDF4JValueConverter;
 import java.util.ArrayList;
@@ -47,7 +50,7 @@ public class KvinConnection extends SailConnectionWrapper {
             super.addStatement(subj, pred, obj, contexts);
         } else {
             for (Resource ctx : contexts) {
-                if (ctx.isIRI() && ((IRI) ctx).getNamespace() == "kvin:") {
+                if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith("kvin:")) {
                     newStatements.add(subj, pred, obj, ctx);
                 } else {
                     super.addStatement(subj, pred, obj, ctx);
@@ -62,7 +65,7 @@ public class KvinConnection extends SailConnectionWrapper {
             super.addStatement(modify, subj, pred, obj, contexts);
         } else {
             for (Resource ctx : contexts) {
-                if (ctx.isIRI() && ((IRI) ctx).getNamespace() == "kvin:") {
+                if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith("kvin:")) {
                     newStatements.add(subj, pred, obj, ctx);
                 } else {
                     super.addStatement(modify, subj, pred, obj, contexts);
@@ -80,14 +83,14 @@ public class KvinConnection extends SailConnectionWrapper {
 
     private void createKvinTuples() {
         long currentTime = System.currentTimeMillis();
-        newStatements
+        kvinSail.getKvin().put(WrappedIterator.create(newStatements
             .stream().filter(stmt -> stmt.getSubject().isIRI())
-            .forEach(stmt -> {
+            .map(stmt -> {
                 IRI item = (IRI) stmt.getSubject();
                 IRI predicate = stmt.getPredicate();
-                KvinTuple tuple = toKvinTuple(item, predicate, stmt.getObject(), currentTime);
-                System.out.println(tuple);
-            });
+                return toKvinTuple(item, predicate, stmt.getObject(), currentTime);
+                //System.out.println(tuple);
+            }).iterator()));
     }
 
     private KvinTuple toKvinTuple(IRI item, IRI predicate, Value rdfValue, long currentTime) {
@@ -100,11 +103,11 @@ public class KvinConnection extends SailConnectionWrapper {
             value = convertValue(it.next().getObject());
             it = newStatements.getStatements(r, KVIN.TIME, null).iterator();
             if (it.hasNext()) {
-                time = ((Literal) it.next()).longValue();
+                time = ((Literal) it.next().getObject()).longValue();
             }
             it = newStatements.getStatements(r, KVIN.SEQNR, null).iterator();
             if (it.hasNext()) {
-                seqNr = ((Literal) it.next()).intValue();
+                seqNr = ((Literal) it.next().getObject()).intValue();
             }
         } else if (rdfValue instanceof BNodeWithValue && ((BNodeWithValue) rdfValue).value instanceof KvinTuple) {
             KvinTuple t = (KvinTuple) ((BNodeWithValue) rdfValue).value;
@@ -114,15 +117,22 @@ public class KvinConnection extends SailConnectionWrapper {
         } else {
             value = convertValue(rdfValue);
         }
-        return new KvinTuple(valueConverter.fromRdf4j(item).getURI(), valueConverter.fromRdf4j(predicate).getURI(),
+        return new KvinTuple(convertIri(item).getURI(), convertIri(predicate).getURI(),
             Kvin.DEFAULT_CONTEXT, time < 0 ? currentTime : time, seqNr, value);
+    }
+
+    private IReference convertIri(IRI rdfValue) {
+        if (rdfValue.toString().startsWith("r:")) {
+            return URIs.createURI(rdfValue.toString().substring(2));
+        }
+        return valueConverter.fromRdf4j(rdfValue);
     }
 
     private Object convertValue(Value rdfValue) {
         if (rdfValue.isLiteral()) {
             return literalConverter.createObject((ILiteral) valueConverter.fromRdf4j(rdfValue));
         } else if (rdfValue.isIRI()) {
-            return valueConverter.fromRdf4j(rdfValue);
+            return convertIri((IRI) rdfValue);
         } else {
             // value is a blank node
             Resource r = (Resource) rdfValue;
