@@ -10,6 +10,7 @@ import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedSe
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolverClient;
 import org.eclipse.rdf4j.repository.Repository;
+import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 
@@ -21,6 +22,7 @@ public class KvinFederatedServiceComponent {
     IModelSet ms;
     Kvin kvin;
 
+    @Activate
     void activate() {
         IModelSet.Internal msInternal = (IModelSet.Internal) ms;
         Binding<Repository> repositoryBinding = msInternal.getInjector().getExistingBinding(Key.get(Repository.class));

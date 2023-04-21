@@ -78,7 +78,12 @@ object Data {
   // caches currentModel for each request
   object modelForRequest extends RequestVar[Box[IModel]](currentModel)
 
-  val kvin: Option[Kvin] = KvinManager.getKvin() map { kvin =>
+  def getKvin() : Option[Kvin] = {
+    Option(bundleContext).flatMap(ctx =>
+      Option(ctx.getServiceReference(classOf[Kvin])).map(ref => ctx.getService(ref)))
+  }
+
+  val kvin: Option[Kvin] = getKvin() map { kvin =>
     kvin.addListener(new KvinListener {
       override def entityCreated(item: URI, property: URI): Unit = {
         // FIXME: add/use actual subject via session/token/...
