@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -214,7 +215,9 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                 }
             }
             if (rightFetch != null) {
-                return leftArg.getAssuredBindingNames().containsAll(rightFetch.getRequiredBindings());
+                // do not use hash join if required bindings are provided by left join argument
+                Set<String> leftAssured = leftArg.getAssuredBindingNames();
+                return ! rightFetch.getRequiredBindings().stream().anyMatch(required -> leftAssured.contains(required));
             }
         }
         return false;
