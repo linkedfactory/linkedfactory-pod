@@ -136,7 +136,8 @@ public class KvinEvaluationUtil {
 
         final String aggregationFunc;
         if (params.aggregationFunction != null) {
-            aggregationFunc = aggregationFuncValue instanceof IRI ? ((IRI) aggregationFuncValue).getLocalName() : null;
+            aggregationFunc = aggregationFuncValue instanceof IRI ? ((IRI) aggregationFuncValue).getLocalName() :
+                aggregationFuncValue.stringValue();
         } else {
             aggregationFunc = null;
         }

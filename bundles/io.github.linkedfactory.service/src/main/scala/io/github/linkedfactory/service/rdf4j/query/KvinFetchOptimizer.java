@@ -36,7 +36,7 @@ public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException
             StatementPattern stmt = (StatementPattern) arg;
             Parameters params = scanner.getParameters(stmt.getObjectVar());
             if (params != null) {
-                node.setArg(new KvinFetch(stmt, params));
+                node.setArg(new KvinFetch(stmt, scanner.getParameters(stmt)));
             }
         }
     }
@@ -59,7 +59,7 @@ public class KvinFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException
                 Parameters params = scanner.getParameters(stmt.getObjectVar());
                 if (params != null) {
                     stmt.replaceWith(new SingletonSet());
-                    kvinFetches.add(new KvinFetch(stmt, params));
+                    kvinFetches.add(new KvinFetch(stmt, scanner.getParameters(stmt)));
                 }
                 // no need to further inspect this
                 it.remove();

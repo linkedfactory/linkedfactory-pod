@@ -1,6 +1,7 @@
 package io.github.linkedfactory.service.rdf4j.query;
 
 import io.github.linkedfactory.service.rdf4j.KVIN;
+import scala.xml.PrettyPrinter.Para;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -36,6 +37,18 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 
 	public Parameters getParameters(Var subject) {
 		return parameterIndex.get(subject);
+	}
+
+	public Parameters getParameters(StatementPattern pattern) {
+		Parameters subjectParams = parameterIndex.get(pattern.getSubjectVar());
+		Parameters objectParams = parameterIndex.get(pattern.getObjectVar());
+		if (subjectParams == null) {
+			return objectParams;
+		} else if (objectParams == null) {
+			return subjectParams;
+		} else {
+			return Parameters.combine(objectParams, subjectParams);
+		}
 	}
 
 	protected Parameters createParameters(Var subject) {
@@ -76,6 +89,11 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 		} else if (KVIN.INDEX.equals(pValue)) {
 			// <> kvin:index ?index
 			createParameters(sp.getSubjectVar()).index = o;
+		} else if (KVIN.PARAMS.equals(pValue)) {
+			// can be used to specify default parameters on an item
+			// <> kvin:params [ <kvin:limit> 1 ; <kvin:op> "avg" ; ...]
+			Parameters params = createParameters(sp.getObjectVar());
+			parameterIndex.put(sp.getSubjectVar(), params);
 		} else {
 			if (KVIN.VALUE.equals(pValue)) {
 				// ensure that parameters are created if only kvin:value is present
