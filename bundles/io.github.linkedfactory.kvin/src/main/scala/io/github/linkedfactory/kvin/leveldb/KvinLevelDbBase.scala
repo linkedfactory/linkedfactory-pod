@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.kvin.leveldb
 
-import io.github.linkedfactory.kvin.KvinTuple
+import io.github.linkedfactory.kvin.util.Varint
 import net.enilink.commons.iterator.NiceIterator
 import net.enilink.komma.core.URI
 import org.iq80.leveldb.{DB, DBIterator}
@@ -30,9 +30,6 @@ import scala.util.matching.Regex
  * Common base functions for LevelDB based value stores.
  */
 trait KvinLevelDbBase {
-  val TIME_BYTES = 6
-  val SEQ_BYTES = 2
-
   val LONG_BYTES: Int = java.lang.Long.SIZE / 8
   val BYTE_ORDER: ByteOrder = ByteOrder.BIG_ENDIAN
   val ID_POOL_SIZE = 1000L
@@ -138,7 +135,10 @@ trait KvinLevelDbBase {
   protected def removeByTtl(db: DB, prefix: Array[Byte], ttl: Long): Unit = {
     val now = System.currentTimeMillis
     val eldest = now - ttl
-    val idTimePrefix = new Array[Byte](prefix.length + TIME_BYTES)
+    val idTimePrefix = new Array[Byte](prefix.length + Varint.MAX_BYTES)
+    val bb = ByteBuffer.wrap(idTimePrefix).order(ByteOrder.BIG_ENDIAN)
+    bb.put(prefix)
+    writeVarint(bb, eldest)
     val it = db.iterator
     try {
       var done = false
@@ -155,7 +155,15 @@ trait KvinLevelDbBase {
     }
   }
 
-  def mapTime(time: Long): Long = KvinTuple.TIME_MAX_VALUE - time
+  def writeVarint(byteBuffer: ByteBuffer, value : Long) : Unit = {
+    Varint.writeUnsignedInverted(byteBuffer, value)
+  }
 
-  def mapSeq(seq: Int): Int = KvinTuple.SEQ_MAX_VALUE - seq
+  def writeVarint(byteBuffer: ByteBuffer, pos : Int, value : Long) : Unit = {
+    Varint.writeUnsignedInverted(byteBuffer, pos, value)
+  }
+
+  def readVarint(byteBuffer: ByteBuffer) : Long = {
+    Varint.readUnsignedInverted(byteBuffer)
+  }
 }

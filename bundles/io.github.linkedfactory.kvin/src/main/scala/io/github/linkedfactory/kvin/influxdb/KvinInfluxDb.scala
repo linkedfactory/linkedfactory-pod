@@ -79,7 +79,7 @@ class KvinInfluxDb(endpoint: URI, dbName: String) extends Kvin {
 
       if (newEntity) {
         knowEntities.put((item, property), true)
-        for (l <- listeners.asScala) l.entityCreated(item, property)
+        for (l <- listeners.asScala) l.entityCreated(item)
       }
       for (l <- listeners.asScala) l.valueAdded(item, property, tuple.context, tuple.time, 0L, tuple.value)
     }

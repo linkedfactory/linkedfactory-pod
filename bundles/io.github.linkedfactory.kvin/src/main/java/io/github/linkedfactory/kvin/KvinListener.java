@@ -24,7 +24,7 @@ public interface KvinListener {
 	/**
 	 * Called when a new (item, property) combination has been created.
 	 */
-	void entityCreated(URI item, URI property);
+	void entityCreated(URI item);
 
 	/**
 	 * Called when a new value for the (item, property, context) combination has been added.

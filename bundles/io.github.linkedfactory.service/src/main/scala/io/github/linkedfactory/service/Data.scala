@@ -85,7 +85,7 @@ object Data {
 
   val kvin: Option[Kvin] = getKvin() map { kvin =>
     kvin.addListener(new KvinListener {
-      override def entityCreated(item: URI, property: URI): Unit = {
+      override def entityCreated(item: URI): Unit = {
         // FIXME: add/use actual subject via session/token/...
         modelForRequest.foreach { m =>
           createHierarchyExecutor.submit(new Runnable {

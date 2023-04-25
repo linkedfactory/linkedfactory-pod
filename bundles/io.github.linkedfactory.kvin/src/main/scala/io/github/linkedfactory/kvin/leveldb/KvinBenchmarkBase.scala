@@ -42,7 +42,7 @@ abstract class KvinBenchmarkBase extends App {
 
     var currentTime = startTimeValues
     (0 to writeValues).foreach { i =>
-      if (i % 10000 == 0) println("  at: " + i)
+      if (i % 100000 == 0) println("  at: " + i)
       
       val randomNr = nrs(rand.nextInt(nrs.length))
       val uri = URIs.createURI("http://linkedfactory.github.io/" + randomNr + "/e3fabrik/rollex/" + randomNr + "/measured-point-1")

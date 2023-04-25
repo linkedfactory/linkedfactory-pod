@@ -164,7 +164,7 @@ abstract class KvinTestBase {
       }
     }
 
-    var interval = 2 * pointDistance
+    val interval = 2 * pointDistance
     assertEquals(2, store.fetch(itemUri(1), valueProperty, null, startTime, startTime - interval, 0, interval, null).toList.size)
 
     val entries = store.fetch(itemUri(1), valueProperty, null, startTime, startTime - 2 * interval, 0, interval, null).toList
