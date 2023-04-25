@@ -622,6 +622,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
             }
           }
           if (validProperty) {
+            count = 0
             it.seek(idTimePrefix)
           } else {
             close()
