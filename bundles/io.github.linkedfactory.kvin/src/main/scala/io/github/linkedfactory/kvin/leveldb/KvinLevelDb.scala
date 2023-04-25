@@ -488,7 +488,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   override def fetch(item: URI, property: URI, context: URI, limit: Long): IExtendedIterator[KvinTuple] = fetchInternal(item = item, property = property, context = context, limit = limit)
 
   override def fetch(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE, begin: Long = 0L, limit: Long = 0L, interval: Long = 0L, op: String = null): IExtendedIterator[KvinTuple] = {
-    var results = fetchInternal(item, property, context, end, begin, if (op == null) limit else 0L, interval)
+    var results = fetchInternal(item, property, context, end, begin, if (op == null) limit else 0L, if (op == null) interval else 0L)
     if (op != null) {
       results = new AggregatingIterator(results, interval, op.trim.toLowerCase, limit) {
         override def createElement(item: URI, property: URI, context: URI, time: Long, seqNr: Int, value: Object): KvinTuple = {
