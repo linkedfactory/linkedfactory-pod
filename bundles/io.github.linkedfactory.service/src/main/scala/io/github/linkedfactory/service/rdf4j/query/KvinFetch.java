@@ -52,7 +52,8 @@ public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
     @Override
     public Set<String> getAssuredBindingNames() {
         Set<String> assuredBindingNames = new LinkedHashSet(16);
-        assuredBindingNames.addAll(getArg().getAssuredBindingNames());
+        assuredBindingNames.add(getStatement().getPredicateVar().getName());
+        assuredBindingNames.add(getStatement().getObjectVar().getName());
         addAdditionalBindingNames(assuredBindingNames, true);
         return assuredBindingNames;
     }
@@ -62,7 +63,7 @@ public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
     }
 
     Set<String> computeRequiredBindings() {
-        return Stream.of(params.from, params.to, params.interval, params.aggregationFunction)
+        return Stream.of(getStatement().getSubjectVar(), params.from, params.to, params.interval, params.aggregationFunction)
             .filter(p -> p != null).map(p -> p.getName()).collect(
             Collectors.toSet());
     }

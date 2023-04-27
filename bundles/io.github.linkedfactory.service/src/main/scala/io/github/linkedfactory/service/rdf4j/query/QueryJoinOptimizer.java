@@ -22,8 +22,10 @@ import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.algebra.BindingSetAssignment;
 import org.eclipse.rdf4j.query.algebra.Join;
 import org.eclipse.rdf4j.query.algebra.LeftJoin;
+import org.eclipse.rdf4j.query.algebra.QueryModelNode;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
+import org.eclipse.rdf4j.query.algebra.Union;
 import org.eclipse.rdf4j.query.algebra.Var;
 import org.eclipse.rdf4j.query.algebra.ZeroLengthPath;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryOptimizer;
@@ -79,7 +81,6 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 		}
 
 		private void optimizePriorityJoin(Set<String> origBoundVars, TupleExpr join) {
-
 			Set<String> saveBoundVars = boundVars;
 			try {
 				boundVars = new HashSet<>(origBoundVars);
@@ -91,7 +92,6 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 
 		@Override
 		public void meet(Join node) {
-
 			Set<String> origBoundVars = boundVars;
 			try {
 				boundVars = new HashSet<>(boundVars);
@@ -162,7 +162,7 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 						}
 					}
 
-					// Build map of var frequences
+					// Build map of var frequencies
 					Map<Var, Integer> varFreqMap = new HashMap<>();
 					for (List<Var> varList : varsMap.values()) {
 						getVarFreqMap(varList, varFreqMap);
