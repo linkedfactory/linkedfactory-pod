@@ -15,6 +15,7 @@
  */
 package io.github.linkedfactory.kvin;
 
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
@@ -197,7 +198,14 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 		StringBuilder sb = new StringBuilder("[");
 		for (Iterator<T> it = this.iterator(); it.hasNext();) {
 			Data<?> d = it.next();
-			sb.append("(").append(d.getProperty()).append(", ").append(d.getValue()).append(")");
+			sb.append("(").append(d.getProperty()).append(", ");
+			Object value = d.getValue();
+			if (value instanceof Object[]) {
+				sb.append(Arrays.toString((Object[])value));
+			} else {
+				sb.append(value);
+			}
+			sb.append(")");
 			if (it.hasNext()) {
 				sb.append(", ");
 			}

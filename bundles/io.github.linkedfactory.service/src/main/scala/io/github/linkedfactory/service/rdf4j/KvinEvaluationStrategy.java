@@ -176,7 +176,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                 return new KvinEvaluationUtil(kvin).evaluate(vf, bs, params == null ? new Parameters() : params, stmt);
             }
         }
-        return super.evaluate(stmt, bs);
+        return new EmptyIteration<>();
     }
 
     @Override

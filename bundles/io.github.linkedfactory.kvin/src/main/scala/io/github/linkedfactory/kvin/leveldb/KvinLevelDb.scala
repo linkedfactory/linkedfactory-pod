@@ -506,6 +506,10 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         try {
           // marker for an object
           baos.write(Array('O'.toByte))
+          val size = d.size()
+          val length: Array[Byte] = Array.ofDim(Varint.calcLengthUnsigned(size))
+          Varint.writeUnsigned(length, 0, size)
+          baos.write(length)
           for {
             element <- d.asScala
           } {
@@ -555,8 +559,9 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     b.get match {
       // this is an object
       case 'O' =>
+        val length = Varint.readUnsigned(b).intValue
         var dataObj = Record.NULL
-        while (b.hasRemaining) {
+        for (_ <- 0 until length) {
           val pId = new Array[Byte](varIntLength(b))
           b.get(pId)
           val pUriOpt = toUri(pId, EntryType.PropertyToId)
