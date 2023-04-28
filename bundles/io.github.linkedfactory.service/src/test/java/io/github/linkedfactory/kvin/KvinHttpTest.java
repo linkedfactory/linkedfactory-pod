@@ -630,9 +630,9 @@ public class KvinHttpTest extends Mockito {
             while (tuples.hasNext()) {
                 KvinTuple tuple = tuples.next();
                 if (count == 0) {
-                    assertEquals(tuple.value.toString(), "6.333333333333333");
+                    assertEquals(tuple.value.toString(), "18.916666666666664");
                 } else {
-                    assertEquals(tuple.value.toString(), "6.2");
+                    assertEquals(tuple.value.toString(), "18.533333333333335");
                 }
                 count++;
             }

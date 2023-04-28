@@ -101,6 +101,11 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   val ids: DB = factory.open(new File(path, "ids"), createOptions(false))
   val values: DB = factory.open(new File(path, "values"), createOptions(true))
 
+  def getIdStore(): DB = ids
+
+  def getValueStore(): DB = values
+
+
   val listeners = new CopyOnWriteArraySet[KvinListener]
 
   def getIdStore(): DB = ids
@@ -657,7 +662,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           if (key.startsWith(id)) {
             val bb = ByteBuffer.wrap(key, id.length, key.length - id.length).order(BYTE_ORDER)
             val time = readVarint(bb)
-            val seq : Int = if (bb.hasRemaining) readVarint(bb).toInt else 0
+            val seq: Int = if (bb.hasRemaining) readVarint(bb).toInt else 0
             if (time <= end && time >= begin && (limit == 0 || count < limit)) {
               count += 1
 
