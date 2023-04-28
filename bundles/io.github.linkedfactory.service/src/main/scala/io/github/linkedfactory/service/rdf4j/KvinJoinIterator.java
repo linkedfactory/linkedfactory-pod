@@ -10,6 +10,7 @@ import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.Join;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
+import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 
 public class KvinJoinIterator extends LookAheadIteration<BindingSet, QueryEvaluationException> {
 
@@ -19,27 +20,28 @@ public class KvinJoinIterator extends LookAheadIteration<BindingSet, QueryEvalua
 
 	private final EvaluationStrategy strategy;
 
-	private final TupleExpr joinArg;
-
 	private final CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
 
 	private volatile CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
+
+	private final QueryEvaluationStep preparedJoinArg;
 
 	/*--------------*
 	 * Constructors *
 	 *--------------*/
 
-	public KvinJoinIterator(EvaluationStrategy strategy, Join join, BindingSet bindings)
+	public KvinJoinIterator(EvaluationStrategy strategy, QueryEvaluationStep leftPrepared, QueryEvaluationStep rightPrepared,
+		Join join, BindingSet bindings, boolean lateral)
 			throws QueryEvaluationException {
 		this.strategy = strategy;
 
 		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = strategy.evaluate(join.getLeftArg(), bindings);
-		if (leftIt.hasNext()) {
-			joinArg = join.getRightArg();
+		if (leftIt.hasNext() || lateral) {
+			preparedJoinArg = rightPrepared;
 		} else {
 			leftIt.close();
-			leftIt =  strategy.evaluate(join.getRightArg(), bindings);
-			joinArg = join.getLeftArg();
+			leftIt = strategy.evaluate(join.getRightArg(), bindings);
+			preparedJoinArg = leftPrepared;
 		}
 		rightIter = new EmptyIteration<>();
 		leftIter = leftIt;
@@ -61,7 +63,7 @@ public class KvinJoinIterator extends LookAheadIteration<BindingSet, QueryEvalua
 				rightIter.close();
 
 				if (leftIter.hasNext()) {
-					rightIter = strategy.evaluate(joinArg, leftIter.next());
+					rightIter = preparedJoinArg.evaluate(leftIter.next());
 				}
 			}
 		} catch (NoSuchElementException ignore) {

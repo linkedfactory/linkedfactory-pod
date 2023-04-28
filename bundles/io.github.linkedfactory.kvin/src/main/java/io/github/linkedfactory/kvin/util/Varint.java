@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
  */
 public final class Varint {
 
+	public static final int MAX_BYTES = 9;
+
 	private Varint() {
 	}
 
@@ -107,6 +109,55 @@ public final class Varint {
 			int bytes = descriptor(value) + 1;
 			bb.put((byte) (250 + (bytes - 3)));
 			writeSignificantBits(bb, value, bytes);
+		}
+	}
+
+	/**
+	 * Encodes a value using the <a href="https://sqlite.org/src4/doc/trunk/www/varint.wiki">variable-length encoding of
+	 * SQLite</a>. Inverts the resulting bytes to sort values DESCENDING in a key-value store.
+	 *
+	 * @param bb    buffer for writing bytes
+	 * @param value value to encode
+	 */
+	public static void writeUnsignedInverted(final ByteBuffer bb, final long value) {
+		if (value <= 240) {
+			bb.put((byte) ~value);
+		} else if (value <= 2287) {
+			bb.put((byte) ~((value - 240) / 256 + 241));
+			bb.put((byte) ~((value - 240) % 256));
+		} else if (value <= 67823) {
+			bb.put((byte) ~249);
+			bb.put((byte) ~((value - 2288) / 256));
+			bb.put((byte) ~((value - 2288) % 256));
+		} else {
+			int bytes = descriptor(value) + 1;
+			bb.put((byte) ~(250 + (bytes - 3)));
+			writeSignificantBitsInverted(bb, value, bytes);
+		}
+	}
+
+	/**
+	 * Encodes a value using the <a href="https://sqlite.org/src4/doc/trunk/www/varint.wiki">variable-length encoding of
+	 * SQLite</a>. Inverts the resulting bytes to sort values DESCENDING in a key-value store.
+	 *
+	 * @param bb    buffer for writing bytes
+	 * @param pos   target position within the buffer
+	 * @param value value to encode
+	 */
+	public static void writeUnsignedInverted(final ByteBuffer bb, int pos, final long value) {
+		if (value <= 240) {
+			bb.put(pos, (byte) ~value);
+		} else if (value <= 2287) {
+			bb.put(pos, (byte) ~((value - 240) / 256 + 241));
+			bb.put(pos + 1, (byte) ~((value - 240) % 256));
+		} else if (value <= 67823) {
+			bb.put(pos, (byte) ~249);
+			bb.put(pos + 1, (byte) ~((value - 2288) / 256));
+			bb.put(pos + 2, (byte) ~((value - 2288) % 256));
+		} else {
+			int bytes = descriptor(value) + 1;
+			bb.put(pos, (byte) ~(250 + (bytes - 3)));
+			writeSignificantBitsInverted(bb, pos, value, bytes);
 		}
 	}
 
@@ -205,6 +256,32 @@ public final class Varint {
 		} else {
 			int bytes = a0 - 250 + 3;
 			return readSignificantBits(bb, bytes);
+		}
+	}
+
+	/**
+	 * Decodes a value using the <a href="https://sqlite.org/src4/doc/trunk/www/varint.wiki">variable-length encoding of
+	 * SQLite</a>. Inverts the byte value before decoding.
+	 *
+	 * @param bb buffer for reading bytes
+	 * @return decoded value
+	 * @throws IllegalArgumentException if encoded varint is longer than 9 bytes
+	 * @see #writeUnsignedInverted(ByteBuffer, long)
+	 */
+	public static long readUnsignedInverted(ByteBuffer bb) throws IllegalArgumentException {
+		int a0 = ~bb.get() & 0xFF;
+		if (a0 <= 240) {
+			return a0;
+		} else if (a0 <= 248) {
+			int a1 = ~bb.get() & 0xFF;
+			return 240 + 256 * (a0 - 241) + a1;
+		} else if (a0 == 249) {
+			int a1 = ~bb.get() & 0xFF;
+			int a2 = ~bb.get() & 0xFF;
+			return 2288 + 256 * a1 + a2;
+		} else {
+			int bytes = a0 - 250 + 3;
+			return readSignificantBitsInverted(bb, bytes);
 		}
 	}
 
@@ -335,6 +412,21 @@ public final class Varint {
 
 	/**
 	 * Writes only the significant bytes of the given value in big-endian order.
+	 * Inverts the resulting bytes to sort values DESCENDING in a key-value store.
+	 *
+	 * @param bb    buffer for writing bytes
+	 * @param value value to encode
+	 * @param bytes number of significant bytes
+	 */
+	private static void writeSignificantBitsInverted(ByteBuffer bb, long value, int bytes) {
+		while (bytes-- > 0) {
+			bb.put((byte) ~(0xFF & (value >>> (bytes * 8))));
+		}
+	}
+
+	/**
+	 * Writes only the significant bytes of the given value in big-endian order.
+	 * Inverts the resulting bytes to sort values DESCENDING in a key-value store.
 	 *
 	 * @param bytes array with bytes for number
 	 * @param pos   target position within the byte array
@@ -345,6 +437,21 @@ public final class Varint {
 		int i = pos;
 		while (bytes-- > 0) {
 			b[i++] = (byte) (0xFF & (value >>> (bytes * 8)));
+		}
+	}
+
+	/**
+	 * Writes only the significant bytes of the given value in big-endian order.
+	 *
+	 * @param bb    buffer for writing bytes
+	 * @param pos   target position within the buffer
+	 * @param value value to encode
+	 * @param bytes number of significant bytes
+	 */
+	private static void writeSignificantBitsInverted(ByteBuffer bb, int pos, long value, int bytes) {
+		int i = pos;
+		while (bytes-- > 0) {
+			bb.put(i++, (byte) ~(0xFF & (value >>> (bytes * 8))));
 		}
 	}
 
@@ -365,6 +472,22 @@ public final class Varint {
 
 	/**
 	 * Reads only the significant bytes of the given value in big-endian order.
+	 * Inverts the byte value before decoding.
+	 *
+	 * @param bb    buffer for reading bytes
+	 * @param bytes number of significant bytes
+	 */
+	private static long readSignificantBitsInverted(ByteBuffer bb, int bytes) {
+		bytes--;
+		long value = (long) (~bb.get() & 0xFF) << (bytes * 8);
+		while (bytes-- > 0) {
+			value |= (long) (~bb.get() & 0xFF) << (bytes * 8);
+		}
+		return value;
+	}
+
+	/**
+	 * Reads only the significant bytes of the given value in big-endian order.
 	 *
 	 * @param bb    buffer for reading bytes
 	 * @param pos   position within the buffer
@@ -375,6 +498,23 @@ public final class Varint {
 		long value = (long) (bb.get(pos++) & 0xFF) << (bytes * 8);
 		while (bytes-- > 0) {
 			value |= (long) (bb.get(pos++) & 0xFF) << (bytes * 8);
+		}
+		return value;
+	}
+
+	/**
+	 * Reads only the significant bytes of the given value in big-endian order.
+	 * Inverts the byte value before decoding.
+	 *
+	 * @param bb    buffer for reading bytes
+	 * @param pos   position within the buffer
+	 * @param bytes number of significant bytes
+	 */
+	private static long readSignificantBitsInverted(ByteBuffer bb, int pos, int bytes) {
+		bytes--;
+		long value = (long) (~bb.get(pos++) & 0xFF) << (bytes * 8);
+		while (bytes-- > 0) {
+			value |= (long) (~bb.get(pos++) & 0xFF) << (bytes * 8);
 		}
 		return value;
 	}

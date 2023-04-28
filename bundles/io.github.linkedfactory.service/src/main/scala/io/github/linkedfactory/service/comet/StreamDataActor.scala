@@ -133,7 +133,7 @@ class StreamDataActor extends CometActor with KvinListener {
     Data.kvin.map(_.removeListener(this))
   }
 
-  override def entityCreated(item: URI, property: URI) {
+  override def entityCreated(item: URI) {
   }
 
   override def valueAdded(item: URI, property: URI, ctx : URI, time: Long, seqNr: Long, value: Any) {

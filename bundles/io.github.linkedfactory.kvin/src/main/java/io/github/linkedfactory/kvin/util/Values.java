@@ -72,7 +72,7 @@ public class Values {
 				return buffer.get() != 0;
 			// string
 			case '"':
-				var b = new byte[buffer.remaining()];
+				var b = new byte[(int) Varint.readUnsigned(buffer)];
 				buffer.get(b);
 				return new String(b, StandardCharsets.UTF_8);
 			default:
@@ -123,7 +123,10 @@ public class Values {
 		}
 		if (value instanceof String) {
 			var b = ((String) value).getBytes(StandardCharsets.UTF_8);
-			return buffer('"', b.length * 8).put(b).array();
+			var length = Varint.calcLengthUnsigned(b.length) + b.length;
+			var buffer = buffer('"', length * 8);
+			Varint.writeUnsigned(buffer, b.length);
+			return buffer.put(b).array();
 		}
 		if (value instanceof BigInteger) {
 			// store big integers as longs (possible loss of range)

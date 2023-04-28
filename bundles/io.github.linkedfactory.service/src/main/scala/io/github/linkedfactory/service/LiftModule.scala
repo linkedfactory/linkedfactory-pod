@@ -66,13 +66,15 @@ class LiftModule {
   def boot {
     // initialize data object and value store service
     // FIXME: initialize value store differently (not as side-effect of Data ctor)
-    Data
     Data.kvin map { kvin =>
       shutdownHooks :+= (() => kvin.close())
       val kvinSvc = FrameworkUtil.getBundle(getClass).getBundleContext.registerService(classOf[Kvin], kvin, new util.Hashtable[String, Object]())
       shutdownHooks :+= (() => kvinSvc.unregister())
       LiftRules.statelessDispatch.append(new KvinService("linkedfactory" :: Nil, kvin))
     }
+
+    // overwrite existing SparqlRest
+    LiftRules.dispatch.prepend(SparqlService)
 
     // ensure that the fixed data model is always used
     Globals.contextModelRules.append {

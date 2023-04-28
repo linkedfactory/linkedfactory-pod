@@ -16,8 +16,6 @@
 package io.github.linkedfactory.service
 
 import com.google.common.cache.CacheBuilder
-import io.github.linkedfactory.kvin.influxdb.KvinInfluxDb
-import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.kvin.{Kvin, KvinListener}
 import io.github.linkedfactory.service.model.ssn._
 import io.github.linkedfactory.service.util.ResourceHelpers.withTransaction
@@ -33,15 +31,12 @@ import net.liftweb.http.{RequestVar, S}
 import org.eclipse.core.runtime.Platform
 import org.osgi.framework.FrameworkUtil
 
-import java.io.File
-import java.nio.file.Files
 import java.security.PrivilegedExceptionAction
 import java.text.SimpleDateFormat
 import java.util.concurrent.Executors
 import javax.security.auth.Subject
 import scala.jdk.CollectionConverters._
 import scala.reflect.{ClassTag, classTag}
-import scala.util.{Failure, Success, Try}
 
 object Data {
   val NAMESPACE = "http://linkedfactory.github.io/vocab#"
@@ -57,7 +52,6 @@ object Data {
 
   // FIXME: make withPluginConfig return a result, use val from result
   private var _modelURI: URI = _
-  private var _kvin: Option[Kvin] = None
 
   if (bundleContext != null) {
     // get configuration settings from plugin config model
@@ -67,47 +61,6 @@ object Data {
         case r: IReference if r.getURI != null => r.getURI
         case s: String => URIs.createURI(s)
         case _ => URIs.createURI("http://linkedfactory.github.io/data/")
-      }
-      _kvin = cfg.getSingle(cfgURI.appendLocalPart("type")) match {
-        case s: String if (s == "InfluxDB") =>
-          val endpoint = cfg.getSingle(cfgURI.appendLocalPart("endpoint")) match {
-            case r: IReference if (r.getURI != null) => r.getURI
-            case s: String => URIs.createURI(s)
-            case _ => URIs.createURI("http://localhost:8086/")
-          }
-          val db = cfg.getSingle(cfgURI.appendLocalPart("database")) match {
-            case s: String => s
-            case _ => "LinkedFactory"
-          }
-          Try(new KvinInfluxDb(endpoint, db)) match {
-            case Failure(throwable) =>
-              System.err.println(s"Value store: FAILURE for InfluxDB @ $endpoint: ${throwable.getMessage}")
-              None
-            case Success(success) =>
-              println(s"Value store: using InfluxDB @ $endpoint")
-              Some(success)
-          }
-        //case s: String if (s == "KVIN") =>
-        case _ =>
-          val dirName = cfg.getSingle(cfgURI.appendLocalPart("dirName")) match {
-            case s: String => s
-            case _ => "linkedfactory-valuestore"
-          }
-          val valueStorePath = new File(dirName) match {
-            case dir if (dir.isAbsolute()) => dir
-            case _ if (instanceLoc.isSet) => new File(new File(instanceLoc.getURL.toURI), dirName)
-            case _ => new File(Files.createTempDirectory("lf").toFile, dirName)
-          }
-          Try {
-            new KvinLevelDb(valueStorePath)
-          } match {
-            case Failure(throwable) =>
-              System.err.println(s"Value store: FAILURE for LF w/ path=$valueStorePath: ${throwable.getMessage}")
-              None
-            case Success(success) =>
-              println(s"Value store: using LF w/ path=$valueStorePath")
-              Some(success)
-          }
       }
     }
     }
@@ -125,9 +78,14 @@ object Data {
   // caches currentModel for each request
   object modelForRequest extends RequestVar[Box[IModel]](currentModel)
 
-  val kvin: Option[Kvin] = _kvin map { kvin =>
+  def getKvin() : Option[Kvin] = {
+    Option(bundleContext).flatMap(ctx =>
+      Option(ctx.getServiceReference(classOf[Kvin])).map(ref => ctx.getService(ref)))
+  }
+
+  val kvin: Option[Kvin] = getKvin() map { kvin =>
     kvin.addListener(new KvinListener {
-      override def entityCreated(item: URI, property: URI): Unit = {
+      override def entityCreated(item: URI): Unit = {
         // FIXME: add/use actual subject via session/token/...
         modelForRequest.foreach { m =>
           createHierarchyExecutor.submit(new Runnable {
@@ -155,6 +113,9 @@ object Data {
     Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() =>
       Globals.contextModelSet.vend.map { modelSet =>
         try {
+          // disable change support
+          modelSet.getDataChangeSupport.setDefaultEnabled(false)
+
           modelSet.getUnitOfWork.begin
 
           modelSet.getModule.includeModule(new KommaModule() {

@@ -18,58 +18,54 @@ package io.github.linkedfactory.kvin.leveldb
 import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.util.concurrent.Striped
 import io.github.linkedfactory.kvin._
-import io.github.linkedfactory.kvin.leveldb.Utils._
 import io.github.linkedfactory.kvin.util.{AggregatingIterator, Values, Varint}
-import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator, UniqueExtendedIterator}
+import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator, UniqueExtendedIterator, WrappedIterator}
 import net.enilink.komma.core.{URI, URIs}
 import org.iq80.leveldb.impl.Iq80DBFactory.{bytes, factory}
 import org.iq80.leveldb.{CompressionType, DB, Options, Range, WriteBatch, WriteOptions}
 
 import java.io.{ByteArrayOutputStream, File}
 import java.nio.{ByteBuffer, ByteOrder}
+import java.util
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.locks.{ReadWriteLock, ReentrantReadWriteLock}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
-sealed trait EntryType {
-  def id: Int
-
-  def reverse: Int = id + 1
-}
-
-object EntryType {
-  object SubjectToId extends EntryType {
-    val id = 1
-  }
-
-  object PropertyToId extends EntryType {
-    val id = 3
-  }
-
-  object ResourceToId extends EntryType {
-    val id = 5
-  }
-
-  object ContextToId extends EntryType {
-    val id = 7
-  }
-
-  object SPCtoId extends EntryType {
-    val id = 9
-  }
-}
-
 /**
  * Indirect mapping of (item, property) -> ID and (ID, time, sequence-nr) -> value.
  */
 class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
+  sealed trait EntryType {
+    def id: Int
+
+    def reverse: Int = id + 1
+  }
+
+  object EntryType {
+    object SubjectToId extends EntryType {
+      val id = 1
+    }
+
+    object PropertyToId extends EntryType {
+      val id = 3
+    }
+
+    object ResourceToId extends EntryType {
+      val id = 5
+    }
+
+    object ContextToId extends EntryType {
+      val id = 7
+    }
+  }
+
   val idKey: Array[Byte] = bytes("__NEXT_ID\u0000")
 
   val locks: Striped[ReadWriteLock] = Striped.readWriteLock(64)
 
   val uriToIdCache: Cache[(URI, Int), Array[Byte]] = CacheBuilder.newBuilder.maximumSize(20000).build[(URI, Int), Array[Byte]]
-  val spToIdCache: Cache[(URI, URI, URI), Array[Byte]] = CacheBuilder.newBuilder.maximumSize(20000).build[(URI, URI, URI), Array[Byte]]
+  val spcToIdCache: Cache[(URI, URI, URI), Array[Byte]] = CacheBuilder.newBuilder.maximumSize(20000).build[(URI, URI, URI), Array[Byte]]
 
   // open the LevelDB instance
   def createOptions(timeSeries: Boolean): Options = {
@@ -97,10 +93,6 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   val values: DB = factory.open(new File(path, "values"), createOptions(true))
 
   val listeners = new CopyOnWriteArraySet[KvinListener]
-
-  def getIdStore(): DB = ids
-
-  def getValueStore(): DB = values
 
   override def addListener(listener: KvinListener): Boolean = {
     listeners.add(listener)
@@ -157,6 +149,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
             // add reverse mapping
             val idKeyBytes = idKey(entryType.reverse.toByte, idBytes)
             ids.put(idKeyBytes, uri.toString.getBytes("UTF-8"))
+
+            if (entryType == EntryType.SubjectToId) for (l <- listeners.asScala) l.entityCreated(uri)
           }
         }
       }
@@ -203,7 +197,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
   def toId(item: URI, property: URI, context: URI, generate: Boolean): Array[Byte] = {
     val cacheKey = (item, property, context)
-    var id = spToIdCache.getIfPresent(cacheKey)
+    var id = spcToIdCache.getIfPresent(cacheKey)
     if (id == null) {
       val itemId = toId(item, EntryType.SubjectToId, generate)
       if (itemId != null) {
@@ -211,29 +205,13 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         if (propertyId != null) {
           val contextId = toId(contextOrDefault(context), EntryType.ContextToId, generate)
           if (contextId != null) {
-            val spc = new Array[Byte](itemId.length + propertyId.length + contextId.length)
+            id = new Array[Byte](contextId.length + itemId.length + propertyId.length)
 
-            System.arraycopy(itemId, 0, spc, 0, itemId.length)
-            System.arraycopy(propertyId, 0, spc, itemId.length, propertyId.length)
-            System.arraycopy(contextId, 0, spc, itemId.length + propertyId.length, contextId.length)
+            System.arraycopy(itemId, 0, id, 0, itemId.length)
+            System.arraycopy(propertyId, 0, id, itemId.length, propertyId.length)
+            System.arraycopy(contextId, 0, id, itemId.length + propertyId.length, contextId.length)
 
-            id = ids.get(idKey(EntryType.SPCtoId.id.toByte, spc))
-            if (id == null && generate) {
-              val created = writeLock(lockFor(item)) {
-                id = ids.get(idKey(EntryType.SPCtoId.id.toByte, spc))
-                if (id == null) {
-                  id = createNewIdMapping(spc, EntryType.SPCtoId)
-                  true
-                } else {
-                  false
-                }
-              }
-              // notify listeners outside of lock
-              if (created) for (l <- listeners.asScala) l.entityCreated(item, property)
-            }
-            if (id != null) {
-              spToIdCache.put(cacheKey, id)
-            }
+            spcToIdCache.put(cacheKey, id)
           }
           id
         } else null
@@ -247,56 +225,60 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   }
 
   override def delete(item: URI): Boolean = {
+    val BATCH_SIZE = 100000
     val itemId = toId(item, EntryType.SubjectToId, generate = false)
-    val prefix = new Array[Byte](itemId.length + 1)
-    prefix(0) = EntryType.SPCtoId.id.toByte
-    System.arraycopy(itemId, 0, prefix, 1, itemId.length)
-
     var deletedAny = false
-    var done = false
-    val it = ids.iterator
-    try {
-      it.seek(prefix)
-      while (it.hasNext && !done) {
-        val entry = it.next
-        val key = entry.getKey
-        if (key.startsWith(prefix)) {
-          deletedAny = true
+    if (itemId != null) {
+      deleteId(item, EntryType.SubjectToId)
 
-          var pos = prefix.length
-          var idLength = varIntLength(key, pos)
-          var idBytes = new Array[Byte](idLength)
-          System.arraycopy(key, pos, idBytes, 0, idBytes.length)
-          val propertyUri = toUri(idBytes, EntryType.PropertyToId)
+      val prefix = new Array[Byte](itemId.length + java.lang.Long.BYTES + 1)
+      System.arraycopy(itemId, 0, prefix, 0, itemId.length)
 
-          pos += idBytes.length
-          idLength = varIntLength(key, pos)
-          if (idLength != idBytes.length) idBytes = new Array[Byte](idLength)
-          System.arraycopy(key, pos, idBytes, 0, idBytes.length)
-          val contextUri = toUri(idBytes, EntryType.ContextToId)
+      val it = values.iterator
+      try {
+        var batch: WriteBatch = null
+        var count = 0L
+        var done = false
 
-          (propertyUri, contextUri) match {
-            case (Some(p), Some(c)) => delete(item, p, c)
-            case _ => // this is an error, IDs should be defined => inconsistent data
-          }
-        } else done = true
+        it.seek(prefix)
+        while (it.hasNext && !done) {
+          val entry = it.next
+          val key = entry.getKey
+          if (key.startsWith(prefix)) {
+            deletedAny = true
+
+            if (batch == null) batch = values.createWriteBatch
+            count += 1
+            batch.delete(key)
+            if (count % BATCH_SIZE == 0) {
+              values.write(batch, new WriteOptions().sync(false))
+              batch.close()
+              batch = values.createWriteBatch
+            }
+          } else done = true
+        }
+
+        if (batch != null && count % BATCH_SIZE != 0) {
+          values.write(batch, new WriteOptions().sync(false))
+        }
+      } finally {
+        it.close()
       }
-    } finally {
-      it.close()
     }
     deletedAny
   }
 
-  override def delete(item: URI, property: URI, context: URI, end: Long = Long.MaxValue, begin: Long = 0L): Long = {
+  override def delete(item: URI, property: URI, context: URI,
+                      end: Long = KvinTuple.TIME_MAX_VALUE, begin: Long = 0L): Long = {
     val lock = lockFor(item)
     readLock(lock) {
       val BATCH_SIZE = 100000
       val id = toId(item, property, context, generate = false)
       if (id == null) 0L else {
-        var intervalEnd = if (end == Long.MaxValue) 0L else end
-        val idTimePrefix = new Array[Byte](id.length + TIME_BYTES)
+        val idTimePrefix = new Array[Byte](id.length + Varint.MAX_BYTES)
         val prefixBuffer = ByteBuffer.wrap(idTimePrefix).order(BYTE_ORDER)
-        prefixBuffer.put(id).putInt6(mapTime(end))
+        prefixBuffer.put(id)
+        writeVarint(prefixBuffer, end)
         var batch: WriteBatch = null
         var count = 0L
         val it = values.iterator
@@ -308,7 +290,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
             val key = entry.getKey
             if (key.startsWith(id)) {
               val bb = ByteBuffer.wrap(key, id.length, key.length - id.length).order(BYTE_ORDER)
-              val time = mapTime(bb.getInt6)
+              val time = readVarint(bb)
               if (time <= end && time >= begin) {
                 if (batch == null) batch = values.createWriteBatch
                 count += 1
@@ -390,11 +372,11 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   override def properties(item: URI): IExtendedIterator[URI] = {
     val itemId = toId(item, EntryType.SubjectToId, generate = false)
     if (itemId == null) NiceIterator.emptyIterator[URI] else {
-      val prefix = new Array[Byte](itemId.length + 1)
-      prefix(0) = EntryType.SPCtoId.id.toByte
-      System.arraycopy(itemId, 0, prefix, 1, itemId.length)
+      val prefix = new Array[Byte](itemId.length + java.lang.Long.BYTES + 1)
+      System.arraycopy(itemId, 0, prefix, 0, itemId.length)
 
-      val it = ids.iterator
+      val it = values.iterator
+      var propertyId: Long = 0
       UniqueExtendedIterator.create(
         new StoreIterator[URI](it) {
           override def init: Unit = {
@@ -404,12 +386,15 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           override def computeNext: Option[URI] = {
             val entry = it.next
             val key = entry.getKey
-            if (key.startsWith(prefix)) {
-              val pos = prefix.length
-              val idLength = varIntLength(key, pos)
-              val idBytes = new Array[Byte](idLength)
-              System.arraycopy(key, pos, idBytes, 0, idBytes.length)
-              toUri(idBytes, EntryType.PropertyToId)
+            if (key.startsWith(itemId)) {
+              val propertyIdLength = varIntLength(key, itemId.length)
+              val propertyIdBytes = new Array[Byte](propertyIdLength)
+              System.arraycopy(key, itemId.length, propertyIdBytes, 0, propertyIdBytes.length)
+              propertyId = Varint.readUnsigned(ByteBuffer.wrap(propertyIdBytes))
+              Varint.writeUnsigned(prefix, itemId.length, propertyId + 1)
+              // go to next property
+              it.seek(prefix)
+              toUri(propertyIdBytes, EntryType.PropertyToId)
             } else None
           }
         })
@@ -451,14 +436,12 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         val lock = lockFor(entry.item)
         readLock(lock) {
           val prefix = toId(entry.item, entry.property, entry.context, generate = true)
-          var keyLength = prefix.length + TIME_BYTES
-          //          if (entry.seqNr > 0)
-          keyLength += SEQ_BYTES
-          val key = new Array[Byte](keyLength)
+          val key = new Array[Byte](prefix.length + Varint.calcLengthUnsigned(entry.time) +
+            Varint.calcLengthUnsigned(entry.seqNr))
           val bb = ByteBuffer.wrap(key).order(BYTE_ORDER)
-          bb.put(prefix).putInt6(mapTime(entry.time))
-          //          if (entry.seqNr > 0)
-          bb.putShortUnsigned(mapSeq(entry.seqNr))
+          bb.put(prefix)
+          writeVarint(bb, entry.time)
+          writeVarint(bb, entry.seqNr)
 
           values.put(key, encodedValue)
 
@@ -480,14 +463,12 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         val lock = lockFor(entry.item)
         readLock(lock) {
           val prefix = toId(entry.item, entry.property, entry.context, generate = true)
-          var keyLength = prefix.length + TIME_BYTES
-          //          if (entry.seqNr > 0)
-          keyLength += SEQ_BYTES
-          val key = new Array[Byte](keyLength)
+          val key = new Array[Byte](prefix.length + Varint.calcLengthUnsigned(entry.time) +
+            Varint.calcLengthUnsigned(entry.seqNr))
           val bb = ByteBuffer.wrap(key).order(BYTE_ORDER)
-          bb.put(prefix).putInt6(mapTime(entry.time))
-          //          if (entry.seqNr > 0)
-          bb.putShortUnsigned(mapSeq(entry.seqNr))
+          bb.put(prefix)
+          writeVarint(bb, entry.time)
+          writeVarint(bb, entry.seqNr)
 
           batch.put(key, encodedValue)
 
@@ -507,7 +488,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   override def fetch(item: URI, property: URI, context: URI, limit: Long): IExtendedIterator[KvinTuple] = fetchInternal(item = item, property = property, context = context, limit = limit)
 
   override def fetch(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE, begin: Long = 0L, limit: Long = 0L, interval: Long = 0L, op: String = null): IExtendedIterator[KvinTuple] = {
-    var results = fetchInternal(item, property, context, end, begin, limit, interval)
+    var results = fetchInternal(item, property, context, end, begin, if (op == null) limit else 0L, if (op == null) interval else 0L)
     if (op != null) {
       results = new AggregatingIterator(results, interval, op.trim.toLowerCase, limit) {
         override def createElement(item: URI, property: URI, context: URI, time: Long, seqNr: Int, value: Object): KvinTuple = {
@@ -522,20 +503,37 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     value match {
       case d: Data[_] =>
         val baos = new ByteArrayOutputStream
-        // marker for an object
-        baos.write(Array('O'.toByte))
-        for {
-          element <- d.asScala
-        } {
-          // write the property
-          val p = element.getProperty
-          val pId = toId(p, EntryType.PropertyToId, generate = true)
-          baos.write(pId)
-
-          // write the value
-          baos.write(encode(element.getValue))
-        }
         try {
+          // marker for an object
+          baos.write(Array('O'.toByte))
+          val size = d.size()
+          val length: Array[Byte] = Array.ofDim(Varint.calcLengthUnsigned(size))
+          Varint.writeUnsigned(length, 0, size)
+          baos.write(length)
+          for {
+            element <- d.asScala
+          } {
+            // write the property
+            val p = element.getProperty
+            val pId = toId(p, EntryType.PropertyToId, generate = true)
+            baos.write(pId)
+
+            // write the value
+            baos.write(encode(element.getValue))
+          }
+          baos.toByteArray
+        } finally {
+          baos.close()
+        }
+      case a: Array[_] =>
+        val baos = new ByteArrayOutputStream
+        try {
+          // marker for an array
+          baos.write(Array('['.toByte))
+          val length: Array[Byte] = Array.ofDim(Varint.calcLengthUnsigned(a.length))
+          Varint.writeUnsigned(length, 0, a.length)
+          baos.write(length)
+          a.foreach(e => baos.write(encode(e)))
           baos.toByteArray
         } finally {
           baos.close()
@@ -561,8 +559,9 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     b.get match {
       // this is an object
       case 'O' =>
+        val length = Varint.readUnsigned(b).intValue
         var dataObj = Record.NULL
-        while (b.hasRemaining) {
+        for (_ <- 0 until length) {
           val pId = new Array[Byte](varIntLength(b))
           b.get(pId)
           val pUriOpt = toUri(pId, EntryType.PropertyToId)
@@ -570,6 +569,14 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           pUriOpt.foreach { pUri => dataObj = dataObj.append(new Record(pUri, value)) }
         }
         dataObj
+      // an array
+      case '[' =>
+        val length = Varint.readUnsigned(b).intValue
+        val values = Array.ofDim[Any](length)
+        for (i <- 0 until length) {
+          values(i) = decode(b)
+        }
+        values
       // a URI reference
       case 'R' =>
         val refId = new Array[Byte](varIntLength(b))
@@ -582,28 +589,53 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     }
   }
 
-  def varIntLength(bytes: Array[Byte], pos: Int): Int = {
-    Varint.firstToLength(bytes(pos))
-  }
+  def varIntLength(bytes: Array[Byte], pos: Int): Int = Varint.firstToLength(bytes(pos))
 
-  def varIntLength(bb: ByteBuffer): Int = {
-    Varint.firstToLength(bb.get(bb.position()))
-  }
+  def varIntLength(bb: ByteBuffer): Int = Varint.firstToLength(bb.get(bb.position()))
 
-  def fetchInternal(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE, begin: Long = 0L, limit: Long = 0L, interval: Long = 0L): IExtendedIterator[KvinTuple] = {
-    val id = toId(item, property, context, generate = false)
-    if (id == null) NiceIterator.emptyIterator[KvinTuple] else {
-      val idTimePrefix = new Array[Byte](id.length + TIME_BYTES + SEQ_BYTES)
-      val prefixBuffer = ByteBuffer.wrap(idTimePrefix).order(BYTE_ORDER)
-      prefixBuffer.put(id).putInt6(mapTime(end))
+  def fetchInternal(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE,
+                    begin: Long = 0L, limit: Long = 0L, interval: Long = 0L): IExtendedIterator[KvinTuple] = {
+    val currentContext = if (context == null) Kvin.DEFAULT_CONTEXT else context
+    val propertiesIt: IExtendedIterator[URI] = if (property == null) {
+      properties(item)
+    } else {
+      WrappedIterator.create(List(property).asJava.iterator())
+    }
 
+    if (!propertiesIt.hasNext()) NiceIterator.emptyIterator[KvinTuple] else {
       val it = values.iterator
       new StoreIterator[KvinTuple](it) {
+        var currentProperty: URI = null
+        var id: Array[Byte] = null
+        val idTimePrefix: Array[Byte] = new Array[Byte](Varint.MAX_BYTES * 4)
+        val prefixBuffer: ByteBuffer = ByteBuffer.wrap(idTimePrefix).order(BYTE_ORDER)
+
         var intervalSeq: Int = 0
         var count: Long = 0
 
+        def nextProperty(): Unit = {
+          var validProperty = false
+          while (!validProperty && propertiesIt.hasNext) {
+            currentProperty = propertiesIt.next()
+            id = toId(item, currentProperty, context, generate = false)
+            if (id != null) {
+              validProperty = true
+              util.Arrays.fill(idTimePrefix, 0.toByte)
+              prefixBuffer.clear()
+              prefixBuffer.put(id)
+              writeVarint(prefixBuffer, end)
+            }
+          }
+          if (validProperty) {
+            count = 0
+            it.seek(idTimePrefix)
+          } else {
+            close()
+          }
+        }
+
         override def init: Unit = {
-          it.seek(idTimePrefix)
+          nextProperty()
         }
 
         override def computeNext: Option[KvinTuple] = {
@@ -611,8 +643,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           val key = entry.getKey
           if (key.startsWith(id)) {
             val bb = ByteBuffer.wrap(key, id.length, key.length - id.length).order(BYTE_ORDER)
-            val time = mapTime(bb.getInt6)
-            val seq = if (bb.hasRemaining) mapSeq(bb.getShortUnsigned) else 0
+            val time = readVarint(bb)
+            val seq : Int = if (bb.hasRemaining) readVarint(bb).toInt else 0
             if (time <= end && time >= begin && (limit == 0 || count < limit)) {
               count += 1
 
@@ -620,16 +652,30 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
               if (interval > 0) {
                 val intervalStart = time - (time % interval)
                 // seek to next interval
-                prefixBuffer.putInt6(id.length, mapTime(intervalStart - 1))
+                (id.length until idTimePrefix.length).foreach(idTimePrefix(_) = 0)
+                writeVarint(prefixBuffer, id.length, intervalStart - 1)
                 it.seek(idTimePrefix)
 
                 intervalSeq += 1
-                Some(new KvinTuple(item, property, context, intervalStart, intervalSeq, decode(entry.getValue)))
+                Some(new KvinTuple(item, currentProperty, currentContext, intervalStart,
+                  intervalSeq, decode(entry.getValue)))
               } else {
-                Some(new KvinTuple(item, property, context, time, seq, decode(entry.getValue)))
+                Some(new KvinTuple(item, currentProperty, currentContext, time, seq,
+                  decode(entry.getValue)))
               }
-            } else None
-          } else None
+            } else {
+              nextProperty()
+              if (open) computeNext else None
+            }
+          } else {
+            nextProperty()
+            if (open) computeNext else None
+          }
+        }
+
+        override def close(): Unit = {
+          propertiesIt.close()
+          super.close()
         }
       }
     }
@@ -638,11 +684,13 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   override def approximateSize(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE, begin: Long = 0L): Long = {
     val id = toId(item, property, context, generate = false)
     if (id == null) 0L else {
-      val size = id.length + TIME_BYTES
+      val size = id.length + Varint.MAX_BYTES
       val lowKey = ByteBuffer.allocate(size).order(BYTE_ORDER)
-      lowKey.put(id).putInt6(mapTime(end))
+      lowKey.put(id)
+      writeVarint(lowKey, end)
       val highKey = ByteBuffer.allocate(size).order(BYTE_ORDER)
-      highKey.put(id).putInt6(mapTime(begin))
+      highKey.put(id)
+      writeVarint(highKey, begin)
       val sizes = values.getApproximateSizes(new Range(lowKey.array, highKey.array))
       sizes(0)
     }

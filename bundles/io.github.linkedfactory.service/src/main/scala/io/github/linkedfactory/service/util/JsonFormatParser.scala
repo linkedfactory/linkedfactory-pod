@@ -63,8 +63,10 @@ object JsonFormatParser extends Loggable {
     }
 
     def parseValue(value: JValue): Box[Any] = value match {
-      case null | JNothing | JArray(_) =>
+      case null | JNothing =>
         Failure("Invalid value")
+      case JArray(values) =>
+        Full(values.flatMap(parseValue(_)).toArray)
       case obj: JObject =>
         obj \ "@id" match {
           case JString(id) => Full(resolveUri(id, activeContexts))

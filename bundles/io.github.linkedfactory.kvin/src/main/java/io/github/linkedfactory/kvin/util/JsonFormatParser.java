@@ -3,20 +3,16 @@ package io.github.linkedfactory.kvin.util;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonParser.Feature;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
 import net.enilink.commons.iterator.NiceIterator;
-import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.ContentType;
-import org.apache.http.entity.StringEntity;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -25,44 +21,31 @@ import java.math.BigInteger;
 import java.util.*;
 
 public class JsonFormatParser {
-    JsonFactory jsonFactory;
-    JsonParser jsonParser;
-    ObjectMapper mapper;
+    final static JsonFactory jsonFactory = new JsonFactory().configure(Feature.AUTO_CLOSE_SOURCE, true);
+    final JsonParser jsonParser;
+    final static ObjectMapper mapper = new ObjectMapper()
+                .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
+                .configure(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN, true);
 
-    public JsonFormatParser(InputStream content) {
-        try {
-            jsonFactory = new JsonFactory();
-            mapper = new ObjectMapper();
-            mapper = mapper.configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
-            mapper = mapper.configure(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN, true);
-            jsonParser = jsonFactory.createParser(content);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public JsonFormatParser() {
-        mapper = new ObjectMapper();
+    public JsonFormatParser(InputStream content) throws IOException {
+        jsonParser = jsonFactory.createParser(content);
     }
 
     public NiceIterator<KvinTuple> parse() {
-        if (jsonParser == null) {
-            throw new RuntimeException("cannot parse without json string");
-        }
         return new NiceIterator<>() {
             KvinTuple kvinTuple;
-            private String currentItemName = "";
-            private String currentPropertyName = "";
-            private boolean isLoopingProperties = false;
-            private boolean IsLoopingPropertyItems = false;
+            String currentItemName;
+            String currentPropertyName;
+            boolean isLoopingProperties = false;
+            boolean isLoopingPropertyItems = false;
 
             @Override
             public boolean hasNext() {
                 try {
-                    if (kvinTuple == null && IsLoopingPropertyItems) {
+                    if (kvinTuple == null && isLoopingPropertyItems) {
                         boolean isAddingPropertyItems = addNextPropertyItem(currentItemName, currentPropertyName);
                         if (!isAddingPropertyItems) {
-                            boolean isAddingProperty = addNextProperty(currentItemName);
+                            boolean isAddingProperty = addNextProperty();
                             if (!isAddingProperty) {
                                 addNextItem();
                             }
@@ -70,7 +53,7 @@ public class JsonFormatParser {
                         return isTuplesAlreadyGenerated();
 
                     } else if (kvinTuple == null && isLoopingProperties) {
-                        boolean isAddingProperty = addNextProperty(currentItemName);
+                        boolean isAddingProperty = addNextProperty();
                         if (!isAddingProperty) {
                             addNextItem();
                         }
@@ -96,10 +79,10 @@ public class JsonFormatParser {
             }
 
             private void addNextItem() throws IOException {
-                while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                while (jsonParser.nextToken() != null) {
                     if (jsonParser.getCurrentToken() == JsonToken.FIELD_NAME) {
                         currentItemName = jsonParser.getCurrentName();
-                        addNextProperty(currentItemName);
+                        addNextProperty();
                         if (isTuplesAlreadyGenerated()) {
                             break;
                         }
@@ -107,8 +90,8 @@ public class JsonFormatParser {
                 }
             }
 
-            private boolean addNextProperty(String itemName) throws IOException {
-                while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+            private boolean addNextProperty() throws IOException {
+                while (jsonParser.nextToken() != null) {
                     isLoopingProperties = true;
                     if (jsonParser.getCurrentToken() == JsonToken.FIELD_NAME) {
                         currentPropertyName = jsonParser.getCurrentName();
@@ -121,24 +104,24 @@ public class JsonFormatParser {
                 }
                 if (kvinTuple == null && jsonParser.getCurrentToken() == JsonToken.END_OBJECT) {
                     isLoopingProperties = false;
-                    currentItemName = "";
                 }
                 return isTuplesAlreadyGenerated();
             }
 
             private boolean addNextPropertyItem(String itemName, String propertyName) throws IOException {
                 while (jsonParser.nextToken() != JsonToken.END_ARRAY) {
-                    IsLoopingPropertyItems = true;
+                    isLoopingPropertyItems = true;
                     if (jsonParser.getCurrentToken() == JsonToken.START_OBJECT) {
                         JsonNode node = mapper.readTree(jsonParser);
                         Object value = nodeToValue(node.get("value"));
-                        kvinTuple = new KvinTuple(URIs.createURI(itemName), URIs.createURI(propertyName), null, Long.parseLong(node.get("time").toString()), value);
+                        Object seqNr = nodeToValue(node.get("seqNr"));
+                        kvinTuple = new KvinTuple(URIs.createURI(itemName), URIs.createURI(propertyName), null,
+                            ((Number) nodeToValue(node.get("time"))).longValue(), seqNr != null ?  ((Number) seqNr).intValue() : 0, value);
                         break;
                     }
                 }
                 if (kvinTuple == null && jsonParser.getCurrentToken() == JsonToken.END_ARRAY) {
-                    IsLoopingPropertyItems = false;
-                    currentPropertyName = "";
+                    isLoopingPropertyItems = false;
                 }
                 return isTuplesAlreadyGenerated();
             }
@@ -149,16 +132,23 @@ public class JsonFormatParser {
 
             @Override
             public void close() {
-                super.close();
+                try {
+                    jsonParser.close();
+                } catch (IOException e) {
+                    // ignore
+                }
             }
         };
     }
 
     private Object nodeToValue(JsonNode node) {
+        if (node == null) {
+            return null;
+        }
+
         Record value = null;
         if (node.isObject() && node.get("@id") != null) {
             return URIs.createURI(node.get("@id").textValue());
-
         } else if (node.isObject()) {
             Iterator<Map.Entry<String, JsonNode>> records = node.fields();
             while (records.hasNext()) {
