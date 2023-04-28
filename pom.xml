@@ -20,10 +20,20 @@
 		<enilink.version>1.5.4</enilink.version>
 		<scala.major.version>2.13</scala.major.version>
 		<scala.version>2.13.2</scala.version>
-		<karaf.tooling.version>4.3.0</karaf.tooling.version>
+		<karaf.tooling.version>4.4.0</karaf.tooling.version>
+		<karaf.version>4.4.0</karaf.version>
 
 		<bnd.version>6.3.1</bnd.version>
+		<linkedfactory.scm.connection>scm:git:git://github.com:linkedfactory/linkedfactory-pod.git</linkedfactory.scm.connection>
+		<linkedfactory.scm.developerConnection>scm:git:git@github.com:elinkedfactory/linkedfactory-pod.git</linkedfactory.scm.developerConnection>
+		<linkedfactory.scm.url>https://github.com/linkedfactory/linkedfactory-pod</linkedfactory.scm.url>
 	</properties>
+
+	<scm>
+		<connection>${linkedfactory.scm.connection}</connection>
+		<developerConnection>${linkedfactory.scm.developerConnection}</developerConnection>
+		<url>${linkedfactory.scm.url}</url>
+	</scm>
 
 	<build>
 		<plugins>
@@ -196,6 +206,17 @@
 		</resources>
 	</build>
 
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.slf4j</groupId>
+				<artifactId>slf4j-simple</artifactId>
+				<version>1.7.30</version>
+				<scope>test</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
 	<profiles>
 		<profile>
 			<id>update-licenses</id>
@@ -230,6 +251,14 @@
 				</plugins>
 			</build>
 		</profile>
+		<profile>
+			<id>server</id>
+			<modules>
+				<module>features/io.github.linkedfactory.feature</module>
+				<module>server</module>
+			</modules>
+		</profile>
+
 	</profiles>
 
 	<repositories>

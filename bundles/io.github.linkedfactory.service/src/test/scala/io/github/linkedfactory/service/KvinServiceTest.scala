@@ -255,13 +255,13 @@ class KvinServiceTest {
     while (kvinTuples.hasNext) {
       val tuple: KvinTuple = kvinTuples.next()
       if (count == 0) {
-        assertEquals(tuple.value.toString, "6.333333333333333")
+        assertEquals(18.91, tuple.value.asInstanceOf[Number].doubleValue(), 1e-2)
       } else {
-        assertEquals(tuple.value.toString, "6.2")
+        assertEquals(18.53, tuple.value.asInstanceOf[Number].doubleValue(), 1e-2)
       }
       count = count + 1
     }
-    assertEquals(count, 2)
+    assertEquals(2, count)
 
   }
 

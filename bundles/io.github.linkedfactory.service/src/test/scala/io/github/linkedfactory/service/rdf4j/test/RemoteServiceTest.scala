@@ -22,6 +22,7 @@ import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
 import io.github.linkedfactory.service.rdf4j.KvinFederatedService
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}
+import org.eclipse.rdf4j.model.Literal
 import org.eclipse.rdf4j.query.QueryLanguage
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver
 import org.eclipse.rdf4j.repository.Repository
@@ -53,7 +54,7 @@ class RemoteServiceTest {
       """
         |{
         |    "http://example.org/item1": {
-        |        "http://example.org/properties/p1": [
+        |        "http://example.org/p1": [
         |            {
         |                "value": 57.934878949512196,
         |                "time": 1619424246120
@@ -67,7 +68,7 @@ class RemoteServiceTest {
       """
         |{
         |    "http://example.org/item2": {
-        |        "http://example.org/properties/p2": [
+        |        "http://example.org/p2": [
         |            {
         |                "value": 57.934878949512196,
         |                "time": 1619424246120
@@ -103,19 +104,19 @@ class RemoteServiceTest {
             override def fetch(item: URI, property: URI, context: URI, end: Long, begin: Long, limit: Long, interval: Long, op: String): IExtendedIterator[KvinTuple] = {
               kvinHttpInstance.fetchCall = kvinHttpInstance.fetchCall + 1
               var response = ""
-              if (item.toString.endsWith("p1")) {
+              if (item.toString.endsWith("item1")) {
                 response = mockData.item1
-              } else if (item.toString.endsWith("p2")) {
+              } else if (item.toString.endsWith("item2")) {
                 response = mockData.item2
               }
               val jsonParser = new JsonFormatParser(new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8)))
               jsonParser.parse
             }
-          })
+          }, true)
           kvinHttpInstance.count = kvinHttpInstance.count + 1
           return service
         }
-        val service = new KvinFederatedService(store)
+        val service = new KvinFederatedService(store, false)
         service
       }
     })
@@ -140,14 +141,14 @@ class RemoteServiceTest {
     try {
       val time = START_TIME + 20
 
-      val values = "values ?property { <p1> }"
-      val queryStr = s"select * where { $values service <kvin:http://test0.com> { ?property <property:value> ?v . ?v <kvin:to> $time ; <kvin:limit> 1 . ?v <kvin:value> ?value ; <kvin:time> ?time } }"
+      val values = "values ?item { <item1> }"
+      val queryStr = s"select * where { $values service <kvin:http://test0.com> { ?item <p1> [ <kvin:to> $time ; <kvin:limit> 1 ; <kvin:value> ?value ; <kvin:time> ?time ] } }"
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, "http://example.org/")
       val r = query.evaluate
 
       while (r.hasNext) {
         val bs = r.next
-        Assert.assertTrue(bs.getValue("property").toString.equals("http://example.org/p1"))
+        Assert.assertTrue(bs.getValue("item").toString.equals("http://example.org/item1"))
         Assert.assertTrue(bs.getValue("time").stringValue().equals("1619424246120"))
         Assert.assertTrue(bs.getValue("value").stringValue().equals("57.934878949512196"))
       }
@@ -172,24 +173,19 @@ class RemoteServiceTest {
 
       val queryStr =
         s"""
-           |SELECT *
-           |            WHERE {
-           |              values ?property { <p1> }
-           |              SERVICE <kvin:http://test1.com> {
-           |                ?property <property:value> ?v .
-           |                ?v <kvin:to> $time;
-           |                  <kvin:limit> 1 .
-           |                ?v <kvin:value> ?value ;
-           |                  <kvin:time> ?time
-           |              }
-           |              SERVICE <kvin:http://test2.com> {
-           |                  ?property <property:value> ?v1 .
-           |                  ?v1 <kvin:to> $time ;
-           |                    <kvin:limit> 1 .
-           |                  ?v1 <kvin:value> ?value1 ;
-           |                    <kvin:time> ?time1
-           |              }
-           |            }
+           |SELECT * {
+           |  values ?item { <item1> }
+           |  SERVICE <kvin:http://test1.com> {
+           |    ?item <p1> [ <kvin:to> $time ; <kvin:limit> 1 ;
+           |      <kvin:value> ?value ; <kvin:time> ?time
+           |    ]
+           |  }
+           |  SERVICE <kvin:http://test2.com> {
+           |    ?item <p2> [ <kvin:to> $time ; <kvin:limit> 1 ;
+           |      <kvin:value> ?value1; <kvin:time> ?time1
+           |    ]
+           |  }
+           |}
            |""".stripMargin
 
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, "http://example.org/")
@@ -219,24 +215,21 @@ class RemoteServiceTest {
 
       val queryStr =
         s"""
-           |SELECT (SUM(?value) AS ?total)
-           |            WHERE {
-           |              values ?property { <p1> <p2> }
-           |              SERVICE <kvin:http://test1.com> {
-           |                ?property <property:value> ?v .
-           |                ?v <kvin:to> $time ;
-           |                  <kvin:limit> 1 .
-           |                ?v <kvin:value> ?value ;
-           |                  <kvin:time> ?time
-           |              }
-           |              SERVICE <kvin:http://test2.com> {
-           |                  ?property <property:value> ?v1 .
-           |                  ?v1 <kvin:to> $time;
-           |                    <kvin:limit> 1 .
-           |                  ?v1 <kvin:value> ?value1 ;
-           |                    <kvin:time> ?time1
-           |              }
-           |            }
+           |SELECT (SUM(?value) AS ?total) {
+           |  values ?item { <item1> <item2> }
+           |  optional {
+           |    # has only values for item1
+           |    SERVICE <kvin:http://test1.com> {
+           |      ?item <p1> [ <kvin:to> $time ; <kvin:limit> 1 ; <kvin:value> ?value ]
+           |    }
+           |  }
+           |  optional {
+           |    # has only values for item2
+           |    SERVICE <kvin:http://test2.com> {
+           |      ?item <p2> [ <kvin:to> $time ; <kvin:limit> 1 ; <kvin:value> ?value ]
+           |    }
+           |  }
+           |}
            |""".stripMargin
 
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, "http://example.org/")
@@ -244,7 +237,7 @@ class RemoteServiceTest {
 
       while (r.hasNext) {
         val bs = r.next
-        Assert.assertTrue(bs.getValue("total").stringValue().equals("115.869757899024392"))
+        Assert.assertEquals(115.869757899024392, bs.getValue("total").asInstanceOf[Literal].doubleValue(), 10e-6)
       }
       Assert.assertTrue(kvinHttpInstance.count == 2)
       Assert.assertTrue(kvinHttpInstance.fetchCall == 4)
