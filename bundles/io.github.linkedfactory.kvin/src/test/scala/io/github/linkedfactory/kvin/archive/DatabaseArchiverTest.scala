@@ -18,7 +18,6 @@ class DatabaseArchiverTest {
   var databaseStore: KvinLevelDb = null
   var archiveStore: KvinParquet = null
 
-  @Before
   def setup(): Unit = {
     archiveTempDir = Files.createTempDirectory("archive").toFile
     leveldbTempDir = Files.createTempDirectory("level0db-test").toFile
@@ -27,7 +26,6 @@ class DatabaseArchiverTest {
     addTestData()
   }
 
-  @After
   def cleanup(): Unit = {
     FileUtils.deleteDirectory(new File(archiveTempDir.getPath))
     FileUtils.deleteDirectory(new File(leveldbTempDir.getPath))
@@ -40,12 +38,9 @@ class DatabaseArchiverTest {
     }
   }
 
-  @Test
   def testLevelDbToParquetArchival(): Unit = {
     val dbArchiver: DatabaseArchiver = new DatabaseArchiver(databaseStore, archiveStore)
     dbArchiver.archive()
     assertTrue(new File(archiveTempDir.getPath).listFiles.length > 0)
   }
-
-
 }
