@@ -48,7 +48,7 @@ public class JsonFormatParserTest {
             } else if (index == 3) {
                 assertTrue(t.value instanceof BigInteger);
             } else if (index == 4) {
-                assertTrue(t.value instanceof BigDecimal);
+                assertTrue(t.value instanceof Double);
             } else if (index == 5) {
                 assertTrue(t.value instanceof Long);
             } else if (index == 6) {
