@@ -9,7 +9,7 @@ import javax.servlet.ServletInputStream
  * @param url The target URL
  */
 class MockHttpServletRequest(url: String) extends net.liftweb.mocks.MockHttpServletRequest(url) {
-  class MockServletInputStream(is: InputStream) extends ServletInputStream {
+  class MockServletInputStream(val is: InputStream) extends ServletInputStream {
     def read(): Int = is.read()
 
     override def available(): Int = is.available()

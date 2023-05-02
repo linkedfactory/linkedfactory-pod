@@ -78,6 +78,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           req.rawInputStream.flatMap(saveLineValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
         case _ =>
           req.json.flatMap(saveValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
+          // req.rawInputStream.flatMap(saveValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
       }
       result match {
         case Failure(msg, _, _) => FailureResponse(msg)
@@ -229,6 +230,23 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
         store.put(tuple)
     })
+  }
+
+  // handle JSON post content
+  def saveValues(in: InputStream, path: List[String], currentTime: Long): Box[_] = {
+    var parentUri = Data.pathToURI(path)
+    if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
+
+    try {
+      new io.github.linkedfactory.kvin.util.JsonFormatParser(in).parse().iterator().asScala
+        .foreach { tuple =>
+          publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
+          store.put(tuple)
+        }
+      Empty
+    } catch {
+      case e : Exception => new Failure(e.getMessage(), Full(e), Empty)
+    }
   }
 
   // handle InfluxDB line protocol content
