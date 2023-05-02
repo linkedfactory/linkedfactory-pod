@@ -23,6 +23,7 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
     static File tempDir;
     File archiveDir = new File("./target/archive");
 
+    @BeforeClass
     public static void setup() {
         try {
             tempDir = Files.createTempDirectory("temp_levelDb").toFile();
@@ -33,6 +34,7 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
         }
     }
 
+    @AfterClass
     public static void cleanup() {
         try {
             kvinPartitioned.close();
@@ -43,6 +45,7 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
         }
     }
 
+    @Test
     public void shouldDoPut() {
         try {
             kvinPartitioned.put(generateTestTuples(10, 0, 1672614000L));
@@ -77,6 +80,7 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
         }
     }
 
+    @Test
     public void shouldDoFetch() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9);
@@ -93,6 +97,7 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
         }
     }
 
+    @Test
     public void shouldFetchProperties() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 5);
