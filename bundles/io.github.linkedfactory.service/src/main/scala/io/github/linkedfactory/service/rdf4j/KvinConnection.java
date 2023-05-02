@@ -7,22 +7,21 @@ import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.BNodeWithVal
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.ILiteral;
 import net.enilink.komma.core.IReference;
-import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import net.enilink.komma.literals.LiteralConverter;
 import net.enilink.komma.rdf4j.RDF4JValueConverter;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
-import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
-import org.eclipse.rdf4j.model.impl.LinkedHashModel;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.UpdateContext;
@@ -35,7 +34,7 @@ public class KvinConnection extends SailConnectionWrapper {
     final LiteralConverter literalConverter;
     private final Pattern containerMembershipPredicatePattern =
         Pattern.compile("^http://www.w3.org/1999/02/22-rdf-syntax-ns#_[1-9][0-9]*$");
-    private Model newStatements = new LinkedHashModel();
+    private Map<Resource, List<Statement>> stmtsBySubject = new LinkedHashMap<>();
 
     public KvinConnection(KvinSail sail, SailConnection baseConnection) {
         super(baseConnection);
@@ -51,7 +50,8 @@ public class KvinConnection extends SailConnectionWrapper {
         } else {
             for (Resource ctx : contexts) {
                 if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith("kvin:")) {
-                    newStatements.add(subj, pred, obj, ctx);
+                    stmtsBySubject.computeIfAbsent(subj, key -> new ArrayList<>()).add(
+                        kvinSail.getValueFactory().createStatement(subj, pred, obj, ctx));
                 } else {
                     super.addStatement(subj, pred, obj, ctx);
                 }
@@ -66,7 +66,8 @@ public class KvinConnection extends SailConnectionWrapper {
         } else {
             for (Resource ctx : contexts) {
                 if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith("kvin:")) {
-                    newStatements.add(subj, pred, obj, ctx);
+                    stmtsBySubject.computeIfAbsent(subj, key -> new ArrayList<>()).add(
+                        kvinSail.getValueFactory().createStatement(subj, pred, obj, ctx));
                 } else {
                     super.addStatement(modify, subj, pred, obj, contexts);
                 }
@@ -78,43 +79,49 @@ public class KvinConnection extends SailConnectionWrapper {
     public void flush() throws SailException {
         super.flush();
         createKvinTuples();
-        newStatements = new LinkedHashModel();
+        stmtsBySubject.clear();
     }
 
     private void createKvinTuples() {
         long currentTime = System.currentTimeMillis();
-        kvinSail.getKvin().put(WrappedIterator.create(newStatements
-            .stream().filter(stmt -> stmt.getSubject().isIRI())
-            .map(stmt -> {
-                IRI item = (IRI) stmt.getSubject();
-                IRI predicate = stmt.getPredicate();
-                return toKvinTuple(item, predicate, stmt.getObject(), currentTime);
-                //System.out.println(tuple);
-            }).iterator()));
+        kvinSail.getKvin().put(WrappedIterator.create(
+            stmtsBySubject.entrySet().stream().filter(e -> e.getKey().isIRI())
+                .flatMap(e -> {
+                    IRI item = (IRI) e.getKey();
+                    return e.getValue().stream().map(stmt -> {
+                        IRI predicate = stmt.getPredicate();
+                        return toKvinTuple(item, predicate, stmt.getObject(), currentTime);
+                    });
+                    //System.out.println(tuple);
+                }).iterator()));
     }
 
     private KvinTuple toKvinTuple(IRI item, IRI predicate, Value rdfValue, long currentTime) {
         long time = -1;
         int seqNr = 0;
-        Object value;
-        if (rdfValue.isBNode() && newStatements.contains((Resource) rdfValue, KVIN.VALUE, null)) {
-            Resource r = (Resource) rdfValue;
-            Iterator<Statement> it = newStatements.getStatements(r, KVIN.VALUE, null).iterator();
-            value = convertValue(it.next().getObject());
-            it = newStatements.getStatements(r, KVIN.TIME, null).iterator();
-            if (it.hasNext()) {
-                time = ((Literal) it.next().getObject()).longValue();
+        Object value = null;
+        if (rdfValue.isBNode()) {
+            if (rdfValue instanceof BNodeWithValue && ((BNodeWithValue) rdfValue).value instanceof KvinTuple) {
+                KvinTuple t = (KvinTuple) ((BNodeWithValue) rdfValue).value;
+                value = t.value;
+                time = t.time;
+                seqNr = t.seqNr;
+            } else {
+                List<Statement> stmts = stmtsBySubject.get(rdfValue);
+                if (stmts != null) {
+                    for (Statement stmt : stmts) {
+                        if (KVIN.VALUE.equals(stmt.getPredicate())) {
+                            value = convertValue(stmt.getObject());
+                        } else if (KVIN.TIME.equals(stmt.getPredicate())) {
+                            time = ((Literal) stmt.getObject()).longValue();
+                        } else if (KVIN.SEQNR.equals(stmt.getPredicate())) {
+                            seqNr = ((Literal) stmt.getObject()).intValue();
+                        }
+                    }
+                }
             }
-            it = newStatements.getStatements(r, KVIN.SEQNR, null).iterator();
-            if (it.hasNext()) {
-                seqNr = ((Literal) it.next().getObject()).intValue();
-            }
-        } else if (rdfValue instanceof BNodeWithValue && ((BNodeWithValue) rdfValue).value instanceof KvinTuple) {
-            KvinTuple t = (KvinTuple) ((BNodeWithValue) rdfValue).value;
-            value = t.value;
-            time = t.time;
-            seqNr = t.seqNr;
-        } else {
+        }
+        if (value == null) {
             value = convertValue(rdfValue);
         }
         return new KvinTuple(convertIri(item).getURI(), convertIri(predicate).getURI(),
@@ -135,14 +142,13 @@ public class KvinConnection extends SailConnectionWrapper {
             return convertIri((IRI) rdfValue);
         } else {
             // value is a blank node
-            Resource r = (Resource) rdfValue;
-            Iterable<Statement> stmts = newStatements.getStatements(r, null, null);
-            Iterator<Statement> it = stmts.iterator();
-            if (!it.hasNext()) {
+            List<Statement> stmts = stmtsBySubject.get(rdfValue);
+            if (stmts == null || stmts.isEmpty()) {
                 // TODO handle invalid value with exception
                 return null;
             }
             List<Object> values = null;
+            Iterator<Statement> it = stmts.iterator();
             while (it.hasNext()) {
                 Statement stmt = it.next();
                 if (containerMembershipPredicatePattern.matcher(stmt.getPredicate().toString()).matches()) {
