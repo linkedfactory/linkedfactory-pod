@@ -105,6 +105,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
   def getValueStore(): DB = values
 
+  def getEntryTypeObj() = EntryType
+
 
   val listeners = new CopyOnWriteArraySet[KvinListener]
 
