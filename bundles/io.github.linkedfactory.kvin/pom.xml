@@ -149,6 +149,17 @@
 				<configuration>
 					<skip>true</skip>
 				</configuration>
+				<!-- this is required for older Maven versions that don't recognize skip -->
+				<executions>
+					<execution>
+						<id>default-compile</id>
+						<phase>none</phase>
+					</execution>
+					<execution>
+						<id>default-testCompile</id>
+						<phase>none</phase>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
