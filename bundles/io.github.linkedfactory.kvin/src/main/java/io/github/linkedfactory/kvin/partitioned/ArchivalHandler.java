@@ -5,11 +5,11 @@ import io.github.linkedfactory.kvin.parquet.KvinParquet;
 
 import java.io.IOException;
 
-public class archivalHandler implements Runnable {
+public class ArchivalHandler implements Runnable {
     KvinPartitioned kvinPartitioned;
     KvinParquet archiveStore;
 
-    public archivalHandler(KvinPartitioned kvinPartitioned) {
+    public ArchivalHandler(KvinPartitioned kvinPartitioned) {
         this.kvinPartitioned = kvinPartitioned;
         archiveStore = new KvinParquet("./target/archive/");
     }

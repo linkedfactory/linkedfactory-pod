@@ -35,7 +35,7 @@ public class KvinPartitioned implements Kvin {
         levelDbHotDataStore = new KvinLevelDb(storePath);
         oldLevelDbHotDataStore = levelDbHotDataStore;
         archiveStore = new KvinParquet("./target/archive/");
-        archivalTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new archivalHandler(this), archivalSize, archivalSize, timeUnit);
+        archivalTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new ArchivalHandler(this), archivalSize, archivalSize, timeUnit);
     }
 
     @Override
