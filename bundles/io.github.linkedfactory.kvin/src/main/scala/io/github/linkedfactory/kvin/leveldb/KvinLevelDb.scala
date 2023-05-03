@@ -77,11 +77,11 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     options.writeBufferSize(options.writeBufferSize * 4)
 
     // default is 4096
-    // options.blockSize(4096 * 2)
+    options.blockSize(4096 * 2)
 
     if (timeSeries) {
       // default is 16
-      options.blockRestartInterval(500)
+      options.blockRestartInterval(64)
       //      options.reverseOrdering(true)
       //      options.timeSeriesMode(true)
     }
