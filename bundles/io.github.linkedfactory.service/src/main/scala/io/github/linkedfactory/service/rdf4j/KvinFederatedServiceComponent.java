@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service.rdf4j;
 
 import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.kvinHttp.KvinHttp;
+import io.github.linkedfactory.kvin.http.KvinHttp;
 import net.enilink.komma.model.IModelSet;
 import java.util.Optional;
 

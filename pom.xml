@@ -46,6 +46,7 @@
 				</configuration>
 				<executions>
 					<execution>
+						<id>scala-compile</id>
 						<goals>
 							<goal>add-source</goal>
 							<goal>compile</goal>

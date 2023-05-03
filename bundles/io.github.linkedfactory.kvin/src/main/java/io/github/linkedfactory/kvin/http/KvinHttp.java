@@ -1,4 +1,4 @@
-package io.github.linkedfactory.kvin.kvinHttp;
+package io.github.linkedfactory.kvin.http;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -24,7 +24,6 @@ import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
-import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.util.EntityUtils;
 
 import java.io.ByteArrayInputStream;
@@ -41,12 +40,12 @@ public class KvinHttp implements Kvin {
     JsonFactory jsonFactory = new JsonFactory();
 
     public KvinHttp(String hostEndpoint) {
-        this.hostEndpoint = hostEndpoint.endsWith("/") ? hostEndpoint.substring(0, hostEndpoint.length() - 1) : hostEndpoint;
+        this.hostEndpoint = hostEndpoint;
         this.httpClient = getHttpClient();
     }
 
     public CloseableHttpClient getHttpClient() {
-        return HttpClients.custom().setConnectionManager(new PoolingHttpClientConnectionManager()).build();
+        return HttpClients.createDefault();
     }
 
     @Override
@@ -98,7 +97,7 @@ public class KvinHttp implements Kvin {
                     ArrayList<ObjectNode> objectList = new ArrayList<>();
                     for (KvinTuple tuple : property.getValue()) {
                         ObjectNode objectNode = mapper.createObjectNode();
-                        objectNode.set("value", objectToJson(tuple.value));
+                        objectNode.put("value", objectToJson(tuple.value));
                         objectNode.put("time", tuple.time);
                         objectNode.put("seqNr", tuple.seqNr);
                         objectList.add(objectNode);
@@ -111,13 +110,15 @@ public class KvinHttp implements Kvin {
             String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(rootNode);
 
             // sending post request to the remote endpoint
-            HttpPost httpPost = createHttpPost(this.hostEndpoint + "/values");
+            // this.httpPost = this.httpPost != null ? this.httpPost : new HttpPost(this.hostEndpoint + "/linkedfactory/values");
+            HttpPost httpPost = createHttpPost(this.hostEndpoint + "/linkedfactory/values");
             StringEntity requestPayload = new StringEntity(
                     json,
                     ContentType.APPLICATION_JSON
             );
             httpPost.setEntity(requestPayload);
             CloseableHttpResponse response = httpClient.execute(httpPost);
+            HttpEntity entity = response.getEntity();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -155,15 +156,14 @@ public class KvinHttp implements Kvin {
 
     @Override
     public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
-        return fetchInternal(item, property, context, end != KvinTuple.TIME_MAX_VALUE ? end : null,
-            begin != 0 ? begin : null, limit != 0 ? limit : null, interval != 0 ? interval : null, op);
+        return fetchInternal(item, property, context, end, begin, limit, interval, op);
     }
 
     private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
         try {
             // building url
-            URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/values");
-            uriBuilder.setParameter("item", item.toString());
+            URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/linkedfactory/values");
+            if (item != null) uriBuilder.setParameter("item", item.toString());
             if (property != null) uriBuilder.setParameter("property", property.toString());
             if (limit != null) uriBuilder.setParameter("limit", Long.toString(limit));
             if (end != null) uriBuilder.setParameter("to", Long.toString(end));
@@ -176,12 +176,10 @@ public class KvinHttp implements Kvin {
             HttpGet httpGet = createHttpGet(getRequestUri.toString());
             HttpResponse response = this.httpClient.execute(httpGet);
             HttpEntity entity = response.getEntity();
-            if (response.getStatusLine().getStatusCode() != 200) {
-                return NiceIterator.emptyIterator();
-            }
+            String responseBody = EntityUtils.toString(entity);
 
             // converting json to kvin tuples
-            JsonFormatParser jsonParser = new JsonFormatParser(entity.getContent());
+            JsonFormatParser jsonParser = new JsonFormatParser(new ByteArrayInputStream(responseBody.getBytes(StandardCharsets.UTF_8)));
             return jsonParser.parse();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -215,7 +213,7 @@ public class KvinHttp implements Kvin {
     private IExtendedIterator<URI> descendantsInternal(URI item, Long limit) {
         try {
             // building url
-            URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/**");
+            URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/linkedfactory/**");
             uriBuilder.setParameter("item", item.toString());
             if (limit != null) uriBuilder.setParameter("limit", Long.toString(limit));
             java.net.URI getRequestUri = uriBuilder.build();
@@ -224,13 +222,11 @@ public class KvinHttp implements Kvin {
             HttpGet httpGet = createHttpGet(getRequestUri.toString());
             HttpResponse response = this.httpClient.execute(httpGet);
             HttpEntity entity = response.getEntity();
-            if (response.getStatusLine().getStatusCode() != 200) {
-                return NiceIterator.emptyIterator();
-            }
+            String responseBody = EntityUtils.toString(entity);
 
             // converting json to URI
             return new NiceIterator<>() {
-                final JsonParser jsonParser = jsonFactory.createParser(entity.getContent());
+                final JsonParser jsonParser = jsonFactory.createParser(responseBody);
 
                 @Override
                 public boolean hasNext() {
@@ -264,11 +260,7 @@ public class KvinHttp implements Kvin {
 
                 @Override
                 public void close() {
-                    try {
-                        jsonParser.close();
-                    } catch (IOException e) {
-                        // ignore
-                    }
+                    super.close();
                 }
             };
         } catch (Exception e) {
@@ -278,9 +270,10 @@ public class KvinHttp implements Kvin {
 
     @Override
     public IExtendedIterator<URI> properties(URI item) {
+
         try {
             // building url
-            URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/properties");
+            URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/linkedfactory/properties");
             uriBuilder.setParameter("item", item.toString());
             java.net.URI getRequestUri = uriBuilder.build();
 
@@ -288,13 +281,11 @@ public class KvinHttp implements Kvin {
             HttpGet httpGet = createHttpGet(getRequestUri.toString());
             HttpResponse response = this.httpClient.execute(httpGet);
             HttpEntity entity = response.getEntity();
-            if (response.getStatusLine().getStatusCode() != 200) {
-                return NiceIterator.emptyIterator();
-            }
+            String responseBody = EntityUtils.toString(entity);
 
             // converting json to URI
             return new NiceIterator<>() {
-                final JsonParser jsonParser = jsonFactory.createParser(entity.getContent());
+                final JsonParser jsonParser = jsonFactory.createParser(responseBody);
 
                 @Override
                 public boolean hasNext() {
@@ -328,11 +319,7 @@ public class KvinHttp implements Kvin {
 
                 @Override
                 public void close() {
-                    try {
-                        jsonParser.close();
-                    } catch (IOException e) {
-                        // ignore
-                    }
+                    super.close();
                 }
             };
 
