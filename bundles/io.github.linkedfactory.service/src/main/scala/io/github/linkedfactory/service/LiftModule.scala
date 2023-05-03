@@ -127,7 +127,10 @@ class ItemLoc(override val name: String,
 
   override def rewrite: LocRewrite = Full({
     case RewriteRequest(ParsePath(p @ `prefix` :: tail, _, _, _), _, _) if tail.endsWith(suffix :: Nil) => {
-      val uri = S.param("item").flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(p.dropRight(1))
+      val uri = S.param("item").flatMap { s => tryo(URIs.createURI(s)).map { uri =>
+        // convert relative URI to absolute URI
+        if (uri.isRelative) URIs.createURI("r:" + s) else uri
+      } } openOr Data.pathToURI(p.dropRight(1))
       (RewriteResponse(prefix :: suffix :: Nil, stopRewriting = true), Full(uri))
     }
   })

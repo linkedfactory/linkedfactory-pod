@@ -23,7 +23,7 @@ import net.liftweb.util.Helpers._
 import scala.xml.{NodeSeq, Text}
 
 class Hierarchy(item: URI) {
-  val objectPath = item.segments
+  val objectPath = if (item.segments.length == 0) Array(item.toString) else item.segments()
   val base = item.trimSegments(item.segmentCount)
 
   def allButLast(n: NodeSeq): NodeSeq = if (objectPath.length <= 1) Text("") else {

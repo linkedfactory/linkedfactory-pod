@@ -72,6 +72,8 @@ class StreamDataActor extends CometActor with KvinListener {
       val prefix = trimStar(uri)
       kvin.descendants(prefix).toList.asScala
     }
+    // convert to relative URI
+    case uri if "r".equals(uri.scheme()) => Some(URIs.createURI(uri.toString.substring(2)))
     case uri => Some(uri)
   }.toList
 

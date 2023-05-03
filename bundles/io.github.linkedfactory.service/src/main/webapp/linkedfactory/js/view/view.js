@@ -19,6 +19,9 @@ $(document).on("stream-init", function(evt, data) {
 
 $(function() {
 	var item = $('.uri').text().trim();
+	if (item.startsWith("r:")) {
+	  item = item.substring(2);
+	}
 	var itemProperties = []
 	var selectedProperties = [];
 	$.ajax({
