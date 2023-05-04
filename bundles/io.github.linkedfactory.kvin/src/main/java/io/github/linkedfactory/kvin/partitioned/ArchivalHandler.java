@@ -21,7 +21,6 @@ public class ArchivalHandler implements Runnable {
             this.kvinPartitioned.createNewHotDataStore();
             new DatabaseArchiver(this.kvinPartitioned.getOldLevelDbHotDataStore(), archiveStore).archive();
             this.kvinPartitioned.setArchivalInProcess(false);
-            this.kvinPartitioned.oldLevelDbHotDataStore.close();
             this.kvinPartitioned.deleteOldLevelDbHotDataStore();
         } catch (IOException e) {
             throw new RuntimeException(e);

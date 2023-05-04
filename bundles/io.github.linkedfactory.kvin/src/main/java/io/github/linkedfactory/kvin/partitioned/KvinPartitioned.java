@@ -32,7 +32,7 @@ public class KvinPartitioned implements Kvin {
 
     public KvinPartitioned(File storePath, long archivalSize, TimeUnit timeUnit) {
         this.currentStorePath = storePath;
-        levelDbHotDataStore = new KvinLevelDb(storePath);
+        levelDbHotDataStore = new KvinLevelDb(this.currentStorePath);
         oldLevelDbHotDataStore = levelDbHotDataStore;
         archiveStore = new KvinParquet("./target/archive/");
         archivalTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new ArchivalHandler(this), archivalSize, archivalSize, timeUnit);
@@ -80,18 +80,18 @@ public class KvinPartitioned implements Kvin {
 
     public synchronized void createNewHotDataStore() {
         oldLevelDbHotDataStorePath = this.currentStorePath;
-        this.currentStorePath = new File(currentStorePath.getPath() + System.currentTimeMillis());
+        this.currentStorePath = new File(this.currentStorePath.getPath() + System.currentTimeMillis());
         levelDbHotDataStore.close();
-        oldLevelDbHotDataStore.close();
         levelDbHotDataStore = new KvinLevelDb(currentStorePath);
         oldLevelDbHotDataStore = new KvinLevelDb(oldLevelDbHotDataStorePath);
     }
 
     public KvinLevelDb getOldLevelDbHotDataStore() {
-        return oldLevelDbHotDataStore;
+        return this.oldLevelDbHotDataStore;
     }
 
     public void deleteOldLevelDbHotDataStore() throws IOException {
+        this.oldLevelDbHotDataStore.close();
         FileUtils.deleteDirectory(new File(oldLevelDbHotDataStorePath.getAbsolutePath()));
     }
 
