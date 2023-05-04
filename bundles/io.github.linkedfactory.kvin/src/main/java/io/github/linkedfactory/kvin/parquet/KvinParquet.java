@@ -1,5 +1,7 @@
 package io.github.linkedfactory.kvin.parquet;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinListener;
 import io.github.linkedfactory.kvin.KvinTuple;
@@ -13,12 +15,16 @@ import net.enilink.komma.core.URIs;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.reflect.ReflectData;
+import org.apache.commons.collections.map.HashedMap;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.avro.AvroParquetWriter;
 import org.apache.parquet.filter2.compat.FilterCompat;
-import org.apache.parquet.filter2.predicate.*;
+import org.apache.parquet.filter2.predicate.FilterApi;
+import org.apache.parquet.filter2.predicate.FilterPredicate;
+import org.apache.parquet.filter2.predicate.Statistics;
+import org.apache.parquet.filter2.predicate.UserDefinedPredicate;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -29,6 +35,7 @@ import org.apache.parquet.io.api.Binary;
 import java.io.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -38,41 +45,77 @@ import java.util.*;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
+
     final static ReflectData reflectData = new ReflectData(KvinParquet.class.getClassLoader());
     // parquet file writer config
-    final int ROW_GROUP_SIZE = 5242880;  // 5 MB
-    final int PAGE_SIZE = 8192; // 8 KB
-    final int DICT_PAGE_SIZE = 3145728; // 3 MB
-    final int PAGE_ROW_COUNT_LIMIT = 30000;
-    final int ZSTD_COMPRESSION_LEVEL = 12; // 1 - 22
+    static final long ROW_GROUP_SIZE = 1048576;  // 1 MB
+    static final int PAGE_SIZE = 8192; // 8 KB
+    static final int DICT_PAGE_SIZE = 1048576; // 1 MB
+    static final int ZSTD_COMPRESSION_LEVEL = 12; // 1 - 22
+    Map<Path, HadoopInputFile> inputFileCache = new HashMap<>(); // hadoop input file cache
+    Cache<Long, String> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
     String archiveLocation;
-    // global id counter
-    int idCounter = 0;
     // data file schema
     Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace(KvinParquet.class.getName()).fields()
-            .name("id").type().nullable().intType().noDefault()
+            .name("id").type().nullable().bytesType().noDefault()
             .name("time").type().longType().noDefault()
             .name("seqNr").type().intType().intDefault(0)
-            .name("value_int").type().nullable().intType().noDefault()
-            .name("value_long").type().nullable().longType().noDefault()
-            .name("value_float").type().nullable().floatType().noDefault()
-            .name("value_double").type().nullable().doubleType().noDefault()
-            .name("value_string").type().nullable().stringType().noDefault()
-            .name("value_bool").type().nullable().intType().noDefault()
-            .name("value_object").type().nullable().bytesType().noDefault().endRecord();
-
+            .name("valueInt").type().nullable().intType().noDefault()
+            .name("valueLong").type().nullable().longType().noDefault()
+            .name("valueFloat").type().nullable().floatType().noDefault()
+            .name("valueDouble").type().nullable().doubleType().noDefault()
+            .name("valueString").type().nullable().stringType().noDefault()
+            .name("valueBool").type().nullable().intType().noDefault()
+            .name("valueObject").type().nullable().bytesType().noDefault().endRecord();
     // mapping file schema
-    Schema mappingSchema = SchemaBuilder.record("Mapping").namespace(KvinParquet.class.getName()).fields()
-            .name("id").type().intType().noDefault()
-            .name("item").type().stringType().noDefault()
-            .name("property").type().stringType().noDefault()
+    Schema itemMappingSchema = SchemaBuilder.record("ItemMapping").namespace(KvinParquet.class.getName()).fields()
+            .name("itemId").type().longType().noDefault()
+            .name("item").type().stringType().noDefault().endRecord();
+    Schema propertyMappingSchema = SchemaBuilder.record("PropertyMapping").namespace(KvinParquet.class.getName()).fields()
+            .name("propertyId").type().longType().noDefault()
+            .name("property").type().stringType().noDefault().endRecord();
+    Schema contextMappingSchema = SchemaBuilder.record("ContextMapping").namespace(KvinParquet.class.getName()).fields()
+            .name("contextId").type().longType().noDefault()
             .name("context").type().stringType().noDefault().endRecord();
-
-    public KvinParquet() {
-    }
+    long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0; // global id counter
+    // used by writer
+    Map<String, Long> itemMap = new HashMap<>();
+    Map<String, Long> propertyMap = new HashMap<>();
+    Map<String, Long> contextMap = new HashMap<>();
+    // used by reader
+    Cache<MappingCacheKeyTuple<URI>, Map<String, Mapping>> idMappingCache = CacheBuilder.newBuilder().maximumSize(20000).build();
 
     public KvinParquet(String archiveLocation) {
         this.archiveLocation = archiveLocation;
+    }
+
+    private Mapping fetchMappingIds(Path mappingFile, FilterPredicate filter) throws IOException {
+        Mapping id;
+        HadoopInputFile inputFile = getFile(mappingFile);
+        try (ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(inputFile)
+                .withDataModel(reflectData)
+                .useStatsFilter()
+                .withFilter(FilterCompat.get(filter))
+                .build()) {
+            id = reader.read();
+        }
+        return id;
+    }
+
+    private HadoopInputFile getFile(Path path) {
+        HadoopInputFile inputFile;
+        synchronized (inputFileCache) {
+            inputFile = inputFileCache.get(path);
+            if (inputFile == null) {
+                try {
+                    inputFile = HadoopInputFile.fromPath(path, new Configuration());
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                inputFileCache.put(path, inputFile);
+            }
+        }
+        return inputFile;
     }
 
     @Override
@@ -105,103 +148,124 @@ public class KvinParquet implements Kvin {
         ParquetWriter<KvinTupleInternal> parquetDataWriter = null;
 
         // mapping writer
-        Path mappingFile = null;
-        ParquetWriter<Mapping> parquetMappingWriter = null;
+        Path itemMappingFile, propertyMappingFile, contextMappingFile;
+        ParquetWriter<Object> itemMappingWriter = null, propertyMappingWriter = null, contextMappingWriter = null;
 
-        Long nextChunkTimestamp = null;
-        Calendar prevDate = null;
+        //  state variables
         boolean writingToExistingYearFolder = false;
+        Long nextChunkTimestamp = null;
+        Calendar prevTupleDate = null;
 
-        idCounter = getIdCounter();
-        int fileMin = idCounter == 0 ? 1 : idCounter + 1;
-        int folderMin = idCounter == 0 ? 1 : idCounter + 1;
+        // initial partition key
+        byte[] initialPartitionKey = generatePartitionKey(1L, 1L, 1L);
+        byte[] weekPartitionKey = initialPartitionKey, yearPartitionKey = initialPartitionKey;
 
         for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
+            nextChunkTimestamp = initNextChunkTimestamp(nextChunkTimestamp, tuple);
 
-            if (nextChunkTimestamp == null) nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
-            if (dataFile == null && mappingFile == null) {
+            // initializing writers to data and mapping file along with the initial folders.
+            if (dataFile == null) {
                 int year = getDate(tuple.time).get(Calendar.YEAR);
+                // new year and week folder
                 if (!getExistingYears().contains(year)) {
                     dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/data.parquet");
-                    mappingFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/mapping.parquet");
                 } else {
+                    // existing year and week folder
                     File existingYearFolder = getExistingYearFolder(year);
                     String existingYearFolderPath = existingYearFolder.getAbsolutePath();
 
                     dataFile = new Path(existingYearFolderPath, "temp/data.parquet");
-                    mappingFile = new Path(existingYearFolderPath, "temp/mapping.parquet");
-                    folderMin = Integer.parseInt(existingYearFolder.getName().split("_")[0]);
+                    yearPartitionKey = decodePartitionKey(Long.parseLong(existingYearFolder.getName().split("_")[0])); // minOfItemIdOfAllTheWeeks; // minOfItemIdOfAllTheWeeks
                     writingToExistingYearFolder = true;
                 }
+                // mapping file writers init
+                itemMappingFile = new Path(archiveLocation, "metadata/itemMapping.parquet");
+                propertyMappingFile = new Path(archiveLocation, "metadata/propertyMapping.parquet");
+                contextMappingFile = new Path(archiveLocation, "metadata/contextMapping.parquet");
+
                 parquetDataWriter = getParquetDataWriter(dataFile);
-                parquetMappingWriter = getParquetMappingWriter(mappingFile);
+                itemMappingWriter = getParquetMappingWriter(itemMappingFile, itemMappingSchema);
+                propertyMappingWriter = getParquetMappingWriter(propertyMappingFile, propertyMappingSchema);
+                contextMappingWriter = getParquetMappingWriter(contextMappingFile, contextMappingSchema);
             }
 
-            // shredding file on week change
+            // partitioning file on week change
             if (tuple.time >= nextChunkTimestamp) {
-                //renaming existing data file with max, min ids
-                renameFolder(dataFile, fileMin, idCounter);
-                if (writingToExistingYearFolder)
-                    renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
-                parquetDataWriter.close();
-                parquetMappingWriter.close();
+                // renaming current week folder with partition key name. ( at the start, while writing into the current week folder data and mapping files, the folder name is set to "temp".)
+                // key: WeekMinItemPropertyContextId_WeekMaxItemPropertyContextId
+                renameFolder(dataFile, weekPartitionKey, generatePartitionKey(itemIdCounter, propertyIdCounter, contextIdCounter));
 
-                fileMin = idCounter + 1;
+                // updating partition key of the folder with the max itemId of the newly added week folder
+                // key: YearMinItemPropertyContextId_YearMaxItemPropertyContextId
+                if (writingToExistingYearFolder)
+                    renameFolder(dataFile, yearPartitionKey, generatePartitionKey(itemIdCounter, propertyIdCounter, contextIdCounter), prevTupleDate.get(Calendar.YEAR));
+
+                // updating new week partition id
+                long tempItemId = itemIdCounter, tempPropertyId = propertyIdCounter, tempContextId = contextIdCounter;
+                if (isNeedForIdChange(tuple, idType.ITEM_ID)) {
+                    tempItemId++;
+                }
+                if (isNeedForIdChange(tuple, idType.PROPERTY_ID)) {
+                    tempPropertyId++;
+                }
+                if (isNeedForIdChange(tuple, idType.CONTEXT_ID)) {
+                    tempContextId++;
+                }
+                weekPartitionKey = generatePartitionKey(tempItemId, tempPropertyId, tempContextId);
+
+                // adding 1 week to the current tuple timestamp and marking the timestamp to consider as a change of the week.
                 nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
 
                 // handling year change
-                if (prevDate.get(Calendar.YEAR) != getDate(tuple.time).get(Calendar.YEAR)) {
-                    if (!writingToExistingYearFolder)
-                        renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
-                    folderMin = idCounter + 1;
+                if (prevTupleDate.get(Calendar.YEAR) != getDate(tuple.time).get(Calendar.YEAR)) {
+                    // updating the partition key of the year folder if it was created without the partition key.
+                    if (!writingToExistingYearFolder) {
+                        renameFolder(dataFile, yearPartitionKey, generatePartitionKey(itemIdCounter, propertyIdCounter, contextIdCounter), prevTupleDate.get(Calendar.YEAR));
+                    }
+                    yearPartitionKey = generatePartitionKey(itemIdCounter, propertyIdCounter, contextIdCounter);
                     writingToExistingYearFolder = false;
                 }
 
+                // create new week folder in case of year change.
                 if (!writingToExistingYearFolder) {
-                    mappingFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/mapping.parquet");
                     dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/data.parquet");
                 } else {
+                    // create new week folder under existing year folder for the same year.
                     int year = getDate(tuple.time).get(Calendar.YEAR);
                     File existingYearFolder = getExistingYearFolder(year);
-                    mappingFile = new Path(existingYearFolder.getAbsolutePath(), "temp/mapping.parquet");
                     dataFile = new Path(existingYearFolder.getAbsolutePath(), "temp/data.parquet");
                 }
+                parquetDataWriter.close();
                 parquetDataWriter = getParquetDataWriter(dataFile);
-                parquetMappingWriter = getParquetMappingWriter(mappingFile);
             }
 
-            // building tuple
-            internalTuple.setId(generateId());
+            // writing mappings and values
+            internalTuple.setId(generateId(tuple, itemMappingWriter, propertyMappingWriter, contextMappingWriter));
             internalTuple.setTime(tuple.time);
             internalTuple.setSeqNr(tuple.seqNr);
 
-            internalTuple.setValue_int(tuple.value instanceof Integer ? (int) tuple.value : null);
-            internalTuple.setValue_long(tuple.value instanceof Long ? (long) tuple.value : null);
-            internalTuple.setValue_float(tuple.value instanceof Float ? (float) tuple.value : null);
-            internalTuple.setValue_double(tuple.value instanceof Double ? (double) tuple.value : null);
-            internalTuple.setValue_string(tuple.value instanceof String ? (String) tuple.value : null);
-            internalTuple.setValue_bool(tuple.value instanceof Boolean ? (Boolean) tuple.value ? 1 : 0 : null);
+            internalTuple.setValueInt(tuple.value instanceof Integer ? (int) tuple.value : null);
+            internalTuple.setValueLong(tuple.value instanceof Long ? (long) tuple.value : null);
+            internalTuple.setValueFloat(tuple.value instanceof Float ? (float) tuple.value : null);
+            internalTuple.setValueDouble(tuple.value instanceof Double ? (double) tuple.value : null);
+            internalTuple.setValueString(tuple.value instanceof String ? (String) tuple.value : null);
+            internalTuple.setValueBool(tuple.value instanceof Boolean ? (Boolean) tuple.value ? 1 : 0 : null);
             if (tuple.value instanceof Record || tuple.value instanceof URI || tuple.value instanceof BigInteger || tuple.value instanceof BigDecimal || tuple.value instanceof Short) {
-                internalTuple.setValue_object(encodeRecord(tuple.value));
+                internalTuple.setValueObject(encodeRecord(tuple.value));
             } else {
-                internalTuple.setValue_object(null);
+                internalTuple.setValueObject(null);
             }
-            // building mapping
-            Mapping mapping = new Mapping();
-            mapping.setId(internalTuple.getId());
-            mapping.setItem(tuple.item.toString());
-            mapping.setProperty(tuple.property.toString());
-            mapping.setContext(tuple.context.toString());
-            // writing mapping and data
-            parquetMappingWriter.write(mapping);
             parquetDataWriter.write(internalTuple);
-            prevDate = getDate(tuple.time);
-
+            prevTupleDate = getDate(tuple.time);
         }
-        renameFolder(dataFile, fileMin, idCounter);
-        renameFolder(dataFile, folderMin, idCounter, prevDate.get(Calendar.YEAR));
-        parquetMappingWriter.close();
+        // updating last written week folder's partition key - for including last "WeekMaxItemPropertyContextId" for the week.
+        renameFolder(dataFile, weekPartitionKey, generatePartitionKey(itemIdCounter, propertyIdCounter, contextIdCounter));
+        // updating last written year folder's partition key - for including last "YearMaxItemPropertyContextId".
+        renameFolder(dataFile, yearPartitionKey, generatePartitionKey(itemIdCounter, propertyIdCounter, contextIdCounter), prevTupleDate.get(Calendar.YEAR));
+        itemMappingWriter.close();
+        propertyMappingWriter.close();
+        contextMappingWriter.close();
         parquetDataWriter.close();
     }
 
@@ -213,28 +277,34 @@ public class KvinParquet implements Kvin {
                 .withConf(writerConf)
                 .withDictionaryEncoding(true)
                 .withCompressionCodec(CompressionCodecName.ZSTD)
+                //.withCompressionCodec(CompressionCodecName.SNAPPY)
                 .withRowGroupSize(ROW_GROUP_SIZE)
                 .withPageSize(PAGE_SIZE)
-                .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
                 .withDictionaryPageSize(DICT_PAGE_SIZE)
                 .withDataModel(reflectData)
                 .build();
     }
 
-    private ParquetWriter<Mapping> getParquetMappingWriter(Path dataFile) throws IOException {
+    private ParquetWriter<Object> getParquetMappingWriter(Path dataFile, Schema schema) throws IOException {
         Configuration writerConf = new Configuration();
-        writerConf.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
-        return AvroParquetWriter.<Mapping>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
-                .withSchema(mappingSchema)
+        writerConf.setInt("parquet.zstd.compressionLevel", 12);
+        return AvroParquetWriter.builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
+                .withSchema(schema)
                 .withConf(writerConf)
                 .withDictionaryEncoding(true)
                 .withCompressionCodec(CompressionCodecName.ZSTD)
+                //.withCompressionCodec(CompressionCodecName.SNAPPY)
                 .withRowGroupSize(ROW_GROUP_SIZE)
                 .withPageSize(PAGE_SIZE)
-                .withPageRowCountLimit(PAGE_ROW_COUNT_LIMIT)
                 .withDictionaryPageSize(DICT_PAGE_SIZE)
                 .withDataModel(reflectData)
                 .build();
+    }
+
+    private Long initNextChunkTimestamp(Long nextChunkTimestamp, KvinTuple currentTuple) {
+        // adding 1 week to the initial tuple timestamp and marking the timestamp to consider as a change of the week.
+        if (nextChunkTimestamp == null) nextChunkTimestamp = getNextChunkTimestamp(currentTuple.time);
+        return nextChunkTimestamp;
     }
 
     private long getNextChunkTimestamp(long currentTimestamp) {
@@ -242,30 +312,45 @@ public class KvinParquet implements Kvin {
         return currentTimestamp + 604800;
     }
 
-    private int getIdCounter() {
-        int defaultId = 0;
-        if (new File(archiveLocation).exists()) {
-            File[] yearFolders = new File(archiveLocation).listFiles();
-            if (yearFolders != null && yearFolders.length > 0) {
-                Arrays.sort(yearFolders, (file1, file2) -> {
-                    Integer firstFileYear = Integer.valueOf(file1.getName().split("_")[2]);
-                    Integer secondFileYear = Integer.valueOf(file2.getName().split("_")[2]);
-                    return secondFileYear.compareTo(firstFileYear);
-                });
-                return Integer.parseInt(yearFolders[0].getName().split("_")[1]);
-            }
-        }
-        return defaultId;
-    }
-
-    private void renameFolder(Path file, int min, int max) throws IOException {
+    private void renameFolder(Path file, byte[] newMin, byte[] newMax) throws IOException {
         java.nio.file.Path currentFolder = Paths.get(file.getParent().toString());
-        Files.move(currentFolder, currentFolder.resolveSibling(min + "_" + max));
+        Files.move(currentFolder, currentFolder.resolveSibling(encodePartitionKey(newMin) + "_" + encodePartitionKey(newMax)));
     }
 
-    private void renameFolder(Path file, int min, int max, int year) throws IOException {
+    private void renameFolder(Path file, byte[] min, byte[] max, int year) throws IOException {
         java.nio.file.Path currentFolder = Paths.get(file.getParent().getParent().toString());
-        Files.move(currentFolder, currentFolder.resolveSibling(min + "_" + max + "_" + year));
+        Files.move(currentFolder, currentFolder.resolveSibling(encodePartitionKey(min) + "_" + encodePartitionKey(max) + "_" + year));
+    }
+
+    private byte[] generatePartitionKey(Long itemId, Long propertyId, Long contextId) {
+        ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES * 3);
+        buffer.putLong(itemId);
+        buffer.putLong(propertyId);
+        buffer.putLong(contextId);
+        return buffer.array();
+    }
+
+    private Map<String, Long> readPartitionKey(long key) {
+        ByteBuffer keyBuffer = ByteBuffer.wrap(decodePartitionKey(key));
+        Map<String, Long> partitionKey = new HashedMap();
+        partitionKey.put("itemId", keyBuffer.getLong());
+        partitionKey.put("propertyId", keyBuffer.getLong());
+        partitionKey.put("contextId", keyBuffer.getLong());
+        return partitionKey;
+    }
+
+    private Long encodePartitionKey(byte[] key) {
+        ByteBuffer buffer = ByteBuffer.allocate(24);
+        buffer.put(key);
+        buffer.flip();
+        return buffer.getLong();
+    }
+
+    private byte[] decodePartitionKey(Long key) {
+        ByteBuffer buffer = ByteBuffer.allocate(24);
+        buffer.putLong(key);
+        buffer.flip();
+        return buffer.array();
     }
 
     private ArrayList<Integer> getExistingYears() {
@@ -273,8 +358,11 @@ public class KvinParquet implements Kvin {
         File[] yearFolders = new File(archiveLocation).listFiles();
         if (yearFolders != null) {
             for (File yearFolder : yearFolders) {
-                int year = Integer.parseInt(yearFolder.getName().split("_")[2]);
-                if (!existingYears.contains(year)) existingYears.add(year);
+                String yearFolderName = yearFolder.getName();
+                if (!yearFolderName.startsWith("metadata")) {
+                    int year = Integer.parseInt(yearFolderName.split("_")[2]);
+                    if (!existingYears.contains(year)) existingYears.add(year);
+                }
             }
         }
         return existingYears;
@@ -284,10 +372,12 @@ public class KvinParquet implements Kvin {
         File[] yearFolders = new File(archiveLocation).listFiles();
         File existingYearFolder = null;
         for (File yearFolder : yearFolders) {
-            int year = Integer.parseInt(yearFolder.getName().split("_")[2]);
-            if (year == existingYear) {
-                existingYearFolder = yearFolder;
-                break;
+            if (!yearFolder.getName().startsWith("metadata")) {
+                int year = Integer.parseInt(yearFolder.getName().split("_")[2]);
+                if (year == existingYear) {
+                    existingYearFolder = yearFolder;
+                    break;
+                }
             }
         }
         return existingYearFolder;
@@ -301,71 +391,65 @@ public class KvinParquet implements Kvin {
         return calendar;
     }
 
-    private int generateId() {
-        return ++idCounter;
-    }
+    private byte[] generateId(KvinTuple currentTuple, ParquetWriter itemMappingWriter, ParquetWriter propertyMappingWriter, ParquetWriter contextMappingWriter) throws IOException {
+        Long itemId, propertyId, contextId;
 
-    private ArrayList<Mapping> getIdMapping(URI item, URI property, URI context) throws IOException {
-        // scanning and sorting (by year) archive folders
-        ArrayList<Mapping> mappings = new ArrayList<>();
-        File[] yearFolders = new File(archiveLocation).listFiles();
-        if (yearFolders != null) {
-            Arrays.sort(yearFolders, (file1, file2) -> {
-                Integer firstFileYear = Integer.valueOf(file1.getName().split("_")[2]);
-                Integer secondFileYear = Integer.valueOf(file2.getName().split("_")[2]);
-                return firstFileYear.compareTo(secondFileYear);
-            });
+        if (itemIdCounter == 0 || isNeedForIdChange(currentTuple, idType.ITEM_ID)) {
+            itemId = ++itemIdCounter;
+            itemMap.put(currentTuple.item.toString(), itemId);
+            ItemMapping itemMapping = new ItemMapping();
+            itemMapping.setMappingId(itemId);
+            itemMapping.setMappingValue(currentTuple.item.toString());
+            itemMappingWriter.write(itemMapping);
         } else {
-            return mappings;
+            itemId = itemMap.get(currentTuple.item.toString());
         }
 
-        // finding ids of item & relevant properties
-        for (File yearFolder : yearFolders) {
-            for (File weekFolder : yearFolder.listFiles()) {
-                Path mappingFile = new Path(weekFolder.getPath() + "/mapping.parquet");
-                FilterPredicate filter = null;
-                if (item != null && property != null) {
-                    filter = and(eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString())), eq(FilterApi.binaryColumn("property"), Binary.fromString(property.toString())));
-                } else if (item != null) {
-                    filter = eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString()));
-                }
-                try (ParquetReader<Mapping> reader = AvroParquetReader.<Mapping>builder(HadoopInputFile.fromPath(mappingFile, new Configuration()))
-                        .withDataModel(reflectData)
-                        .withFilter(FilterCompat.get(filter))
-                        .build()) {
-
-                    Mapping mapping;
-                    while ((mapping = reader.read()) != null) {
-                        mappings.add(mapping);
-                    }
-                }
-            }
+        if (propertyIdCounter == 0 || isNeedForIdChange(currentTuple, idType.PROPERTY_ID)) {
+            propertyId = ++propertyIdCounter;
+            propertyMap.put(currentTuple.property.toString(), propertyId);
+            PropertyMapping propertyMapping = new PropertyMapping();
+            propertyMapping.setMappingId(propertyId);
+            propertyMapping.setMappingValue(currentTuple.property.toString());
+            propertyMappingWriter.write(propertyMapping);
+        } else {
+            propertyId = propertyMap.get(currentTuple.property.toString());
         }
-        return mappings;
+
+        if (contextIdCounter == 0 || isNeedForIdChange(currentTuple, idType.CONTEXT_ID)) {
+            contextId = ++contextIdCounter;
+            contextMap.put(currentTuple.context.toString(), contextId);
+            ContextMapping contextMapping = new ContextMapping();
+            contextMapping.setMappingId(contextId);
+            contextMapping.setMappingValue(currentTuple.context.toString());
+            contextMappingWriter.write(contextMapping);
+        } else {
+            contextId = contextMap.get(currentTuple.context.toString());
+        }
+
+        ByteBuffer idBuffer = ByteBuffer.allocate(Long.BYTES * 3);
+        idBuffer.putLong(itemId);
+        idBuffer.putLong(propertyId);
+        idBuffer.putLong(contextId);
+        return idBuffer.array();
     }
 
-    private FilterPredicate generateFetchFilter(ArrayList<Mapping> mappings) {
-        // generates nested filter with the found ids in mapping
-        int mappingSize = mappings.size();
-        FilterPredicate filter = null;
-        if (mappingSize > 0) {
-            if (mappingSize == 1) {
-                filter = or(eq(FilterApi.intColumn("id"), mappings.get(0).getId()), eq(FilterApi.intColumn("id"), -1));
-            } else if (mappingSize == 2) {
-                filter = or(eq(FilterApi.intColumn("id"), mappings.get(0).getId()), eq(FilterApi.intColumn("id"), mappings.get(1).getId()));
-            } else {
-                filter = generateFilterPredicates(mappings, 0);
-            }
-        }
-        return filter;
-    }
+    private boolean isNeedForIdChange(KvinTuple currentTuple, idType type) {
+        boolean result = false;
 
-    private FilterPredicate generateFilterPredicates(ArrayList<Mapping> mappings, int startCount) {
-        FilterPredicate predicate = eq(FilterApi.intColumn("id"), -1);
-        if (startCount < mappings.size()) {
-            predicate = FilterApi.or(eq(FilterApi.intColumn("id"), mappings.get(startCount).getId()), generateFilterPredicates(mappings, ++startCount));
+        switch (type) {
+            case ITEM_ID:
+                result = !itemMap.containsKey(currentTuple.item.toString());
+                break;
+            case PROPERTY_ID:
+                result = !propertyMap.containsKey(currentTuple.property.toString());
+                break;
+            case CONTEXT_ID:
+                result = !contextMap.containsKey(currentTuple.context.toString());
+                break;
+
         }
-        return predicate;
+        return result;
     }
 
     private byte[] encodeRecord(Object record) throws IOException {
@@ -394,6 +478,61 @@ public class KvinParquet implements Kvin {
         return byteArrayOutputStream.toByteArray();
     }
 
+    private Map<String, Mapping> getIdMapping(URI item, URI property, URI context) throws IOException {
+        Mapping itemMapping, propertyMapping, contextMapping;
+        Map<String, Mapping> idMappings;
+
+        Map<String, Mapping> cachedMappingEntry = fetchMappingIdsFromCache(item, property, context);
+        if (cachedMappingEntry == null) {
+            // reading from files
+            idMappings = new HashMap<>();
+            if (item != null) {
+                FilterPredicate filter = eq(FilterApi.binaryColumn("item"), Binary.fromString(item.toString()));
+                Path mappingFile = new Path(this.archiveLocation + "metadata/itemMapping.parquet");
+                itemMapping = fetchMappingIds(mappingFile, filter);
+                idMappings.put("itemMapping", itemMapping);
+            } else {
+                idMappings.put("itemMapping", null);
+            }
+
+            if (property != null) {
+                FilterPredicate filter = eq(FilterApi.binaryColumn("property"), Binary.fromString(property.toString()));
+                Path mappingFile = new Path(this.archiveLocation + "metadata/propertyMapping.parquet");
+                propertyMapping = fetchMappingIds(mappingFile, filter);
+                idMappings.put("propertyMapping", propertyMapping);
+            } else {
+                idMappings.put("propertyMapping", null);
+            }
+
+            if (context != null) {
+                FilterPredicate filter = eq(FilterApi.binaryColumn("context"), Binary.fromString(context.toString()));
+                Path mappingFile = new Path(this.archiveLocation + "metadata/contextMapping.parquet");
+                contextMapping = fetchMappingIds(mappingFile, filter);
+                idMappings.put("contextMapping", contextMapping);
+            } else {
+                idMappings.put("contextMapping", null);
+            }
+            writeMappingIdsToCache(item, property, context, idMappings);
+        } else {
+            idMappings = cachedMappingEntry;
+        }
+        return idMappings;
+    }
+
+    private Map<String, Mapping> fetchMappingIdsFromCache(URI item, URI property, URI context) {
+        MappingCacheKeyTuple<URI> key = getIdMappingCacheKey(item, property, context);
+        return idMappingCache.getIfPresent(key);
+    }
+
+    private void writeMappingIdsToCache(URI item, URI property, URI context, Map<String, Mapping> idMapping) {
+        MappingCacheKeyTuple<URI> key = getIdMappingCacheKey(item, property, context);
+        idMappingCache.put(key, idMapping);
+    }
+
+    private MappingCacheKeyTuple<URI> getIdMappingCacheKey(URI item, URI property, URI context) {
+        return new MappingCacheKeyTuple<>(item, property, context);
+    }
+
     private Object decodeRecord(byte[] data) {
         Record r = null;
         try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(data)) {
@@ -420,6 +559,26 @@ public class KvinParquet implements Kvin {
         return r;
     }
 
+    private FilterPredicate generateFetchFilter(Map<String, Mapping> mappings) {
+        FilterPredicate predicate = null;
+
+        if (mappings.get("propertyMapping") != null) {
+            ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * 3);
+            keyBuffer.putLong(mappings.get("itemMapping").getMappingId());
+            keyBuffer.putLong(mappings.get("propertyMapping").getMappingId());
+            keyBuffer.putLong(mappings.get("contextMapping").getMappingId());
+            predicate = eq(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array()));
+        } else if (mappings.get("propertyMapping") == null) {
+            ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES);
+            keyBuffer.putLong(mappings.get("itemMapping").getMappingId());
+            predicate = and(gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array())),
+                    lt(FilterApi.binaryColumn("id"),
+                            Binary.fromConstantByteArray(ByteBuffer.allocate(Long.BYTES)
+                                    .putLong(mappings.get("itemMapping").getMappingId() + 1).array())));
+        }
+        return predicate;
+    }
+
     @Override
     public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
         return fetchInternal(item, property, context, null, null, limit, null, null);
@@ -439,11 +598,31 @@ public class KvinParquet implements Kvin {
         return internalResult;
     }
 
-    private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
+    public String getProperty(KvinTupleInternal tuple) {
+        ByteBuffer idBuffer = ByteBuffer.wrap(tuple.getId());
+        idBuffer.getLong();
+        Long propertyId = idBuffer.getLong();
+        String cachedProperty = propertyIdReverseLookUpCache.getIfPresent(propertyId);
 
+        if (cachedProperty == null) {
+            try {
+                FilterPredicate filter = eq(FilterApi.longColumn("propertyId"), propertyId);
+                Path mappingFile = new Path(archiveLocation + "metadata/propertyMapping.parquet");
+                Mapping propertyMapping = null;
+                propertyMapping = fetchMappingIds(mappingFile, filter);
+                cachedProperty = propertyMapping.getMappingValue();
+                propertyIdReverseLookUpCache.put(propertyId, propertyMapping.getMappingValue());
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return cachedProperty;
+    }
+
+    private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
         try {
             // filters
-            ArrayList<Mapping> idMappings = getIdMapping(item, property, context);
+            Map<String, Mapping> idMappings = getIdMapping(item, property, context);
 
             if (idMappings.size() == 0) {
                 return NiceIterator.emptyIterator();
@@ -455,12 +634,14 @@ public class KvinParquet implements Kvin {
 
             // data readers
             for (Path path : dataFiles) {
-                readers.add(AvroParquetReader.<KvinTupleInternal>builder(HadoopInputFile.fromPath(path, new Configuration()))
+                HadoopInputFile inputFile = getFile(path);
+                readers.add(AvroParquetReader.<KvinTupleInternal>builder(inputFile)
                         .withDataModel(reflectData)
+                        .useStatsFilter()
                         .withFilter(FilterCompat.get(filter))
                         .build());
             }
-            return new NiceIterator<>() {
+            return new NiceIterator<KvinTuple>() {
                 KvinTupleInternal internalTuple;
                 ParquetReader<KvinTupleInternal> reader = readers.get(0);
                 HashMap<String, Integer> itemPropertyCount = new HashMap<>();
@@ -473,14 +654,15 @@ public class KvinParquet implements Kvin {
                         if (itemPropertyCount.size() > 0) {
                             // skipping properties if limit is reached
                             if (itemPropertyCount.get(currentProperty) >= limit && limit != 0) {
-                                currentProperty = idMappings.get(propertyCount).getProperty();
                                 previousProperty = currentProperty;
 
-                                while ((internalTuple = reader.read()) != null && propertyCount < idMappings.size() - 1) {
+                                while ((internalTuple = reader.read()) != null) {
                                     propertyCount++;
-                                    if (!previousProperty.equals(idMappings.get(propertyCount).getProperty())) {
+                                    String property = getProperty(internalTuple);
+                                    if (!previousProperty.equals(property)) {
                                         break;
                                     }
+                                    previousProperty = property;
                                 }
                             }
                         }
@@ -489,14 +671,17 @@ public class KvinParquet implements Kvin {
                         throw new RuntimeException(e);
                     }
 
-                    if (internalTuple == null && readerCount >= readers.size() - 1) {
+                    if (internalTuple == null && readerCount >= readers.size() - 1) { // terminating condition
+                        closeCurrentReader();
                         return false;
-                    } else if (internalTuple == null && readerCount <= readers.size() - 1 && itemPropertyCount.get(currentProperty) >= limit && limit != 0) {
+                    } else if (internalTuple == null && readerCount <= readers.size() - 1 && itemPropertyCount.get(currentProperty) >= limit && limit != 0) { // moving on to the next reader upon limit reach
                         readerCount++;
+                        closeCurrentReader();
                         reader = readers.get(readerCount);
                         return hasNext();
-                    } else if (internalTuple == null && readerCount <= readers.size() - 1) {
+                    } else if (internalTuple == null && readerCount <= readers.size() - 1) { // moving on to the next available reader
                         readerCount++;
+                        closeCurrentReader();
                         reader = readers.get(readerCount);
                         try {
                             internalTuple = reader.read();
@@ -520,90 +705,66 @@ public class KvinParquet implements Kvin {
 
                 private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) {
                     Object value = null;
-                    if (internalTuple.value_int != null) {
-                        value = internalTuple.value_int;
-                    } else if (internalTuple.value_long != null) {
-                        value = internalTuple.value_long;
-                    } else if (internalTuple.value_float != null) {
-                        value = internalTuple.value_float;
-                    } else if (internalTuple.value_double != null) {
-                        value = internalTuple.value_double;
-                    } else if (internalTuple.value_string != null) {
-                        value = internalTuple.value_string;
-                    } else if (internalTuple.value_bool != null) {
-                        value = internalTuple.value_bool == 1;
-                    } else if (internalTuple.value_object != null) {
-                        value = decodeRecord(internalTuple.value_object);
+                    if (internalTuple.valueInt != null) {
+                        value = internalTuple.valueInt;
+                    } else if (internalTuple.valueLong != null) {
+                        value = internalTuple.valueLong;
+                    } else if (internalTuple.valueFloat != null) {
+                        value = internalTuple.valueFloat;
+                    } else if (internalTuple.valueDouble != null) {
+                        value = internalTuple.valueDouble;
+                    } else if (internalTuple.valueString != null) {
+                        value = internalTuple.valueString;
+                    } else if (internalTuple.valueBool != null) {
+                        value = internalTuple.valueBool == 1;
+                    } else if (internalTuple.valueObject != null) {
+                        value = decodeRecord(internalTuple.valueObject);
                     }
 
                     // checking for property change
+                    String property = getProperty(internalTuple);
                     if (currentProperty == null) {
-                        currentProperty = idMappings.get(propertyCount).getProperty();
+                        currentProperty = property;
                         previousProperty = currentProperty;
-                    } else if (!idMappings.get(propertyCount).getProperty().equals(previousProperty)) {
-                        currentProperty = idMappings.get(propertyCount).getProperty();
-                        previousProperty = idMappings.get(propertyCount).getProperty();
+                    } else if (!property.equals(previousProperty)) {
+                        currentProperty = property;
+                        previousProperty = property;
                         itemPropertyCount.clear();
                     }
 
                     // updating item property count
-                    if (itemPropertyCount.containsKey(idMappings.get(propertyCount).getProperty())) {
-                        String property = idMappings.get(propertyCount).getProperty();
+                    if (itemPropertyCount.containsKey(property)) {
                         Integer count = itemPropertyCount.get(property) + 1;
                         itemPropertyCount.put(property, count);
                     } else {
-                        itemPropertyCount.put(idMappings.get(propertyCount).getProperty(), 1);
+                        itemPropertyCount.put(property, 1);
                     }
 
-                    return new KvinTuple(URIs.createURI(idMappings.get(propertyCount).getItem()), URIs.createURI(idMappings.get(propertyCount).getProperty()), URIs.createURI(idMappings.get(propertyCount).getContext()), internalTuple.time, internalTuple.seqNr, value);
+                    return new KvinTuple(URIs.createURI(idMappings.get("itemMapping").getMappingValue()), URIs.createURI(property), URIs.createURI(idMappings.get("contextMapping").getMappingValue()), internalTuple.time, internalTuple.seqNr, value);
 
                 }
 
                 @Override
                 public void close() {
-                    super.close();
+                    try {
+                        for (ParquetReader<?> reader : readers) {
+                            reader.close();
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+
+                public void closeCurrentReader() {
+                    try {
+                        reader.close();
+                    } catch (IOException e) {
+                    }
                 }
             };
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private ArrayList<Path> getFilePath(ArrayList<Mapping> idMappings) {
-
-        File archiveFolder = new File(archiveLocation);
-        File[] yearWiseFolders = archiveFolder.listFiles();
-        ArrayList<Path> matchedFiles = new ArrayList<>();
-
-        // matching ids with relevant parquet files
-        if (yearWiseFolders != null) {
-            for (Mapping mapping : idMappings) {
-                for (File yearFolder : yearWiseFolders) {
-                    try {
-                        String[] FolderIdMinMaxData = yearFolder.getName().split("_");
-                        int folderMin = Integer.parseInt(FolderIdMinMaxData[0]);
-                        int folderMax = Integer.parseInt(FolderIdMinMaxData[1]);
-                        if (mapping.getId() >= folderMin && mapping.getId() <= folderMax) {
-                            for (File weekFolder : new File(yearFolder.getPath()).listFiles()) {
-                                try {
-                                    String[] weekFolderIdMinMaxData = weekFolder.getName().split("_");
-                                    int weekFolderMin = Integer.parseInt(weekFolderIdMinMaxData[0]);
-                                    int weekFolderMax = Integer.parseInt(weekFolderIdMinMaxData[1]);
-                                    if (mapping.getId() >= weekFolderMin && mapping.getId() <= weekFolderMax) {
-                                        Path path = new Path(weekFolder.getPath() + "/data.parquet");
-                                        if (!matchedFiles.contains(path)) matchedFiles.add(path);
-                                        break;
-                                    }
-                                } catch (RuntimeException ignored) {
-                                }
-                            }
-                        }
-                    } catch (RuntimeException ignored) {
-                    }
-                }
-            }
-        }
-        return matchedFiles;
     }
 
     @Override
@@ -614,6 +775,47 @@ public class KvinParquet implements Kvin {
     @Override
     public boolean delete(URI item) {
         return false;
+    }
+
+    private ArrayList<Path> getFilePath(Map<String, Mapping> idMappings) {
+
+        File archiveFolder = new File(archiveLocation);
+        File[] yearWiseFolders = archiveFolder.listFiles();
+        ArrayList<Path> matchedFiles = new ArrayList<>();
+
+        Long itemId = idMappings.get("itemMapping").getMappingId();
+
+        // matching ids with relevant parquet files
+        if (yearWiseFolders != null) {
+            for (File yearFolder : yearWiseFolders) {
+                try {
+                    String[] folderIdMinMaxData = yearFolder.getName().split("_");
+                    if (folderIdMinMaxData[0].contains("metadata")) {
+                        continue;
+                    }
+                    Map<String, Long> yearMinPartitionKey = readPartitionKey(Long.parseLong(folderIdMinMaxData[0]));
+                    Map<String, Long> yearMaxPartitionKey = readPartitionKey(Long.parseLong(folderIdMinMaxData[1]));
+
+                    if (itemId >= yearMinPartitionKey.get("itemId") && itemId <= yearMaxPartitionKey.get("itemId")) {
+                        for (File weekFolder : new File(yearFolder.getPath()).listFiles()) {
+                            try {
+                                String[] weekFolderIdMinMaxData = weekFolder.getName().split("_");
+                                Map<String, Long> weekMinPartitionKey = readPartitionKey(Long.parseLong(weekFolderIdMinMaxData[0]));
+                                Map<String, Long> weekMaxPartitionKey = readPartitionKey(Long.parseLong(weekFolderIdMinMaxData[1]));
+                                if (itemId >= weekMinPartitionKey.get("itemId") && itemId <= weekMaxPartitionKey.get("itemId")) {
+                                    Path path = new Path(weekFolder.getPath() + "/data.parquet");
+                                    if (!matchedFiles.contains(path)) matchedFiles.add(path);
+                                    break;
+                                }
+                            } catch (RuntimeException ignored) {
+                            }
+                        }
+                    }
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+        return matchedFiles;
     }
 
     @Override
@@ -628,14 +830,13 @@ public class KvinParquet implements Kvin {
 
     @Override
     public IExtendedIterator<URI> properties(URI item) {
-
         try {
             // filters
-            ArrayList<Mapping> idMappings = getIdMapping(item, null, null);
+            Map<String, Mapping> idMappings = getIdMapping(item, null, Kvin.DEFAULT_CONTEXT);
             if (idMappings.size() == 0) {
                 return NiceIterator.emptyIterator();
             }
-            FilterPredicate filter = generateFilterPredicates(idMappings, 0);
+            FilterPredicate filter = generateFetchFilter(idMappings);
             ArrayList<Path> dataFiles = getFilePath(idMappings);
             ArrayList<ParquetReader<KvinTupleInternal>> readers = new ArrayList<>();
 
@@ -681,12 +882,19 @@ public class KvinParquet implements Kvin {
                 }
 
                 private URI getKvinTupleProperty() {
-                    return URIs.createURI(idMappings.get(propertyCount).getProperty());
+                    return URIs.createURI("");
+                    //return URIs.createURI(internalTuple.getProperty());
                 }
 
                 @Override
                 public void close() {
-                    super.close();
+                    try {
+                        for (ParquetReader<?> reader : readers) {
+                            reader.close();
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             };
         } catch (IOException e) {
@@ -701,26 +909,67 @@ public class KvinParquet implements Kvin {
 
     @Override
     public void close() {
+    }
 
+    // id enum
+    enum idType {
+        ITEM_ID,
+        PROPERTY_ID,
+        CONTEXT_ID
+    }
+
+    interface Mapping {
+        Long getMappingId();
+
+        void setMappingId(Long mappingId);
+
+        String getMappingValue();
+
+        void setMappingValue(String mappingValue);
+    }
+
+    static class MappingCacheKeyTuple<T> {
+        final T item, property, context;
+
+        MappingCacheKeyTuple(T a, T b, T c) {
+            this.item = a;
+            this.property = b;
+            this.context = c;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            MappingCacheKeyTuple<?> that = (MappingCacheKeyTuple<?>) o;
+            return Objects.equals(item, that.item) && Objects.equals(property, that.property) && Objects.equals(context, that.context);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(item, property, context);
+        }
     }
 
     public static class KvinTupleInternal {
-        int id;
-        Long time;
-        Integer seqNr;
-        Integer value_int;
-        Long value_long;
-        Float value_float;
-        Double value_double;
-        String value_string;
-        Integer value_bool;
-        byte[] value_object;
+        private byte[] id;
+        private Long time;
+        private Integer seqNr;
+        private Integer valueInt;
+        private Long valueLong;
+        private Float valueFloat;
+        private Double valueDouble;
+        private String valueString;
+        private Integer valueBool;
+        private byte[] valueObject;
 
-        public int getId() {
+        private String archiveLocation;
+
+        public byte[] getId() {
             return id;
         }
 
-        public void setId(int id) {
+        public void setId(byte[] id) {
             this.id = id;
         }
 
@@ -740,102 +989,132 @@ public class KvinParquet implements Kvin {
             this.seqNr = seqNr;
         }
 
-        public Integer getValue_int() {
-            return value_int;
+        public Integer getValueInt() {
+            return valueInt;
         }
 
-        public void setValue_int(Integer value_int) {
-            this.value_int = value_int;
+        public void setValueInt(Integer valueInt) {
+            this.valueInt = valueInt;
         }
 
-        public Long getValue_long() {
-            return value_long;
+        public Long getValueLong() {
+            return valueLong;
         }
 
-        public void setValue_long(Long value_long) {
-            this.value_long = value_long;
+        public void setValueLong(Long valueLong) {
+            this.valueLong = valueLong;
         }
 
-        public Float getValue_float() {
-            return value_float;
+        public Float getValueFloat() {
+            return valueFloat;
         }
 
-        public void setValue_float(Float value_float) {
-            this.value_float = value_float;
+        public void setValueFloat(Float valueFloat) {
+            this.valueFloat = valueFloat;
         }
 
-        public Double getValue_double() {
-            return value_double;
+        public Double getValueDouble() {
+            return valueDouble;
         }
 
-        public void setValue_double(Double value_double) {
-            this.value_double = value_double;
+        public void setValueDouble(Double valueDouble) {
+            this.valueDouble = valueDouble;
         }
 
-        public String getValue_string() {
-            return value_string;
+        public String getValueString() {
+            return valueString;
         }
 
-        public void setValue_string(String value_string) {
-            this.value_string = value_string;
+        public void setValueString(String valueString) {
+            this.valueString = valueString;
         }
 
-        public byte[] getValue_object() {
-            return value_object;
+        public byte[] getValueObject() {
+            return valueObject;
         }
 
-        public void setValue_object(byte[] value_object) {
-            this.value_object = value_object;
+        public void setValueObject(byte[] valueObject) {
+            this.valueObject = valueObject;
         }
 
-        public Integer getValue_bool() {
-            return value_bool;
+        public Integer getValueBool() {
+            return valueBool;
         }
 
-        public void setValue_bool(Integer value_bool) {
-            this.value_bool = value_bool;
+        public void setValueBool(Integer valueBool) {
+            this.valueBool = valueBool;
         }
-
     }
 
-    public static class Mapping {
-        Integer id;
+    public static class ItemMapping implements Mapping {
+        Long itemId;
         String item;
-        String property;
-        String context;
 
-        public Integer getId() {
-            return id;
+        public Long getMappingId() {
+            return itemId;
         }
 
-        public void setId(Integer id) {
-            this.id = id;
+        public void setMappingId(Long itemId) {
+            this.itemId = itemId;
         }
 
-        public String getItem() {
+        public String getMappingValue() {
             return item;
         }
 
-        public void setItem(String item) {
+        public void setMappingValue(String item) {
             this.item = item;
         }
+    }
 
-        public String getProperty() {
+    public static class PropertyMapping implements Mapping {
+        Long propertyId;
+        String property;
+
+        @Override
+        public Long getMappingId() {
+            return propertyId;
+        }
+
+        @Override
+        public void setMappingId(Long mappingId) {
+            this.propertyId = mappingId;
+        }
+
+        @Override
+        public String getMappingValue() {
             return property;
         }
 
-        public void setProperty(String property) {
-            this.property = property;
+        @Override
+        public void setMappingValue(String mappingValue) {
+            this.property = mappingValue;
+        }
+    }
+
+    public static class ContextMapping implements Mapping {
+        Long contextId;
+        String context;
+
+        @Override
+        public Long getMappingId() {
+            return contextId;
         }
 
-        public String getContext() {
+        @Override
+        public void setMappingId(Long mappingId) {
+            this.contextId = mappingId;
+        }
+
+        @Override
+        public String getMappingValue() {
             return context;
         }
 
-        public void setContext(String context) {
-            this.context = context;
+        @Override
+        public void setMappingValue(String mappingValue) {
+            this.context = mappingValue;
         }
-
-
     }
+
 }
