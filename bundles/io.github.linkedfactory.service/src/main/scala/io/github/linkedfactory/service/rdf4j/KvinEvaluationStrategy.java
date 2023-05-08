@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service.rdf4j;
 
 import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.compareAndBind;
-import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.containsFetch;
+import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.findFirstFetch;
 import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.toKommaUri;
 import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.toRdfValue;
 
@@ -197,15 +197,29 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
             return bindingSet -> new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
         } else {
             // strictly use lateral joins if left arg contains a KVIN fetch as right arg probably depends on the results
-            boolean lateral = containsFetch(join.getLeftArg());
+            KvinFetch fetch = findFirstFetch(join.getLeftArg());
+            boolean lateral = fetch != null;
+            // do not use lateral join if left fetch requires a binding from the right join argument
+            if (lateral) {
+                // switch join order if left depends on right
+                Set<String> assured = join.getRightArg().getAssuredBindingNames();
+                boolean leftDependsOnRight = fetch.getRequiredBindings().stream()
+                    .anyMatch(name -> assured.contains(name));
+                if (leftDependsOnRight) {
+                    // swap left and right argument
+                    return bindingSet -> new KvinJoinIterator(KvinEvaluationStrategy.this,
+                        rightPrepared, leftPrepared, bindingSet, true
+                    );
+                }
+            }
             return bindingSet -> new KvinJoinIterator(KvinEvaluationStrategy.this,
-                leftPrepared, rightPrepared, join, bindingSet, lateral
+                leftPrepared, rightPrepared, bindingSet, lateral
             );
         }
     }
 
     boolean useHashJoin(TupleExpr leftArg, TupleExpr rightArg) {
-        if (containsFetch(leftArg)) {
+        if (findFirstFetch(leftArg) != null) {
             KvinFetch rightFetch = rightArg instanceof KvinFetch ? (KvinFetch) rightArg : null;
             while (rightArg instanceof Join && rightFetch == null) {
                 if (((Join) rightArg).getLeftArg() instanceof KvinFetch) {

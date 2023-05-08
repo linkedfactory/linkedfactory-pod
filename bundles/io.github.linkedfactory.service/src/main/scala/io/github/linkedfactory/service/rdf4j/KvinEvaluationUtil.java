@@ -281,16 +281,16 @@ public class KvinEvaluationUtil {
         return iteration;
     }
 
-    public static boolean containsFetch(TupleExpr t) {
+    public static KvinFetch findFirstFetch(TupleExpr t) {
         TupleExpr n = t;
         ArrayDeque queue = null;
         do {
             if (n instanceof KvinFetch) {
-                return true;
+                return (KvinFetch) n;
             }
 
-            if (n instanceof Projection && ((Projection) n).isSubquery() || n instanceof Service) {
-                return false;
+            if (n instanceof Service) {
+                return null;
             }
 
             List<TupleExpr> children = TupleExprs.getChildren(n);
@@ -302,7 +302,7 @@ public class KvinEvaluationUtil {
             }
             n = queue != null ? (TupleExpr) queue.poll() : null;
         } while (n != null);
-        return false;
+        return null;
     }
 
     public static CloseableIteration<BindingSet, QueryEvaluationException>  compareAndBind(BindingSet bs, Var variable, Value valueToBind) {

@@ -30,17 +30,16 @@ public class KvinJoinIterator extends LookAheadIteration<BindingSet, QueryEvalua
 	 * Constructors *
 	 *--------------*/
 
-	public KvinJoinIterator(EvaluationStrategy strategy, QueryEvaluationStep leftPrepared, QueryEvaluationStep rightPrepared,
-		Join join, BindingSet bindings, boolean lateral)
-			throws QueryEvaluationException {
+	public KvinJoinIterator(EvaluationStrategy strategy, QueryEvaluationStep leftPrepared,
+		QueryEvaluationStep rightPrepared, BindingSet bindings, boolean lateral) throws QueryEvaluationException {
 		this.strategy = strategy;
 
-		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = strategy.evaluate(join.getLeftArg(), bindings);
+		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = leftPrepared.evaluate(bindings);
 		if (leftIt.hasNext() || lateral) {
 			preparedJoinArg = rightPrepared;
 		} else {
 			leftIt.close();
-			leftIt = strategy.evaluate(join.getRightArg(), bindings);
+			leftIt = rightPrepared.evaluate(bindings);
 			preparedJoinArg = leftPrepared;
 		}
 		rightIter = new EmptyIteration<>();
