@@ -205,7 +205,6 @@ class KvinServiceTest {
       headers = (("Accept", "application/json" :: Nil) :: Nil).toMap
     }
 
-    //var response = kvinRest(toReq(getReq))().toList.map((response) => response.toString)
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
     val stringResponse: String = response match {
       case r: OutputStreamResponse =>
@@ -280,7 +279,6 @@ class KvinServiceTest {
       headers = (("Accept", "application/json" :: Nil) :: Nil).toMap
     }
 
-    //var response = kvinRest(toReq(getReq))().toList.map((response) => response.toString)
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
     val stringResponse: String = response match {
       case r: OutputStreamResponse =>

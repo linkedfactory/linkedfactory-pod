@@ -275,21 +275,21 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     }
   }
 
-  def getItem(path: List[String]): URI = S.param("item") flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(path)
-
-  def getProperty: Box[URI] = S.param("property") flatMap { s => tryo(URIs.createURI(s)) }
+  def getSingleItem(path: List[String]): URI = S.param("item") flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(path)
 
   def getSize(path: List[String]): JObject = {
-    val uri = getItem(path)
+    val uri = S.param("item") flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(path)
     val end = S.param("to") flatMap (v => tryo(v.toLong)) openOr Long.MaxValue
     val begin = S.param("from") flatMap (v => tryo(v.toLong)) openOr 0L
-    JObject(JField("size", store.approximateSize(uri, getProperty openOr valueProperty, Kvin.DEFAULT_CONTEXT, end, begin)) :: Nil)
+    JObject(JField("size", store.approximateSize(uri,
+      S.param("property") flatMap { s => tryo(URIs.createURI(s)) } openOr valueProperty,
+      Kvin.DEFAULT_CONTEXT, end, begin)) :: Nil)
   }
 
   def getValues(path: List[String], limit: Long): Map[String, Map[String, IExtendedIterator[KvinTuple]]] = {
-    val items = S.param("items").map {
+    val items = (S.param("item") or S.param("items")).map {
       _.split("\\s+").flatMap { i => tryo(URIs.createURI(i)) }.toList
-    } openOr List(getItem(path))
+    } openOr List(Data.pathToURI(path))
 
     val end = S.param("to") flatMap (v => tryo(v.toLong)) openOr KvinTuple.TIME_MAX_VALUE
     val begin = S.param("from") flatMap (v => tryo(v.toLong)) openOr 0L
@@ -301,12 +301,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     val results = items map { item =>
       val itemData = for (
         property <- {
-          S.param("properties").map {
+          (S.param("property") or S.param("properties")).map {
             _.split("\\s+").flatMap { s => tryo(URIs.createURI(s)) }.toList
-          } openOr (getProperty match {
-            case Full(p) => List(p)
-            case _ => store.properties(item).toList.asScala
-          })
+          } openOr store.properties(item).toList.asScala
         }
       ) yield {
         val propertyData = (interval, op) match {
@@ -323,9 +320,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   def deleteValues(path: List[String]): JObject = {
-    val items = S.param("items").map {
+    val items = (S.param("item") or S.param("items")).map {
       _.split("\\s+").flatMap { i => tryo(URIs.createURI(i)) }.toList
-    } openOr List(getItem(path))
+    } openOr List(Data.pathToURI(path))
 
     val end = S.param("to") flatMap (v => tryo(v.toLong)) openOr Long.MaxValue
     val begin = S.param("from") flatMap (v => tryo(v.toLong)) openOr 0L
@@ -333,12 +330,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     val deletedRows = items.foldLeft(0L) {
       case (count: Long, item: URI) =>
         val properties = {
-          S.param("properties").map {
+          (S.param("property") or S.param("properties")).map {
             _.split("\\s+").flatMap { s => tryo(URIs.createURI(s)) }.toList
-          } openOr (getProperty match {
-            case Full(p) => List(p)
-            case _ => store.properties(item).toList.asScala
-          })
+          } openOr store.properties(item).toList.asScala
         }
         count + properties.foldLeft(0L) {
           case (count2: Long, property: URI) =>
@@ -350,7 +344,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   def getDescendants(path: List[String]): JArray = {
-    val uri = getItem(path) match {
+    val uri = getSingleItem(path) match {
       case u if u.lastSegment != "" => u.appendSegment("")
       case u => u
     }
@@ -361,7 +355,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   def getProperties(path: List[String]): JArray = {
-    val uri = getItem(path)
+    val uri = getSingleItem(path)
     val properties = store.properties(uri).iterator.asScala.map {
       uri => JObject(JField("@id", uri.toString) :: Nil)
     }
