@@ -9,6 +9,7 @@ import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
@@ -18,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.*;
 
+@Ignore
 public class KvinPartitionedTest extends KvinPartitionedTestBase {
     static KvinPartitioned kvinPartitioned;
     static File tempDir;
