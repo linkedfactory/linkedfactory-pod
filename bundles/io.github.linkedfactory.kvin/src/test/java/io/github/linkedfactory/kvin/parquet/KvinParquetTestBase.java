@@ -6,14 +6,13 @@ import io.github.linkedfactory.kvin.Record;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
-import org.apache.commons.lang.RandomStringUtils;
 
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class KvinParquetTestBase {
     final static long seed = 200L;
-    private static Random random =  new Random(seed);
+    private static Random random = new Random(seed);
 
     public static NiceIterator<KvinTuple> generateRandomKvinTuples(int sampleSize, int itemPool, int propertyPool) {
         return new NiceIterator<>() {
@@ -37,14 +36,14 @@ public class KvinParquetTestBase {
             public KvinTuple next() {
                 isLoopingProperties = currentPropertyCount < propertyCount;
                 if (!isLoopingProperties) {
-                    propertyCount = getRandomInt(5);
+                    propertyCount = getRandomInt(50);
                     currentPropertyCount = 0;
                     itemCounter++;
                     propertyCounter = 0;
                     currentItem = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + itemCounter);
 
                     // incrementing week after n items
-                    if (itemCounter % 5 == 0 && itemCounter != 0) {
+                    if (itemCounter % 50 == 0 && itemCounter != 0) {
                         time = time + (604800 * chunkCounter);
                         chunkCounter++;
                     }
@@ -75,7 +74,7 @@ public class KvinParquetTestBase {
                 tupleCount++;
                 currentPropertyCount++;
                 if (tupleCount % 1000 == 0) {
-                    System.out.println("wrote " + tupleCount + " tuples");
+                    //System.out.println("wrote " + tupleCount + " tuples");
                 }
                 return new KvinTuple(currentItem, property, context, time, seqNr, value);
             }
@@ -121,7 +120,16 @@ public class KvinParquetTestBase {
     }
 
     private static String getRandomString(int stringLength) {
-        return RandomStringUtils.random(stringLength, true, false);
+        int leftLimit = 48; // numeral '0'
+        int rightLimit = 122; // letter 'z'
+        int targetStringLength = 10;
+        Random random = new Random(1337);
+
+        return random.ints(leftLimit, rightLimit + 1)
+                .filter(i -> (i <= 57 || i >= 65) && (i <= 90 || i >= 97))
+                .limit(targetStringLength)
+                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
+                .toString();
     }
 
     private static int getRandomInt(int max) {

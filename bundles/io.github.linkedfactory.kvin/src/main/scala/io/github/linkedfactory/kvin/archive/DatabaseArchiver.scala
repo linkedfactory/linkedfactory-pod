@@ -83,7 +83,9 @@ class DatabaseArchiver(var databaseStore: KvinLevelDb, var archiveStore: KvinPar
       }
 
       override def close(): Unit = {
+        propertyIterator.close();
         idIterator.close()
+        idsSnapshotOption.snapshot().close()
         idsSnapshot.close()
       }
     }
@@ -92,6 +94,7 @@ class DatabaseArchiver(var databaseStore: KvinLevelDb, var archiveStore: KvinPar
   def archive(): Unit = {
     val dbIterator: NiceIterator[KvinTuple] = getDatabaseIterator
     archiveStore.put(dbIterator)
+    archiveStore.close()
     dbIterator.close()
   }
 }

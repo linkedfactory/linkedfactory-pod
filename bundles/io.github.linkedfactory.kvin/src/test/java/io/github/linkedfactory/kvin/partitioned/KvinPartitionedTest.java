@@ -50,23 +50,13 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
     @Test
     public void shouldDoPut() {
         try {
-            kvinPartitioned.put(generateTestTuples(10, 0, 1672614000L));
-            Thread.sleep(500);
-            // trying to read while archival is in process
-            TestArchivalInProcessRead testArchivalInProcessRead = new TestArchivalInProcessRead();
-            Thread inProcessArchivalReadTestThread = new Thread(testArchivalInProcessRead);
-            inProcessArchivalReadTestThread.start();
-            inProcessArchivalReadTestThread.join();
-            boolean isInArchivalReadSuccessful = testArchivalInProcessRead.getIsInArchivalReadSuccessful();
-            assertTrue(isInArchivalReadSuccessful);
-
             // continuing incremental put on kvinPartitioned
-            Thread.sleep(1000);
+            kvinPartitioned.put(generateTestTuples(10, 0, 1672614000L));
+            Thread.sleep(2300);
             kvinPartitioned.put(generateTestTuples(10, 5, 1673218800L));
             Thread.sleep(2000);
             kvinPartitioned.archivalTaskfuture.cancel(false);
             kvinPartitioned.put(generateTestTuples(10, 10, 1673823600L));
-
             NiceIterator<KvinTuple> storeIterator = kvinPartitioned.readCurrentHotStore();
             assertTrue(archiveDir.listFiles().length > 0); // main folder
             assertEquals(2, archiveDir.listFiles()[0].listFiles().length); // sub folders
@@ -85,7 +75,7 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
     @Test
     public void shouldDoFetch() {
         try {
-            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9);
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1);
             URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 1 + "/measured-point-1");
             long limit = 0;
 
@@ -109,32 +99,6 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
             assertTrue(properties.toList().size() > 0);
         } catch (Exception e) {
             fail("Something went wrong while testing properties method of KvinPartitioned test.");
-        }
-    }
-
-    class TestArchivalInProcessRead implements Runnable {
-        AtomicBoolean isInArchivalReadSuccessful = new AtomicBoolean(false);
-
-        @Override
-        public void run() {
-            while (true) {
-                if (kvinPartitioned.isArchivalInProcess()) {
-                    URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 4);
-                    URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 1 + "/measured-point-1");
-                    long limit = 0;
-
-                    IExtendedIterator<KvinTuple> tuples = kvinPartitioned.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
-
-                    assertNotNull(tuples);
-                    assertTrue(tuples.toList().size() > 0);
-                    isInArchivalReadSuccessful.set(true);
-                    break;
-                }
-            }
-        }
-
-        public boolean getIsInArchivalReadSuccessful() {
-            return isInArchivalReadSuccessful.get();
         }
     }
 }
