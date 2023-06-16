@@ -166,16 +166,22 @@
 
 	<build>
 		<plugins>
+			<!-- skip Java compilation as it is already executed via Scala plugin -->
 			<plugin>
-				<groupId>net.alchim31.maven</groupId>
-				<artifactId>scala-maven-plugin</artifactId>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<skip>true</skip>
+				</configuration>
+				<!-- this is required for older Maven versions that don't recognize skip -->
 				<executions>
 					<execution>
-						<id>scala-test-compile</id>
-						<phase>process-test-resources</phase>
-						<goals>
-							<goal>testCompile</goal>
-						</goals>
+						<id>default-compile</id>
+						<phase>none</phase>
+					</execution>
+					<execution>
+						<id>default-testCompile</id>
+						<phase>none</phase>
 					</execution>
 				</executions>
 			</plugin>
