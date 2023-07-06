@@ -2,12 +2,14 @@ package io.github.linkedfactory.service.rdf4j;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.http.KvinHttp;
+import io.github.linkedfactory.service.rdf4j.functions.DateTimeFunction;
 import net.enilink.komma.model.IModelSet;
 import java.util.Optional;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolverClient;
+import org.eclipse.rdf4j.query.algebra.evaluation.function.FunctionRegistry;
 import org.eclipse.rdf4j.repository.Repository;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -23,6 +25,9 @@ public class KvinFederatedServiceComponent {
 
     @Activate
     void activate() {
+        // add custom SPARQL functions
+        FunctionRegistry.getInstance().add(new DateTimeFunction());
+
         IModelSet.Internal msInternal = (IModelSet.Internal) ms;
         Binding<Repository> repositoryBinding = msInternal.getInjector().getExistingBinding(Key.get(Repository.class));
         if (repositoryBinding != null) {
