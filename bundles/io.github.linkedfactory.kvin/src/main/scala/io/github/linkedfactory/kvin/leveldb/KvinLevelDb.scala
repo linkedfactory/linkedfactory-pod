@@ -32,37 +32,32 @@ import java.util.concurrent.locks.{ReadWriteLock, ReentrantReadWriteLock}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
-/**
- * Indirect mapping of (item, property) -> ID and (ID, time, sequence-nr) -> value.
- */
-class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
-  sealed trait EntryType {
-    def id: Int
+sealed trait EntryType {
+  def id: Int
 
-    def reverse: Int = id + 1
+  def reverse: Int = id + 1
+}
+
+object EntryType {
+  object SubjectToId extends EntryType {
+    val id = 1
   }
 
-  object EntryType {
-    object SubjectToId extends EntryType {
-      val id = 1
-    }
-
-    object PropertyToId extends EntryType {
-      val id = 3
-    }
-
-    object ResourceToId extends EntryType {
-      val id = 5
-    }
-
-    object ContextToId extends EntryType {
-      val id = 7
-    }
+  object PropertyToId extends EntryType {
+    val id = 3
   }
 
-  object SPCtoId extends EntryType {
-    val id = 9
+  object ResourceToId extends EntryType {
+    val id = 5
   }
+
+  object ContextToId extends EntryType {
+    val id = 7
+  }
+}
+
+object SPCtoId extends EntryType {
+  val id = 9
 }
 
 /**
@@ -100,19 +95,13 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
   val ids: DB = factory.open(new File(path, "ids"), createOptions(false))
   val values: DB = factory.open(new File(path, "values"), createOptions(true))
+  val listeners = new CopyOnWriteArraySet[KvinListener]
 
   def getIdStore(): DB = ids
 
   def getValueStore(): DB = values
 
   def getEntryTypeObj() = EntryType
-
-
-  val listeners = new CopyOnWriteArraySet[KvinListener]
-
-  def getIdStore(): DB = ids
-
-  def getValueStore(): DB = values
 
   override def addListener(listener: KvinListener): Boolean = {
     listeners.add(listener)
