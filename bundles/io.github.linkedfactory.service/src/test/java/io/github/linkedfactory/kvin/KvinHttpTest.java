@@ -158,6 +158,8 @@ public class KvinHttpTest extends Mockito {
         this.httpGet = mock(HttpGet.class);
         this.statusLine = mock(StatusLine.class);
         this.entity = mock(HttpEntity.class);
+        when(httpResponse.getStatusLine()).thenReturn(statusLine);
+        when(statusLine.getStatusCode()).thenReturn(200);
     }
 
     private Box<LiftResponse> kvinRest(Req request) {
@@ -181,8 +183,6 @@ public class KvinHttpTest extends Mockito {
             long time = 1653292320;
             int seqNr = 1;
             // mocking settings for http client response
-            when(httpResponse.getStatusLine()).thenReturn(statusLine);
-            when(statusLine.getStatusCode()).thenReturn(200);
             when(httpClient.execute(httpPost)).thenReturn(this.httpResponse);
             this.kvinHttp = new KvinHttp("http://samplehost.de") {
                 @Override
@@ -224,8 +224,6 @@ public class KvinHttpTest extends Mockito {
             long time = 1653292320;
             int seqNr = 1;
             // mocking settings for http client response
-            when(httpResponse.getStatusLine()).thenReturn(statusLine);
-            when(statusLine.getStatusCode()).thenReturn(200);
             when(httpClient.execute(httpPost)).thenReturn(this.httpResponse);
             this.kvinHttp = new KvinHttp("http://samplehost.de") {
                 @Override
