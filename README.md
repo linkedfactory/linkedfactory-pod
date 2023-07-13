@@ -6,7 +6,7 @@ This is the reference implementation of the
 [LinkedFactory specification](https://github.com/linkedfactory/specification).
 
 ## Run with docker
-* `docker run -p 8080:8080 -v /tmp/workspace:/enilink-server/workspace linkedfactory/linkedfactory-pod`
+* `docker run -p 8080:8080 -v /tmp/workspace:/linkedfactory-pod/workspace linkedfactory/linkedfactory-pod`
 
 ## Building
 * This is a plain Maven project
