@@ -45,7 +45,7 @@ jobs:
           images: linkedfactory/linkedfactory-pod
 
       - name: Set version env variable
-        run: echo "PROJECT_VERSION=$(< server/target/classes/version.txt)" >> $GITHUB_ENV
+        run: echo "PROJECT_VERSION=$(< server/target/version.txt)" >> $GITHUB_ENV
       
       - name: Build and push Docker image
         uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
