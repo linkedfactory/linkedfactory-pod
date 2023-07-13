@@ -1,7 +1,12 @@
+[![Docker](https://img.shields.io/docker/v/linkedfactory/linkedfactory-pod?label=Docker&style=flat)](https://hub.docker.com/r/linkedfactory/linkedfactory-pod)
+
 # Welcome to the LinkedFactory POD repository
 
 This is the reference implementation of the 
 [LinkedFactory specification](https://github.com/linkedfactory/specification).
+
+## Run with docker
+* `docker run -p 8080:8080 -v /tmp/workspace:/enilink-server/workspace linkedfactory/linkedfactory-pod`
 
 ## Building
 * This is a plain Maven project
