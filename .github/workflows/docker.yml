@@ -53,5 +53,5 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           push: true
-          tags: linkedfactory/linkedfactory-pod:${{ env.PROJECT_VERSION }}
+          tags: linkedfactory/linkedfactory-pod:${{ env.PROJECT_VERSION }},linkedfactory/linkedfactory-pod:latest
           labels: ${{ steps.meta.outputs.labels }}
