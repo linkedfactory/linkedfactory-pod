@@ -1,0 +1,16 @@
+version: "3"
+
+services:
+  enilink:
+    container_name: linkedfactory-pod
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      - enilink.loginrequired=false
+    volumes:
+      - ./enilink-data/workspace:/enilink-server/workspace
+      - ./enilink-data/deploy:/enilink-server/deploy
+    ports:
+      - 8080:8080

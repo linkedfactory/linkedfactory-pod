@@ -13,3 +13,5 @@ OSGI-INF
 # but include the directories
 !META-INF/
 !OSGI-INF/
+.enilink-data/
+/launch/**/workspace
