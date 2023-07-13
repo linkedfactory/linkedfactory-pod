@@ -1,7 +1,7 @@
 version: "3"
 
 services:
-  enilink:
+  linkedfactory-pod:
     container_name: linkedfactory-pod
     build:
       context: ..
@@ -10,7 +10,7 @@ services:
     environment:
       - enilink.loginrequired=false
     volumes:
-      - ./enilink-data/workspace:/enilink-server/workspace
-      - ./enilink-data/deploy:/enilink-server/deploy
+      - ./pod-data/workspace:/linkedfactory-pod/workspace
+      - ./pod-data/deploy:/linkedfactory-pod/deploy
     ports:
       - 8080:8080

@@ -292,6 +292,5 @@
 		<module>bundles/io.github.linkedfactory.kvin</module>
 		<module>bundles/io.github.linkedfactory.service</module>
 		<module>bundles/io.github.linkedfactory.opcua</module>
-		<module>features/io.github.linkedfactory.feature</module>
 	</modules>
 </project>

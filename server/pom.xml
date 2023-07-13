@@ -10,7 +10,6 @@
 		<groupId>io.github.linkedfactory</groupId>
 		<artifactId>linkedfactory-parent</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
-		<relativePath>..</relativePath>
 	</parent>
 
 	<artifactId>linkedFactory-server</artifactId>
@@ -98,16 +97,23 @@
 					</bootFeatures>
 				</configuration>
 			</plugin>
+			<plugin>
+				<artifactId>maven-antrun-plugin</artifactId>
+				<version>3.1.0</version>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<configuration>
+							<target>
+								<echo file="${project.build.directory}/version.txt">${project.version}</echo>
+							</target>
+						</configuration>
+						<goals>
+							<goal>run</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
-
-		<resources>
-			<resource>
-				<directory>.</directory>
-				<filtering>true</filtering>
-				<includes>
-					<include>version.txt</include>
-				</includes>
-			</resource>
-		</resources>
 	</build>
 </project>

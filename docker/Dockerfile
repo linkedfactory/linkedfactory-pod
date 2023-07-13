@@ -1,10 +1,11 @@
 FROM adoptopenjdk:11-jre-hotspot
+EXPOSE 8080
 
-# Add enilink server
-ADD server/target/assembly /opt/enilink-dist
+# Add linkedfactory-pod server
+ADD ./server/target/assembly /opt/linkedfactory-pod
 
 RUN set -x && \
-  ln -s /opt/enilink-dist /enilink-server
+  ln -s /opt/linkedfactory-pod /linkedfactory-pod
 
 # Run the enilink platform server
-CMD ["/enilink-server/bin/karaf", "run"]
+CMD ["/linkedfactory-pod/bin/karaf", "run"]

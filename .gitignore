@@ -13,5 +13,5 @@ OSGI-INF
 # but include the directories
 !META-INF/
 !OSGI-INF/
-.enilink-data/
+/docker/pod-data/
 /launch/**/workspace
