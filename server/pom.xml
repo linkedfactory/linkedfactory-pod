@@ -99,5 +99,15 @@
 				</configuration>
 			</plugin>
 		</plugins>
+
+		<resources>
+			<resource>
+				<directory>.</directory>
+				<filtering>true</filtering>
+				<includes>
+					<include>version.txt</include>
+				</includes>
+			</resource>
+		</resources>
 	</build>
 </project>

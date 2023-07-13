@@ -43,6 +43,9 @@ jobs:
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
           images: linkedfactory/linkedfactory-pod
+
+      - name: Set version env variable
+        run: echo "PROJECT_VERSION=$(< server/target/classes/version.txt)" >> $GITHUB_ENV
       
       - name: Build and push Docker image
         uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
@@ -50,5 +53,5 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: linkedfactory/linkedfactory-pod:${{ env.PROJECT_VERSION }}
           labels: ${{ steps.meta.outputs.labels }}
