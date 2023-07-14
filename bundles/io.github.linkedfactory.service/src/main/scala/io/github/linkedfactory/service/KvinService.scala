@@ -344,10 +344,15 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   def getDescendants(path: List[String]): JArray = {
-    val uri = getSingleItem(path) match {
-      case u if u.lastSegment != "" => u.appendSegment("")
-      case u => u
+    val uri = path match {
+      // retrieve all items if path is the root path
+      case p if p == this.path && S.param("item").isEmpty => URIs.createURI("")
+      case p => getSingleItem(p) match {
+        case u if u.lastSegment != "" => u.appendSegment("")
+        case u => u
+      }
     }
+
     val descendants = store.descendants(uri).iterator.asScala.map {
       uri => JObject(JField("@id", uri.toString) :: Nil)
     }
