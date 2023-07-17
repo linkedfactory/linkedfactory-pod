@@ -41,10 +41,10 @@
 						<programArgument>-noExit</programArgument>
 					</programArguments>
 					<vmProperties>
-						<!-- property>
+						<property>
 							<name>net.enilink.config</name>
 							<value>${project.basedir}/../../configurations/default.ttl</value>
-						</property -->
+						</property>
 						<property>
 							<name>org.osgi.service.http.port</name>
 							<value>8080</value>

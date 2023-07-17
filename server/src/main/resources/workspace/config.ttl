@@ -29,5 +29,4 @@ group:Administrators foaf:member user:admin .
 #	models:repository <workspace:/data/> .
 
 @prefix login: <plugin://net.enilink.platform.core/Login/> .
-login: login:jaasConfigUrl <jaas.conf> ;
-	login:loginModule [ login:jaasConfigName "LinkedFactory-POD" ; rdfs:label "LinkedFactory-POD" ] .
+login: login:loginModule [ login:jaasConfigName "LinkedFactory-POD" ; rdfs:label "LinkedFactory-POD" ] .
