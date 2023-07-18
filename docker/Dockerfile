@@ -9,5 +9,11 @@ RUN set -x && \
 
 VOLUME /linkedfactory-pod/workspace
 
-# Run the enilink platform server
+# copy config.ttl to root directory for initializing mounted workspace directories
+ADD ./server/target/assembly/workspace/config.ttl /linkedfactory-pod/config.ttl
+ADD ./docker/entrypoint.sh .
+RUN chmod +x entrypoint.sh
+ENTRYPOINT ["./entrypoint.sh"]
+
+# Pass command to entrypoint for running the linkedfactory-pod server
 CMD ["/linkedfactory-pod/bin/karaf", "run"]
