@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.io.ByteStreams;
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinListener;
 import io.github.linkedfactory.kvin.KvinTuple;
@@ -26,13 +27,17 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.util.EntityUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class KvinHttp implements Kvin {
+	private static Logger logger = LoggerFactory.getLogger(KvinHttp.class);
 
     String hostEndpoint;
     ArrayList<KvinListener> listeners = new ArrayList<>();
@@ -46,7 +51,7 @@ public class KvinHttp implements Kvin {
     }
 
     public CloseableHttpClient getHttpClient() {
-        return HttpClients.custom().setConnectionManager(new PoolingHttpClientConnectionManager()).build();
+        return HttpClients.createDefault();
     }
 
     @Override
@@ -161,6 +166,7 @@ public class KvinHttp implements Kvin {
     }
 
     private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
+	    InputStream content = null;
         try {
             // building url
             URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/values");
@@ -183,9 +189,18 @@ public class KvinHttp implements Kvin {
             }
 
             // converting json to kvin tuples
-            JsonFormatParser jsonParser = new JsonFormatParser(entity.getContent());
+            // TODO directly read from stream with pooled HTTP client
+            content = entity.getContent();
+            JsonFormatParser jsonParser = new JsonFormatParser(new ByteArrayInputStream(ByteStreams.toByteArray(content)));
             return jsonParser.parse();
         } catch (Exception e) {
+            if (content != null) {
+                try {
+                    content.close();
+                } catch (IOException ioe) {
+                    logger.error("Error while closing input stream", ioe);
+                }
+            }
             throw new RuntimeException(e);
         }
     }
@@ -232,7 +247,7 @@ public class KvinHttp implements Kvin {
 
             // converting json to URI
             return new NiceIterator<>() {
-                final JsonParser jsonParser = jsonFactory.createParser(entity.getContent());
+                JsonParser jsonParser = jsonFactory.createParser(new ByteArrayInputStream(ByteStreams.toByteArray(entity.getContent())));
 
                 @Override
                 public boolean hasNext() {
@@ -267,9 +282,13 @@ public class KvinHttp implements Kvin {
                 @Override
                 public void close() {
                     try {
-                        jsonParser.close();
+                        if (jsonParser != null) {
+                            jsonParser.close();
+                            jsonParser = null;
+                        }
                     } catch (IOException e) {
                         // ignore
+                        logger.error("Exception while closing JSON parser", e);
                     }
                 }
             };
@@ -296,7 +315,7 @@ public class KvinHttp implements Kvin {
 
             // converting json to URI
             return new NiceIterator<>() {
-                final JsonParser jsonParser = jsonFactory.createParser(entity.getContent());
+                JsonParser jsonParser = jsonFactory.createParser(new ByteArrayInputStream(ByteStreams.toByteArray(entity.getContent())));
 
                 @Override
                 public boolean hasNext() {
@@ -331,9 +350,13 @@ public class KvinHttp implements Kvin {
                 @Override
                 public void close() {
                     try {
-                        jsonParser.close();
+                        if (jsonParser != null) {
+                            jsonParser.close();
+                            jsonParser = null;
+                        }
                     } catch (IOException e) {
                         // ignore
+                        logger.error("Exception while closing JSON parser", e);
                     }
                 }
             };

@@ -15,6 +15,8 @@ import io.github.linkedfactory.kvin.Record;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,10 +25,11 @@ import java.math.BigInteger;
 import java.util.*;
 
 public class JsonFormatParser {
+    final static Logger logger = LoggerFactory.getLogger(JsonFormatParser.class);
     final static JsonFactory jsonFactory = new JsonFactory().configure(Feature.AUTO_CLOSE_SOURCE, true);
-    final JsonParser jsonParser;
     final static ObjectMapper mapper = new ObjectMapper()
                .configure(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN, true);
+    JsonParser jsonParser;
 
     public JsonFormatParser(InputStream content) throws IOException {
         jsonParser = jsonFactory.createParser(content);
@@ -67,7 +70,17 @@ public class JsonFormatParser {
                     } else {
                         return isTuplesAlreadyGenerated();
                     }
-                } catch (IOException e) {
+                } catch (Exception e) {
+                    logger.error("Exception while parsing", e);
+                    try {
+                        if (jsonParser != null) {
+                            jsonParser.close();
+                            jsonParser = null;
+                        }
+                    } catch (IOException ioe) {
+                        // ignore
+                        logger.error("Exception while closing JSON parser", ioe);
+                    }
                     throw new RuntimeException(e);
                 }
             }
@@ -110,7 +123,8 @@ public class JsonFormatParser {
             }
 
             private boolean addNextPropertyItem(URI item, URI property) throws IOException {
-                while (jsonParser.nextToken() != JsonToken.END_ARRAY) {
+                JsonToken token;
+                while ((token = jsonParser.nextToken()) != JsonToken.END_ARRAY && token != null) {
                     isLoopingPropertyItems = true;
                     if (jsonParser.getCurrentToken() == JsonToken.START_OBJECT) {
                         JsonNode node = mapper.readTree(jsonParser);
@@ -134,9 +148,13 @@ public class JsonFormatParser {
             @Override
             public void close() {
                 try {
-                    jsonParser.close();
+                    if (jsonParser != null) {
+                        jsonParser.close();
+                        jsonParser = null;
+                    }
                 } catch (IOException e) {
                     // ignore
+                    logger.error("Exception while closing JSON parser", e);
                 }
             }
         };
