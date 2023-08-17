@@ -17,6 +17,8 @@ package io.github.linkedfactory.opcua;
 
 import com.digitalpetri.opcua.nodeset.UaNodeSet;
 import com.digitalpetri.opcua.nodeset.attributes.NodeAttributes;
+import com.digitalpetri.opcua.nodeset.attributes.VariableNodeAttributes;
+import com.digitalpetri.opcua.nodeset.attributes.VariableTypeNodeAttributes;
 import com.google.inject.Guice;
 import net.enilink.komma.core.*;
 import net.enilink.komma.em.concepts.IResource;
@@ -39,6 +41,7 @@ import java.util.stream.Stream;
 public class NodeSetToRdf {
     static final URI UA_NAMESPACE = URIs.createURI("http://opcfoundation.org/UA/");
     static final URI TYPE_DATATYPE = UA_NAMESPACE.appendLocalPart("DataType");
+    static final URI PROPERTY_DATATYPE = UA_NAMESPACE.appendLocalPart("dataType");
     static final URI PROPERTY_HASSUBTYPE = UA_NAMESPACE.appendLocalPart("i=45");
 
     protected UaNodeSet nodeSet;
@@ -148,6 +151,18 @@ public class NodeSetToRdf {
                     // mark data types as classes
                     rdfNode.getRdfTypes().add(em.find(OWL.TYPE_CLASS, Class.class));
                     break;
+                case Variable: {
+                    // add datatype
+                    NodeId dataType = ((VariableNodeAttributes) attrs).getDataType();
+                    rdfNode.addProperty(PROPERTY_DATATYPE, toUri(dataType));
+                    break;
+                }
+                case VariableType: {
+                    // add datatype
+                    NodeId dataType = ((VariableTypeNodeAttributes) attrs).getDataType();
+                    rdfNode.addProperty(PROPERTY_DATATYPE, toUri(dataType));
+                    break;
+                }
             }
 
             // map references to RDF
