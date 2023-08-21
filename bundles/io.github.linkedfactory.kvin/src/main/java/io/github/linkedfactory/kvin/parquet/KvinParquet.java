@@ -39,6 +39,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
@@ -70,12 +71,20 @@ public class KvinParquet implements Kvin {
             .name("id").type().longType().noDefault()
             .name("value").type().stringType().noDefault().endRecord();
     long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0; // global id counter
+
     // used by writer
     Map<String, Long> itemMap = new HashMap<>();
     Map<String, Long> propertyMap = new HashMap<>();
     Map<String, Long> contextMap = new HashMap<>();
+
     // used by reader
-    Cache<MappingCacheKeyTuple<URI>, Map<String, IdMapping>> idMappingCache = CacheBuilder.newBuilder().maximumSize(20000).build();
+    Cache<URI, Long> itemIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	Cache<URI, Long> propertyIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	Cache<URI, Long> contextIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+
+	static class IdMappings {
+	    long itemId, propertyId, contextId;
+    }
 
     public KvinParquet(String archiveLocation) {
         this.archiveLocation = archiveLocation;
@@ -195,13 +204,13 @@ public class KvinParquet implements Kvin {
 
                 // updating new week partition id
                 long tempItemId = itemIdCounter, tempPropertyId = propertyIdCounter, tempContextId = contextIdCounter;
-                if (isNeedForIdChange(tuple, idType.ITEM_ID)) {
+                if (isNeedForIdChange(tuple, IdType.ITEM_ID)) {
                     tempItemId++;
                 }
-                if (isNeedForIdChange(tuple, idType.PROPERTY_ID)) {
+                if (isNeedForIdChange(tuple, IdType.PROPERTY_ID)) {
                     tempPropertyId++;
                 }
-                if (isNeedForIdChange(tuple, idType.CONTEXT_ID)) {
+                if (isNeedForIdChange(tuple, IdType.CONTEXT_ID)) {
                     tempContextId++;
                 }
                 weekPartitionKey = generatePartitionKey(tempItemId, tempPropertyId, tempContextId);
@@ -386,7 +395,7 @@ public class KvinParquet implements Kvin {
     private byte[] generateId(KvinTuple currentTuple, ParquetWriter itemMappingWriter, ParquetWriter propertyMappingWriter, ParquetWriter contextMappingWriter) throws IOException {
         long itemId, propertyId, contextId;
 
-        if (itemIdCounter == 0 || isNeedForIdChange(currentTuple, idType.ITEM_ID)) {
+        if (itemIdCounter == 0 || isNeedForIdChange(currentTuple, IdType.ITEM_ID)) {
             itemId = ++itemIdCounter;
             itemMap.put(currentTuple.item.toString(), itemId);
             IdMapping mapping = new SimpleMapping();
@@ -397,7 +406,7 @@ public class KvinParquet implements Kvin {
             itemId = itemMap.get(currentTuple.item.toString());
         }
 
-        if (propertyIdCounter == 0 || isNeedForIdChange(currentTuple, idType.PROPERTY_ID)) {
+        if (propertyIdCounter == 0 || isNeedForIdChange(currentTuple, IdType.PROPERTY_ID)) {
             propertyId = ++propertyIdCounter;
             propertyMap.put(currentTuple.property.toString(), propertyId);
             IdMapping mapping = new SimpleMapping();
@@ -408,7 +417,7 @@ public class KvinParquet implements Kvin {
             propertyId = propertyMap.get(currentTuple.property.toString());
         }
 
-        if (contextIdCounter == 0 || isNeedForIdChange(currentTuple, idType.CONTEXT_ID)) {
+        if (contextIdCounter == 0 || isNeedForIdChange(currentTuple, IdType.CONTEXT_ID)) {
             contextId = ++contextIdCounter;
             contextMap.put(currentTuple.context.toString(), contextId);
             IdMapping mapping = new SimpleMapping();
@@ -426,7 +435,7 @@ public class KvinParquet implements Kvin {
         return idBuffer.array();
     }
 
-    private boolean isNeedForIdChange(KvinTuple currentTuple, idType type) {
+    private boolean isNeedForIdChange(KvinTuple currentTuple, IdType type) {
         boolean result = false;
 
         switch (type) {
@@ -470,59 +479,60 @@ public class KvinParquet implements Kvin {
         return byteArrayOutputStream.toByteArray();
     }
 
-    private Map<String, IdMapping> getIdMapping(URI item, URI property, URI context) throws IOException {
-        IdMapping itemMapping, propertyMapping, contextMapping;
-        Map<String, IdMapping> idMappings;
-
-        Map<String, IdMapping> cachedMappingEntry = fetchMappingIdsFromCache(item, property, context);
-        if (cachedMappingEntry == null) {
-            // reading from files
-            idMappings = new HashMap<>();
-            if (item != null) {
-                FilterPredicate filter = eq(FilterApi.binaryColumn("value"), Binary.fromString(item.toString()));
-                Path mappingFile = new Path(this.archiveLocation + "metadata/itemMapping.parquet");
-                itemMapping = fetchMappingIds(mappingFile, filter);
-                idMappings.put("itemMapping", itemMapping);
-            } else {
-                idMappings.put("itemMapping", null);
-            }
-
-            if (property != null) {
-                FilterPredicate filter = eq(FilterApi.binaryColumn("value"), Binary.fromString(property.toString()));
-                Path mappingFile = new Path(this.archiveLocation + "metadata/propertyMapping.parquet");
-                propertyMapping = fetchMappingIds(mappingFile, filter);
-                idMappings.put("propertyMapping", propertyMapping);
-            } else {
-                idMappings.put("propertyMapping", null);
-            }
-
-            if (context != null) {
-                FilterPredicate filter = eq(FilterApi.binaryColumn("value"), Binary.fromString(context.toString()));
-                Path mappingFile = new Path(this.archiveLocation + "metadata/contextMapping.parquet");
-                contextMapping = fetchMappingIds(mappingFile, filter);
-                idMappings.put("contextMapping", contextMapping);
-            } else {
-                idMappings.put("contextMapping", null);
-            }
-            writeMappingIdsToCache(item, property, context, idMappings);
-        } else {
-            idMappings = cachedMappingEntry;
+    private long getId(URI entity, IdType idType) {
+        Cache<URI, Long> idCache;
+        switch (idType) {
+            case ITEM_ID:
+                idCache = itemIdCache;
+                break;
+            case PROPERTY_ID:
+                idCache = propertyIdCache;
+                break;
+            default:
+            //case CONTEXT_ID:
+                idCache = contextIdCache;
+                break;
         }
-        return idMappings;
+        Long id = null;
+        try {
+            id = idCache.get(entity, () -> {
+                // read from files
+                String name;
+                switch (idType) {
+                    case ITEM_ID:
+                        name ="item";
+                        break;
+                    case PROPERTY_ID:
+                        name = "property";
+                        break;
+                    default:
+                        //case CONTEXT_ID:
+                        name = "context";
+                        break;
+                }
+                FilterPredicate filter = eq(FilterApi.binaryColumn("value"), Binary.fromString(entity.toString()));
+                Path mappingFile = new Path(this.archiveLocation + "metadata/" + name + "Mapping.parquet");
+                IdMapping mapping = fetchMappingIds(mappingFile, filter);
+                return mapping != null ? mapping.getId() : 0L;
+            });
+        } catch (ExecutionException e) {
+            return 0L;
+        }
+        return id != null ? id : 0L;
     }
 
-    private Map<String, IdMapping> fetchMappingIdsFromCache(URI item, URI property, URI context) {
-        MappingCacheKeyTuple<URI> key = getIdMappingCacheKey(item, property, context);
-        return idMappingCache.getIfPresent(key);
-    }
-
-    private void writeMappingIdsToCache(URI item, URI property, URI context, Map<String, IdMapping> idMapping) {
-        MappingCacheKeyTuple<URI> key = getIdMappingCacheKey(item, property, context);
-        idMappingCache.put(key, idMapping);
-    }
-
-    private MappingCacheKeyTuple<URI> getIdMappingCacheKey(URI item, URI property, URI context) {
-        return new MappingCacheKeyTuple<>(item, property, context);
+    private IdMappings getIdMappings(URI item, URI property, URI context) throws IOException {
+        final IdMappings mappings = new IdMappings();
+        if (item != null) {
+            mappings.itemId = getId(item, IdType.ITEM_ID);
+        }
+        if (property != null) {
+            mappings.propertyId = getId(property, IdType.PROPERTY_ID);
+        }
+        if (context != null) {
+            mappings.contextId = getId(context, IdType.CONTEXT_ID);
+        }
+        return mappings;
     }
 
     private Object decodeRecord(byte[] data) {
@@ -551,20 +561,20 @@ public class KvinParquet implements Kvin {
         return r;
     }
 
-    private FilterPredicate generateFetchFilter(Map<String, IdMapping> mappings) {
-        if (mappings.get("propertyMapping") != null) {
+    private FilterPredicate generateFetchFilter(IdMappings idMappings) {
+        if (idMappings.propertyId != 0L) {
             ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * 3);
-            keyBuffer.putLong(mappings.get("itemMapping").getId());
-            keyBuffer.putLong(mappings.get("propertyMapping").getId());
-            keyBuffer.putLong(mappings.get("contextMapping").getId());
+            keyBuffer.putLong(idMappings.itemId);
+            keyBuffer.putLong(idMappings.propertyId);
+            keyBuffer.putLong(idMappings.contextId);
             return eq(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array()));
         } else {
             ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES);
-            keyBuffer.putLong(mappings.get("itemMapping").getId());
+            keyBuffer.putLong(idMappings.itemId);
             return and(gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array())),
                     lt(FilterApi.binaryColumn("id"),
                             Binary.fromConstantByteArray(ByteBuffer.allocate(Long.BYTES)
-                                    .putLong(mappings.get("itemMapping").getId() + 1).array())));
+                                    .putLong(idMappings.itemId + 1).array())));
         }
     }
 
@@ -610,9 +620,8 @@ public class KvinParquet implements Kvin {
     private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
         try {
             // filters
-            Map<String, IdMapping> idMappings = getIdMapping(item, property, context);
-
-            if (idMappings.size() == 0) {
+            IdMappings idMappings = getIdMappings(item, property, context);
+            if (idMappings.itemId == 0L) {
                 return NiceIterator.emptyIterator();
             }
 
@@ -728,8 +737,7 @@ public class KvinParquet implements Kvin {
                         itemPropertyCount.put(property, 1);
                     }
 
-                    return new KvinTuple(URIs.createURI(idMappings.get("itemMapping").getValue()),
-                            URIs.createURI(property), URIs.createURI(idMappings.get("contextMapping").getValue()),
+                    return new KvinTuple(item, URIs.createURI(property), context,
                             internalTuple.time, internalTuple.seqNr, value);
 
                 }
@@ -767,13 +775,13 @@ public class KvinParquet implements Kvin {
         return false;
     }
 
-    private ArrayList<Path> getFilePath(Map<String, IdMapping> idMappings) {
+    private ArrayList<Path> getFilePath(IdMappings idMappings) {
 
         File archiveFolder = new File(archiveLocation);
         File[] yearWiseFolders = archiveFolder.listFiles();
         ArrayList<Path> matchedFiles = new ArrayList<>();
 
-        long itemId = idMappings.get("itemMapping").getId();
+        long itemId = idMappings.itemId;
 
         // matching ids with relevant parquet files
         if (yearWiseFolders != null) {
@@ -822,8 +830,8 @@ public class KvinParquet implements Kvin {
     public IExtendedIterator<URI> properties(URI item) {
         try {
             // filters
-            Map<String, IdMapping> idMappings = getIdMapping(item, null, Kvin.DEFAULT_CONTEXT);
-            if (idMappings.size() == 0) {
+            IdMappings idMappings = getIdMappings(item, null, Kvin.DEFAULT_CONTEXT);
+            if (idMappings.itemId == 0L) {
                 return NiceIterator.emptyIterator();
             }
             FilterPredicate filter = generateFetchFilter(idMappings);
@@ -902,7 +910,7 @@ public class KvinParquet implements Kvin {
     }
 
     // id enum
-    enum idType {
+    enum IdType {
         ITEM_ID,
         PROPERTY_ID,
         CONTEXT_ID
@@ -916,29 +924,6 @@ public class KvinParquet implements Kvin {
         String getValue();
 
         void setValue(String value);
-    }
-
-    static class MappingCacheKeyTuple<T> {
-        final T item, property, context;
-
-        MappingCacheKeyTuple(T a, T b, T c) {
-            this.item = a;
-            this.property = b;
-            this.context = c;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            MappingCacheKeyTuple<?> that = (MappingCacheKeyTuple<?>) o;
-            return Objects.equals(item, that.item) && Objects.equals(property, that.property) && Objects.equals(context, that.context);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(item, property, context);
-        }
     }
 
     public static class KvinTupleInternal {
