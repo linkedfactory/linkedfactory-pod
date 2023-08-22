@@ -626,24 +626,22 @@ public class KvinParquet implements Kvin {
             }
 
             FilterPredicate filter = generateFetchFilter(idMappings);
-            ArrayList<Path> dataFiles = getFilePath(idMappings);
-            ArrayList<ParquetReader<KvinTupleInternal>> readers = new ArrayList<>();
-
-            // data readers
-            for (Path path : dataFiles) {
-                HadoopInputFile inputFile = getFile(path);
-                readers.add(AvroParquetReader.<KvinTupleInternal>builder(inputFile)
-                        .withDataModel(reflectData)
-                        .useStatsFilter()
-                        .withFilter(FilterCompat.get(filter))
-                        .build());
-            }
+            List<Path> dataFiles = getFilePath(idMappings);
             return new NiceIterator<KvinTuple>() {
                 KvinTupleInternal internalTuple;
-                ParquetReader<KvinTupleInternal> reader = readers.get(0);
-                HashMap<String, Integer> itemPropertyCount = new HashMap<>();
-                int propertyCount = 0, readerCount = 0;
+                ParquetReader<KvinTupleInternal> reader;
+                Map<String, Integer> itemPropertyCount = new HashMap<>();
+                int propertyCount;
+                int fileIndex = -1;
                 String currentProperty, previousProperty;
+
+                {
+                    try {
+                        nextReader();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
 
                 @Override
                 public boolean hasNext() {
@@ -664,27 +662,21 @@ public class KvinParquet implements Kvin {
                             }
                         }
                         internalTuple = reader.read();
+
+                        if (internalTuple == null && fileIndex >= dataFiles.size() - 1) { // terminating condition
+                            closeCurrentReader();
+                            return false;
+                        } else if (internalTuple == null && fileIndex < dataFiles.size() - 1 && itemPropertyCount.get(currentProperty) >= limit && limit != 0) { // moving on to the next reader upon limit reach
+                            closeCurrentReader();
+                            nextReader();
+                            return hasNext();
+                        } else if (internalTuple == null && fileIndex < dataFiles.size() - 1) { // moving on to the next available reader
+                            closeCurrentReader();
+                            nextReader();
+                            internalTuple = reader.read();
+                        }
                     } catch (IOException e) {
                         throw new RuntimeException(e);
-                    }
-
-                    if (internalTuple == null && readerCount >= readers.size() - 1) { // terminating condition
-                        closeCurrentReader();
-                        return false;
-                    } else if (internalTuple == null && readerCount <= readers.size() - 1 && itemPropertyCount.get(currentProperty) >= limit && limit != 0) { // moving on to the next reader upon limit reach
-                        readerCount++;
-                        closeCurrentReader();
-                        reader = readers.get(readerCount);
-                        return hasNext();
-                    } else if (internalTuple == null && readerCount <= readers.size() - 1) { // moving on to the next available reader
-                        readerCount++;
-                        closeCurrentReader();
-                        reader = readers.get(readerCount);
-                        try {
-                            internalTuple = reader.read();
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
                     }
                     return true;
                 }
@@ -736,27 +728,32 @@ public class KvinParquet implements Kvin {
                     } else {
                         itemPropertyCount.put(property, 1);
                     }
-
                     return new KvinTuple(item, URIs.createURI(property), context,
                             internalTuple.time, internalTuple.seqNr, value);
-
                 }
 
                 @Override
                 public void close() {
-                    try {
-                        for (ParquetReader<?> reader : readers) {
-                            reader.close();
-                        }
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
+                   closeCurrentReader();
                 }
 
-                public void closeCurrentReader() {
-                    try {
-                        reader.close();
-                    } catch (IOException e) {
+                void nextReader() throws IOException {
+                    fileIndex++;
+                    HadoopInputFile inputFile = getFile(dataFiles.get(fileIndex));
+                    reader = AvroParquetReader.<KvinTupleInternal>builder(inputFile)
+                            .withDataModel(reflectData)
+                            .useStatsFilter()
+                            .withFilter(FilterCompat.get(filter))
+                            .build();
+                }
+
+                void closeCurrentReader() {
+                    if (reader != null) {
+                        try {
+                            reader.close();
+                        } catch (IOException e) {
+                        }
+                        reader = null;
                     }
                 }
             };
