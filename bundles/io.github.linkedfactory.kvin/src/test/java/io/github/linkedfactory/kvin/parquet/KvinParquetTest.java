@@ -79,7 +79,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
             assertNotNull(tuples);
-            assertEquals(tuples.toList().size(), 5);
+            assertEquals(5, tuples.toList().size());
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet shouldDoFetchWithLimit() method");
         }
