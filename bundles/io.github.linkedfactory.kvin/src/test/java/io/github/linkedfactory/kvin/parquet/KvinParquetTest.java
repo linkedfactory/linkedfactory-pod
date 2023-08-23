@@ -30,6 +30,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertTrue(new File(tempDir.getPath()).listFiles().length > 0);
 
         } catch (Exception e) {
+            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet put() method");
         }
     }
