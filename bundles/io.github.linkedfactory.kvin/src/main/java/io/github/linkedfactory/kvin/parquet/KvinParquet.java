@@ -203,17 +203,10 @@ public class KvinParquet implements Kvin {
                     renameFolder(dataFile, yearPartitionKey, itemIdCounter, prevTupleDate.get(Calendar.YEAR));
 
                 // updating new week partition id
-                long tempItemId = itemIdCounter, tempPropertyId = propertyIdCounter, tempContextId = contextIdCounter;
-                if (isNeedForIdChange(tuple, IdType.ITEM_ID)) {
-                    tempItemId++;
+                weekPartitionKey = itemIdCounter;
+                if (!itemMap.containsKey(tuple.item.toString())) {
+                    weekPartitionKey++;
                 }
-                if (isNeedForIdChange(tuple, IdType.PROPERTY_ID)) {
-                    tempPropertyId++;
-                }
-                if (isNeedForIdChange(tuple, IdType.CONTEXT_ID)) {
-                    tempContextId++;
-                }
-                weekPartitionKey = tempItemId;
 
                 // adding 1 week to the current tuple timestamp and marking the timestamp to consider as a change of the week.
                 nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
@@ -361,65 +354,50 @@ public class KvinParquet implements Kvin {
         return calendar;
     }
 
-    private byte[] generateId(KvinTuple currentTuple, ParquetWriter itemMappingWriter, ParquetWriter propertyMappingWriter, ParquetWriter contextMappingWriter) throws IOException {
-        long itemId, propertyId, contextId;
-
-        if (itemIdCounter == 0 || isNeedForIdChange(currentTuple, IdType.ITEM_ID)) {
-            itemId = ++itemIdCounter;
-            itemMap.put(currentTuple.item.toString(), itemId);
+    private byte[] generateId(KvinTuple currentTuple, ParquetWriter itemMappingWriter, ParquetWriter propertyMappingWriter, ParquetWriter contextMappingWriter) {
+        long itemId = itemMap.computeIfAbsent(currentTuple.item.toString(), key -> {
+            long newId = ++itemIdCounter;
             IdMapping mapping = new SimpleMapping();
-            mapping.setId(itemId);
-            mapping.setValue(currentTuple.item.toString());
-            itemMappingWriter.write(mapping);
-        } else {
-            itemId = itemMap.get(currentTuple.item.toString());
-        }
-
-        if (propertyIdCounter == 0 || isNeedForIdChange(currentTuple, IdType.PROPERTY_ID)) {
-            propertyId = ++propertyIdCounter;
-            propertyMap.put(currentTuple.property.toString(), propertyId);
+            mapping.setId(newId);
+            mapping.setValue(key);
+            try {
+                itemMappingWriter.write(mapping);
+            } catch (IOException e) {
+                throw new RuntimeException();
+            }
+            return newId;
+        });
+        long propertyId = propertyMap.computeIfAbsent(currentTuple.property.toString(), key -> {
+            long newId = ++propertyIdCounter;
             IdMapping mapping = new SimpleMapping();
-            mapping.setId(propertyId);
-            mapping.setValue(currentTuple.property.toString());
-            propertyMappingWriter.write(mapping);
-        } else {
-            propertyId = propertyMap.get(currentTuple.property.toString());
-        }
+            mapping.setId(newId);
+            mapping.setValue(key);
+            try {
+                propertyMappingWriter.write(mapping);
+            } catch (IOException e) {
+                throw new RuntimeException();
+            }
+            return newId;
+        });
 
-        if (contextIdCounter == 0 || isNeedForIdChange(currentTuple, IdType.CONTEXT_ID)) {
-            contextId = ++contextIdCounter;
-            contextMap.put(currentTuple.context.toString(), contextId);
+        long contextId = contextMap.computeIfAbsent(currentTuple.context.toString(), key -> {
+            long newId = ++contextIdCounter;
             IdMapping mapping = new SimpleMapping();
-            mapping.setId(contextId);
-            mapping.setValue(currentTuple.context.toString());
-            contextMappingWriter.write(mapping);
-        } else {
-            contextId = contextMap.get(currentTuple.context.toString());
-        }
+            mapping.setId(newId);
+            mapping.setValue(key);
+            try {
+                contextMappingWriter.write(mapping);
+            } catch (IOException e) {
+                throw new RuntimeException();
+            }
+            return newId;
+        });
 
         ByteBuffer idBuffer = ByteBuffer.allocate(Long.BYTES * 3);
         idBuffer.putLong(itemId);
         idBuffer.putLong(propertyId);
         idBuffer.putLong(contextId);
         return idBuffer.array();
-    }
-
-    private boolean isNeedForIdChange(KvinTuple currentTuple, IdType type) {
-        boolean result = false;
-
-        switch (type) {
-            case ITEM_ID:
-                result = !itemMap.containsKey(currentTuple.item.toString());
-                break;
-            case PROPERTY_ID:
-                result = !propertyMap.containsKey(currentTuple.property.toString());
-                break;
-            case CONTEXT_ID:
-                result = !contextMap.containsKey(currentTuple.context.toString());
-                break;
-
-        }
-        return result;
     }
 
     private byte[] encodeRecord(Object record) throws IOException {
