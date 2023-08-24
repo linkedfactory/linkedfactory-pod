@@ -35,11 +35,14 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
@@ -154,7 +157,6 @@ public class KvinParquet implements Kvin {
 
         //  state variables
         boolean writingToExistingYearFolder = false;
-        Long nextChunkTimestamp = null;
         Calendar prevTupleDate = null;
 
         // initial partition key
@@ -163,14 +165,14 @@ public class KvinParquet implements Kvin {
 
         for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
-            nextChunkTimestamp = initNextChunkTimestamp(nextChunkTimestamp, tuple);
+            Calendar tupleDate = getDate(tuple.time);
 
             // initializing writers to data and mapping file along with the initial folders.
             if (dataFile == null) {
                 int year = getDate(tuple.time).get(Calendar.YEAR);
                 // new year and week folder
                 if (!getExistingYears().contains(year)) {
-                    dataFile = new Path(archiveLocation + getDate(tuple.time).get(Calendar.YEAR), "temp/data.parquet");
+                    dataFile = new Path(archiveLocation + tupleDate.get(Calendar.YEAR), "temp/data.parquet");
                 } else {
                     // existing year and week folder
                     File existingYearFolder = getExistingYearFolder(year);
@@ -192,15 +194,17 @@ public class KvinParquet implements Kvin {
             }
 
             // partitioning file on week change
-            if (tuple.time >= nextChunkTimestamp) {
+            if (prevTupleDate != null && (prevTupleDate.get(Calendar.WEEK_OF_YEAR) != tupleDate.get(Calendar.WEEK_OF_YEAR) ||
+                    prevTupleDate.get(Calendar.YEAR) != tupleDate.get(Calendar.YEAR))) {
                 // renaming current week folder with partition key name. ( at the start, while writing into the current week folder data and mapping files, the folder name is set to "temp".)
                 // key: WeekMinItemPropertyContextId_WeekMaxItemPropertyContextId
-                renameWeekFolder(dataFile, weekPartitionKey, itemIdCounter, String.valueOf(prevTupleDate.get(Calendar.WEEK_OF_YEAR)));
+                renameWeekFolder(dataFile, weekPartitionKey, itemIdCounter, prevTupleDate.get(Calendar.WEEK_OF_YEAR));
 
                 // updating partition key of the folder with the max itemId of the newly added week folder
                 // key: YearMinItemPropertyContextId_YearMaxItemPropertyContextId
-                if (writingToExistingYearFolder)
-                    renameYearFolder(dataFile, yearPartitionKey, itemIdCounter, String.valueOf(prevTupleDate.get(Calendar.YEAR)));
+                if (writingToExistingYearFolder) {
+                    renameYearFolder(dataFile, yearPartitionKey, itemIdCounter, prevTupleDate.get(Calendar.YEAR));
+                }
 
                 // updating new week partition id
                 weekPartitionKey = itemIdCounter;
@@ -208,14 +212,11 @@ public class KvinParquet implements Kvin {
                     weekPartitionKey++;
                 }
 
-                // adding 1 week to the current tuple timestamp and marking the timestamp to consider as a change of the week.
-                nextChunkTimestamp = getNextChunkTimestamp(tuple.time);
-
                 // handling year change
-                if (prevTupleDate.get(Calendar.YEAR) != getDate(tuple.time).get(Calendar.YEAR)) {
+                if (prevTupleDate.get(Calendar.YEAR) != tupleDate.get(Calendar.YEAR)) {
                     // updating the partition key of the year folder if it was created without the partition key.
                     if (!writingToExistingYearFolder) {
-                        renameYearFolder(dataFile, yearPartitionKey, itemIdCounter, String.valueOf(prevTupleDate.get(Calendar.YEAR)));
+                        renameYearFolder(dataFile, yearPartitionKey, itemIdCounter, prevTupleDate.get(Calendar.YEAR));
                     }
                     yearPartitionKey = itemIdCounter;
                     writingToExistingYearFolder = false;
@@ -254,9 +255,9 @@ public class KvinParquet implements Kvin {
             prevTupleDate = getDate(tuple.time);
         }
         // updating last written week folder's partition key - for including last "WeekMaxItemPropertyContextId" for the week.
-        renameWeekFolder(dataFile, weekPartitionKey, itemIdCounter, String.valueOf(prevTupleDate.get(Calendar.WEEK_OF_YEAR)));
+        renameWeekFolder(dataFile, weekPartitionKey, itemIdCounter, prevTupleDate.get(Calendar.WEEK_OF_YEAR));
         // updating last written year folder's partition key - for including last "YearMaxItemPropertyContextId".
-        renameYearFolder(dataFile, yearPartitionKey, itemIdCounter, String.valueOf(prevTupleDate.get(Calendar.YEAR)));
+        renameYearFolder(dataFile, yearPartitionKey, itemIdCounter, prevTupleDate.get(Calendar.YEAR));
         itemMappingWriter.close();
         propertyMappingWriter.close();
         contextMappingWriter.close();
@@ -295,25 +296,14 @@ public class KvinParquet implements Kvin {
                 .build();
     }
 
-    private Long initNextChunkTimestamp(Long nextChunkTimestamp, KvinTuple currentTuple) {
-        // adding 1 week to the initial tuple timestamp and marking the timestamp to consider as a change of the week.
-        if (nextChunkTimestamp == null) nextChunkTimestamp = getNextChunkTimestamp(currentTuple.time);
-        return nextChunkTimestamp;
-    }
-
-    private long getNextChunkTimestamp(long currentTimestamp) {
-        // adds 1 week to the given timestamp
-        return currentTimestamp + 604800;
-    }
-
-    private void renameWeekFolder(Path file, long min, long max, String week) throws IOException {
+    private void renameWeekFolder(Path file, long min, long max, int week) throws IOException {
         java.nio.file.Path currentFolder = Paths.get(file.getParent().toString());
-        Files.move(currentFolder, currentFolder.resolveSibling(week + "_" + min + "-" + max));
+        Files.move(currentFolder, currentFolder.resolveSibling(String.format("%02d", week) + "_" + min + "-" + max));
     }
 
-    private void renameYearFolder(Path file, long min, long max, String year) throws IOException {
+    private void renameYearFolder(Path file, long min, long max, int year) throws IOException {
         java.nio.file.Path currentFolder = Paths.get(file.getParent().getParent().toString());
-        Files.move(currentFolder, currentFolder.resolveSibling(year + "_" + min + "-" + max));
+        Files.move(currentFolder, currentFolder.resolveSibling(String.format("%04d", year) + "_" + min + "-" + max));
     }
 
     private ArrayList<Integer> getExistingYears() {
@@ -727,40 +717,35 @@ public class KvinParquet implements Kvin {
     }
 
     private List<Path> getFilePath(IdMappings idMappings) {
-        File archiveFolder = new File(archiveLocation);
-        File[] yearWiseFolders = archiveFolder.listFiles();
-        List<Path> matchedFiles = new ArrayList<>();
-
         long itemId = idMappings.itemId;
-
-        // matching ids with relevant parquet files
-        if (yearWiseFolders != null) {
-            for (File yearFolder : yearWiseFolders) {
-                try {
-                    long[] minMax = toMinMaxId(yearFolder.getName());
-                    if (minMax == null) {
-                        continue;
-                    }
-                    if (itemId >= minMax[0] && itemId <= minMax[1]) {
-                        for (File weekFolder : new File(yearFolder.getPath()).listFiles()) {
-                            try {
-                                minMax = toMinMaxId(weekFolder.getName());
-                                if (minMax == null) {
-                                    continue;
-                                }
-                                if (itemId >= minMax[0] && itemId <= minMax[1]) {
-                                    Path path = new Path(weekFolder.getPath() + "/data.parquet");
-                                    matchedFiles.add(path);
-                                }
-                            } catch (RuntimeException ignored) {
-                            }
-                        }
-                    }
-                } catch (RuntimeException ignored) {
-                }
-            }
+	    Predicate<java.nio.file.Path> idFilter = p -> {
+		    long[] minMax = toMinMaxId(p.getFileName().toString());
+		    if (minMax == null) {
+			    return false;
+		    }
+		    return itemId >= minMax[0] && itemId <= minMax[1];
+	    };
+        try {
+            return Files.walk(Paths.get(archiveLocation), 1)
+		            .skip(1)
+                    .filter(idFilter)
+                    .sorted(Comparator.reverseOrder())
+		            .flatMap(parent -> {
+			            try {
+				            return Files.walk(parent, 1)
+						            .skip(1)
+						            .filter(idFilter)
+						            .sorted(Comparator.reverseOrder())
+						            // convert to Hadoop path
+						            .map(p -> new Path(p.toString() + "/data.parquet"));
+			            } catch (IOException e) {
+				            throw new RuntimeException(e);
+			            }
+		            })
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
-        return matchedFiles;
     }
 
     @Override
