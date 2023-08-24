@@ -30,7 +30,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertTrue(new File(tempDir.getPath()).listFiles().length > 0);
 
         } catch (Exception e) {
-            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet put() method");
         }
     }
@@ -51,7 +50,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertNotNull(tuples);
             assertTrue(tuples.toList().size() > 0);
         } catch (Exception e) {
-            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
@@ -66,7 +64,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertNotNull(tuples);
             assertTrue(tuples.toList().size() > 1);
         } catch (Exception e) {
-            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet shouldDoFetchWithLimit() method");
         }
     }
