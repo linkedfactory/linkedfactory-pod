@@ -510,6 +510,26 @@ public class KvinParquet implements Kvin {
         }
     }
 
+    private FilterPredicate generatePropertyFetchFilter(IdMappings idMappings) {
+        if (idMappings.propertyId != 0L) {
+            ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * 2);
+            keyBuffer.putLong(idMappings.itemId);
+            keyBuffer.putLong(idMappings.propertyId);
+
+            return and(gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array())),
+                    lt(FilterApi.binaryColumn("id"),
+                            Binary.fromConstantByteArray(ByteBuffer.allocate(Long.BYTES * 2)
+                                    .putLong(idMappings.itemId).putLong(idMappings.propertyId + 1).array())));
+        } else {
+            ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES);
+            keyBuffer.putLong(idMappings.itemId);
+            return and(gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array())),
+                    lt(FilterApi.binaryColumn("id"),
+                            Binary.fromConstantByteArray(ByteBuffer.allocate(Long.BYTES)
+                                    .putLong(idMappings.itemId + 1).array())));
+        }
+    }
+
     @Override
     public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
         return fetchInternal(item, property, context, null, null, limit);
@@ -767,7 +787,7 @@ public class KvinParquet implements Kvin {
                 idMappings.contextId = contextId;
             }
 
-            FilterPredicate filter = generateFetchFilter(idMappings);
+            FilterPredicate filter = generatePropertyFetchFilter(idMappings);
             List<Path> dataFiles = getFilePath(idMappings);
             ParquetReader<KvinTupleInternal> reader;
 
