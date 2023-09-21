@@ -29,12 +29,14 @@ import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.io.api.Binary;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Timestamp;
@@ -73,11 +75,6 @@ public class KvinParquet implements Kvin {
             .name("id").type().longType().noDefault()
             .name("value").type().stringType().noDefault().endRecord();
     long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0; // global id counter
-
-    // used by writer
-    Map<String, Long> itemMap = new HashMap<>();
-    Map<String, Long> propertyMap = new HashMap<>();
-    Map<String, Long> contextMap = new HashMap<>();
 
     // used by reader
     Cache<URI, Long> itemIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
@@ -141,7 +138,16 @@ public class KvinParquet implements Kvin {
         }
     }
 
+    class WriteContext {
+        // used by writer
+        Map<String, Long> itemMap = new HashMap<>();
+        Map<String, Long> propertyMap = new HashMap<>();
+        Map<String, Long> contextMap = new HashMap<>();
+    }
+
     private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
+        WriteContext writeContext = new WriteContext();
+
         // data writer
         Path dataFile = null;
         ParquetWriter<KvinTupleInternal> parquetDataWriter = null;
@@ -155,8 +161,7 @@ public class KvinParquet implements Kvin {
         Calendar prevTupleDate = null;
 
         // initial partition key
-        long initialPartitionKey = 1L;
-        long weekPartitionKey = initialPartitionKey, yearPartitionKey = initialPartitionKey;
+        long weekPartitionKey = 1L, yearPartitionKey = 1L;
 
         for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
@@ -183,9 +188,9 @@ public class KvinParquet implements Kvin {
                 contextMappingFile = new Path(archiveLocation, "metadata/contextMapping.parquet");
 
                 parquetDataWriter = getParquetDataWriter(dataFile);
-                itemMappingWriter = getParquetMappingWriter(itemMappingFile, idMappingSchema);
-                propertyMappingWriter = getParquetMappingWriter(propertyMappingFile, idMappingSchema);
-                contextMappingWriter = getParquetMappingWriter(contextMappingFile, idMappingSchema);
+                itemMappingWriter = getParquetMappingWriter(itemMappingFile);
+                propertyMappingWriter = getParquetMappingWriter(propertyMappingFile);
+                contextMappingWriter = getParquetMappingWriter(contextMappingFile);
             }
 
             // partitioning file on week change
@@ -203,7 +208,7 @@ public class KvinParquet implements Kvin {
 
                 // updating new week partition id
                 weekPartitionKey = itemIdCounter;
-                if (!itemMap.containsKey(tuple.item.toString())) {
+                if (!writeContext.itemMap.containsKey(tuple.item.toString())) {
                     weekPartitionKey++;
                 }
 
@@ -231,7 +236,8 @@ public class KvinParquet implements Kvin {
             }
 
             // writing mappings and values
-            internalTuple.setId(generateId(tuple, itemMappingWriter, propertyMappingWriter, contextMappingWriter));
+            internalTuple.setId(generateId(tuple, writeContext,
+                    itemMappingWriter, propertyMappingWriter, contextMappingWriter));
             internalTuple.setTime(tuple.time);
             internalTuple.setSeqNr(tuple.seqNr);
 
@@ -241,7 +247,8 @@ public class KvinParquet implements Kvin {
             internalTuple.setValueDouble(tuple.value instanceof Double ? (double) tuple.value : null);
             internalTuple.setValueString(tuple.value instanceof String ? (String) tuple.value : null);
             internalTuple.setValueBool(tuple.value instanceof Boolean ? (Boolean) tuple.value ? 1 : 0 : null);
-            if (tuple.value instanceof Record || tuple.value instanceof URI || tuple.value instanceof BigInteger || tuple.value instanceof BigDecimal || tuple.value instanceof Short) {
+            if (tuple.value instanceof Record || tuple.value instanceof URI || tuple.value instanceof BigInteger ||
+                    tuple.value instanceof BigDecimal || tuple.value instanceof Short) {
                 internalTuple.setValueObject(encodeRecord(tuple.value));
             } else {
                 internalTuple.setValueObject(null);
@@ -275,11 +282,11 @@ public class KvinParquet implements Kvin {
                 .build();
     }
 
-    private ParquetWriter<Object> getParquetMappingWriter(Path dataFile, Schema schema) throws IOException {
+    private ParquetWriter<Object> getParquetMappingWriter(Path dataFile) throws IOException {
         Configuration writerConf = new Configuration();
         writerConf.setInt("parquet.zstd.compressionLevel", 12);
         return AvroParquetWriter.builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
-                .withSchema(schema)
+                .withSchema(idMappingSchema)
                 .withConf(writerConf)
                 .withDictionaryEncoding(true)
                 .withCompressionCodec(CompressionCodecName.ZSTD)
@@ -339,8 +346,12 @@ public class KvinParquet implements Kvin {
         return calendar;
     }
 
-    private byte[] generateId(KvinTuple currentTuple, ParquetWriter itemMappingWriter, ParquetWriter propertyMappingWriter, ParquetWriter contextMappingWriter) {
-        long itemId = itemMap.computeIfAbsent(currentTuple.item.toString(), key -> {
+    private byte[] generateId(KvinTuple currentTuple,
+                              WriteContext writeContext,
+                              ParquetWriter itemMappingWriter,
+                              ParquetWriter propertyMappingWriter,
+                              ParquetWriter contextMappingWriter) {
+        long itemId = writeContext.itemMap.computeIfAbsent(currentTuple.item.toString(), key -> {
             long newId = ++itemIdCounter;
             IdMapping mapping = new SimpleMapping();
             mapping.setId(newId);
@@ -352,7 +363,7 @@ public class KvinParquet implements Kvin {
             }
             return newId;
         });
-        long propertyId = propertyMap.computeIfAbsent(currentTuple.property.toString(), key -> {
+        long propertyId = writeContext.propertyMap.computeIfAbsent(currentTuple.property.toString(), key -> {
             long newId = ++propertyIdCounter;
             IdMapping mapping = new SimpleMapping();
             mapping.setId(newId);
@@ -365,7 +376,7 @@ public class KvinParquet implements Kvin {
             return newId;
         });
 
-        long contextId = contextMap.computeIfAbsent(currentTuple.context.toString(), key -> {
+        long contextId = writeContext.contextMap.computeIfAbsent(currentTuple.context.toString(), key -> {
             long newId = ++contextIdCounter;
             IdMapping mapping = new SimpleMapping();
             mapping.setId(newId);
@@ -425,7 +436,7 @@ public class KvinParquet implements Kvin {
                 idCache = contextIdCache;
                 break;
         }
-        Long id = null;
+        Long id;
         try {
             id = idCache.get(entity, () -> {
                 // read from files
