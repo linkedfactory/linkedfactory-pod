@@ -30,7 +30,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertTrue(new File(tempDir.getPath()).listFiles().length > 0);
 
         } catch (Exception e) {
-            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet put() method");
         }
     }
@@ -51,7 +50,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertNotNull(tuples);
             assertTrue(tuples.toList().size() > 0);
         } catch (Exception e) {
-            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
@@ -64,9 +62,8 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, null, Kvin.DEFAULT_CONTEXT, limit);
             assertNotNull(tuples);
-            assertTrue(tuples.toList().size() > 1);
+            assertEquals(29, tuples.toList().size());
         } catch (Exception e) {
-            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet shouldDoFetchWithLimit() method");
         }
     }
@@ -92,7 +89,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1);
             IExtendedIterator<URI> properties = kvinParquet.properties(item);
             assertNotNull(properties);
-            assertTrue(properties.toList().size() > 0);
+            assertEquals(29, properties.toList().size());
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet properties() method");
         }
