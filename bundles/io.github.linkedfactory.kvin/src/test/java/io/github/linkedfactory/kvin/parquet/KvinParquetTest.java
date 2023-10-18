@@ -38,7 +38,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
     @AfterClass
     public static void cleanup() throws IOException {
-        //FileUtils.deleteDirectory(new File(tempDir.getPath()));
+        FileUtils.deleteDirectory(new File(tempDir.getPath()));
     }
 
     @Test
@@ -47,16 +47,39 @@ public class KvinParquetTest extends KvinParquetTestBase {
         URI item1 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9000);
         URI item2 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9001);
         URI item3 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
+        URI item4 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9002);
+        URI item5 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9003);
 
+        // inserting as a new week
         ArrayList<KvinTuple> tuples = new ArrayList<>();
         tuples.add(new KvinTuple(item1, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022611, 0, 11.00));
         propCount++;
-        tuples.add(new KvinTuple(item1, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022612, 0,12.00));
+        tuples.add(new KvinTuple(item1, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022612, 0, 12.00));
         propCount++;
         tuples.add(new KvinTuple(item2, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022613, 0, 13.00));
         propCount++;
         tuples.add(new KvinTuple(item3, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022614, 0, 14.00));
         kvinParquet.put(tuples);
+
+        // inserting as existing week
+        tuples.clear();
+        tuples.add(new KvinTuple(item4, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022615, 0, 13.00));
+        propCount++;
+        tuples.add(new KvinTuple(item5, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022616, 0, 14.00));
+        kvinParquet.put(tuples);
+
+        File[] archiveFolders = tempDir.listFiles();
+        for (File folder : archiveFolders) {
+            if (folder.getName().startsWith("2023")) {
+                File[] subFolders = folder.listFiles();
+                for (File subFolder : subFolders) {
+                    if (subFolder.getName().startsWith("41")) {
+                        assertTrue(subFolder.getName().startsWith("41_"));
+                        assertEquals(3, subFolder.listFiles().length);
+                    }
+                }
+            }
+        }
     }
 
     @Test
