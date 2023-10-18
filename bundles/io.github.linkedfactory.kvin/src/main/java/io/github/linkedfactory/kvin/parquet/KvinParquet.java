@@ -29,10 +29,7 @@ import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.io.api.Binary;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -156,12 +153,12 @@ public class KvinParquet implements Kvin {
 
         // initial partition key
         long weekPartitionKey = 1L, yearPartitionKey = 1L;
+        int mappingSequenceNumber = getMappingSequenceNumber(new Path(archiveLocation, "metadata"));
+        mappingSequenceNumber++;
 
         for (KvinTuple tuple : tuples) {
             KvinTupleInternal internalTuple = new KvinTupleInternal();
             Calendar tupleDate = getDate(tuple.time);
-            int mappingSequenceNumber = getMappingSequenceNumber(new Path(archiveLocation, "metadata"));
-            mappingSequenceNumber++;
 
             // initializing writers to data and mapping file along with the initial folders.
             if (dataFile == null) {
@@ -186,7 +183,6 @@ public class KvinParquet implements Kvin {
                         yearPartitionKey = Long.parseLong(existingYearFolder.getName().split("_")[1].split("-")[0]);
                     }
                     writingToExistingYearFolder = true;
-
                 }
 
                 itemMappingFile = new Path(archiveLocation, "metadata/itemMapping_" + mappingSequenceNumber + ".parquet");
@@ -523,8 +519,14 @@ public class KvinParquet implements Kvin {
                         break;
                 }
                 FilterPredicate filter = eq(FilterApi.binaryColumn("value"), Binary.fromString(entity.toString()));
-                Path mappingFile = new Path(this.archiveLocation + "metadata/" + name + "Mapping.parquet");
-                IdMapping mapping = fetchMappingIds(mappingFile, filter);
+                Path metadataFolder = new Path(this.archiveLocation + "metadata/");
+                File[] mappingFiles = new File(metadataFolder.toString()).listFiles((file, s) -> s.startsWith(name + "Mapping"));
+
+                IdMapping mapping = null;
+                for (File mappingFile : mappingFiles) {
+                    mapping = fetchMappingIds(new Path(mappingFile.getPath()), filter);
+                    if (mapping != null) break;
+                }
                 return mapping != null ? mapping.getId() : 0L;
             });
         } catch (ExecutionException e) {
@@ -638,8 +640,15 @@ public class KvinParquet implements Kvin {
         if (cachedProperty == null) {
             try {
                 FilterPredicate filter = eq(FilterApi.longColumn("id"), propertyId);
-                Path mappingFile = new Path(archiveLocation + "metadata/propertyMapping.parquet");
-                IdMapping propertyMapping = fetchMappingIds(mappingFile, filter);
+                Path metadataFolder = new Path(this.archiveLocation + "metadata/");
+                File[] mappingFiles = new File(metadataFolder.toString()).listFiles((file, s) -> s.startsWith("propertyMapping"));
+                IdMapping propertyMapping = null;
+
+                for (File mappingFile : mappingFiles) {
+                    propertyMapping = fetchMappingIds(new Path(mappingFile.getPath()), filter);
+                    if (propertyMapping != null) break;
+                }
+
                 cachedProperty = propertyMapping.getValue();
                 propertyIdReverseLookUpCache.put(propertyId, propertyMapping.getValue());
             } catch (IOException e) {
@@ -820,6 +829,7 @@ public class KvinParquet implements Kvin {
             }
             return itemId >= minMax[0] && itemId <= minMax[1];
         };
+
         try {
             return Files.walk(Paths.get(archiveLocation), 1)
                     .skip(1)
@@ -831,8 +841,18 @@ public class KvinParquet implements Kvin {
                                     .skip(1)
                                     .filter(idFilter)
                                     .sorted(Comparator.reverseOrder())
-                                    // convert to Hadoop path
-                                    .map(p -> new Path(p.toString() + "/data.parquet"));
+                                    .flatMap(weekParent -> {
+                                        try {
+                                            return Files.walk(weekParent, 1)
+                                                    .skip(1)
+                                                    .filter(path -> path.getFileName().toString().startsWith("data_"))
+                                                    .sorted(Comparator.reverseOrder())
+                                                    // convert to Hadoop path
+                                                    .map(p -> new Path(p.toString()));
+                                        } catch (IOException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    });
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }

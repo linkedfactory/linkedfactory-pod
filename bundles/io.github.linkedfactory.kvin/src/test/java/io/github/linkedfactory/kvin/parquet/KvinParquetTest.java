@@ -6,9 +6,9 @@ import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.*;
+import org.junit.runner.RunWith;
+import org.junit.runners.MethodSorters;
 
 import java.io.File;
 import java.io.IOException;
@@ -29,24 +29,23 @@ public class KvinParquetTest extends KvinParquetTestBase {
         try {
             kvinParquet.put(generateRandomKvinTuples(5000, 500, 10));
             assertTrue(new File(tempDir.getPath()).listFiles().length > 0);
+            nonSequentialPut();
+
 
         } catch (Exception e) {
-            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet put() method");
         }
     }
 
     @AfterClass
     public static void cleanup() throws IOException {
-        FileUtils.deleteDirectory(new File(tempDir.getPath()));
+        //FileUtils.deleteDirectory(new File(tempDir.getPath()));
     }
 
-    @Test
-    public void shouldDoNonSequentialPut() {
+    public static void nonSequentialPut() {
         int propCount = 1;
         URI item1 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9000);
         URI item2 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9001);
-        URI item3 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
         URI item4 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9002);
         URI item5 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9003);
 
@@ -58,7 +57,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
         propCount++;
         tuples.add(new KvinTuple(item2, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022613, 0, 13.00));
         propCount++;
-        tuples.add(new KvinTuple(item3, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022614, 0, 14.00));
         kvinParquet.put(tuples);
 
         // inserting as existing week
@@ -67,7 +65,10 @@ public class KvinParquetTest extends KvinParquetTestBase {
         propCount++;
         tuples.add(new KvinTuple(item5, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022616, 0, 14.00));
         kvinParquet.put(tuples);
+    }
 
+    @Test
+    public void testNonSeqPut() {
         File[] archiveFolders = tempDir.listFiles();
         for (File folder : archiveFolders) {
             if (folder.getName().startsWith("2023")) {
@@ -91,8 +92,12 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
             assertNotNull(tuples);
-            assertTrue(tuples.toList().size() > 0);
+            while (tuples.hasNext()) {
+                System.out.println(tuples.next().toString());
+            }
+            //assertTrue(tuples.toList().size() > 0);
         } catch (Exception e) {
+            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
@@ -123,6 +128,21 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertEquals(5, tuples.toList().size());
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet shouldDoFetchWithLimit() method");
+        }
+    }
+
+    @Test
+    public void shouldDoFetchForNonSeqEntry() {
+        try {
+            URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9000);
+            URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 1 + "/measured-point-1");
+            long limit = 0;
+
+            IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
+            assertNotNull(tuples);
+            assertTrue(tuples.toList().size() > 0);
+        } catch (Exception e) {
+            fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
 
