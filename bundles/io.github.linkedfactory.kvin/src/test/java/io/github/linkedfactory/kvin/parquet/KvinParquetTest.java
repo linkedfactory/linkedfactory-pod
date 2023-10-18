@@ -13,6 +13,7 @@ import org.junit.Test;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 
 import static org.junit.Assert.*;
 
@@ -30,13 +31,32 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertTrue(new File(tempDir.getPath()).listFiles().length > 0);
 
         } catch (Exception e) {
+            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet put() method");
         }
     }
 
     @AfterClass
     public static void cleanup() throws IOException {
-        FileUtils.deleteDirectory(new File(tempDir.getPath()));
+        //FileUtils.deleteDirectory(new File(tempDir.getPath()));
+    }
+
+    @Test
+    public void shouldDoNonSequentialPut() {
+        int propCount = 1;
+        URI item1 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9000);
+        URI item2 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 9001);
+        URI item3 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
+
+        ArrayList<KvinTuple> tuples = new ArrayList<>();
+        tuples.add(new KvinTuple(item1, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022611, 0, 11.00));
+        propCount++;
+        tuples.add(new KvinTuple(item1, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022612, 0,12.00));
+        propCount++;
+        tuples.add(new KvinTuple(item2, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022613, 0, 13.00));
+        propCount++;
+        tuples.add(new KvinTuple(item3, URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propCount + "/measured-point-1"), Kvin.DEFAULT_CONTEXT, 1697022614, 0, 14.00));
+        kvinParquet.put(tuples);
     }
 
     @Test

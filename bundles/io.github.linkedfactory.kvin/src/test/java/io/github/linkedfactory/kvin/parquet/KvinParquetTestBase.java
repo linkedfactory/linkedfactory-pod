@@ -76,6 +76,7 @@ public class KvinParquetTestBase {
                 if (tupleCount % 1000 == 0) {
                     //System.out.println("wrote " + tupleCount + " tuples");
                 }
+                ++time;
                 return new KvinTuple(currentItem, property, context, time, seqNr, value);
             }
 
