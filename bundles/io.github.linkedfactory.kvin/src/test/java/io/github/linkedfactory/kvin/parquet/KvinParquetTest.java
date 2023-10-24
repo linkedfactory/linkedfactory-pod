@@ -11,14 +11,16 @@ import org.junit.runner.RunWith;
 import org.junit.runners.MethodSorters;
 
 import java.io.File;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.*;
 
 public class KvinParquetTest extends KvinParquetTestBase {
-    static Kvin kvinParquet;
+    static KvinParquet kvinParquet;
     static File tempDir;
 
     @BeforeClass
@@ -92,10 +94,8 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
             assertNotNull(tuples);
-            while (tuples.hasNext()) {
-                System.out.println(tuples.next().toString());
-            }
-            //assertTrue(tuples.toList().size() > 0);
+            assertTrue(tuples.toList().size() > 0);
+            tuples.close();
         } catch (Exception e) {
             e.printStackTrace();
             fail("Something went wrong while testing KvinParquet fetch() method");
@@ -111,6 +111,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, null, Kvin.DEFAULT_CONTEXT, limit);
             assertNotNull(tuples);
             assertEquals(29, tuples.toList().size());
+            tuples.close();
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet shouldDoFetchWithLimit() method");
         }
@@ -126,6 +127,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
             assertNotNull(tuples);
             assertEquals(5, tuples.toList().size());
+            tuples.close();
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet shouldDoFetchWithLimit() method");
         }
@@ -141,9 +143,18 @@ public class KvinParquetTest extends KvinParquetTestBase {
             IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
             assertNotNull(tuples);
             assertTrue(tuples.toList().size() > 0);
+            tuples.close();
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet fetch() method");
         }
+    }
+
+    @Test
+    public void mappingFileCompactionTest() throws InterruptedException {
+        kvinParquet.startCompactionWorker(0, 2, TimeUnit.SECONDS);
+        Thread.sleep(1000);
+        File[] metadataFiles = new File(kvinParquet.archiveLocation + "metadata").listFiles((file, s) -> s.endsWith(".parquet"));
+        assertEquals(3, metadataFiles.length);
     }
 
     @Test
@@ -153,6 +164,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
             IExtendedIterator<URI> properties = kvinParquet.properties(item);
             assertNotNull(properties);
             assertEquals(29, properties.toList().size());
+            properties.close();
         } catch (Exception e) {
             fail("Something went wrong while testing KvinParquet properties() method");
         }

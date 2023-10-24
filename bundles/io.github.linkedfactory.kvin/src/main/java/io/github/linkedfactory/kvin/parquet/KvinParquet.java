@@ -38,7 +38,10 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.util.*;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -77,11 +80,24 @@ public class KvinParquet implements Kvin {
     Cache<URI, Long> itemIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
     Cache<URI, Long> propertyIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
     Cache<URI, Long> contextIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
-
     WriteContext writeContext = new WriteContext();
+
+    // Lock
+    ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+    Lock writeLock = readWriteLock.writeLock();
+    Lock readLock = readWriteLock.readLock();
+
+    // compaction scheduler
+    ScheduledExecutorService scheduledExecutorService = new ScheduledThreadPoolExecutor(1);
+    Future<?> compactionTaskfuture;
+
 
     public KvinParquet(String archiveLocation) {
         this.archiveLocation = archiveLocation;
+    }
+
+    public void startCompactionWorker(long initialDelay, long period, TimeUnit unit) {
+        compactionTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new CompactionWorker(archiveLocation, this), initialDelay, period, unit);
     }
 
     private IdMapping fetchMappingIds(Path mappingFile, FilterPredicate filter) throws IOException {
@@ -138,6 +154,7 @@ public class KvinParquet implements Kvin {
     }
 
     private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
+        writeLock.lock();
         // data writer
         Path dataFile = null;
         ParquetWriter<KvinTupleInternal> parquetDataWriter = null;
@@ -284,7 +301,7 @@ public class KvinParquet implements Kvin {
         propertyMappingWriter.close();
         contextMappingWriter.close();
         parquetDataWriter.close();
-
+        writeLock.unlock();
     }
 
     private ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
@@ -658,8 +675,9 @@ public class KvinParquet implements Kvin {
         return cachedProperty;
     }
 
-    private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) {
+    private synchronized IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) {
         try {
+            readLock.lock();
             // filters
             IdMappings idMappings = getIdMappings(item, property, context);
             if (idMappings.itemId == 0L) {
@@ -771,6 +789,7 @@ public class KvinParquet implements Kvin {
                 @Override
                 public void close() {
                     closeCurrentReader();
+                    readLock.unlock();
                 }
 
                 void nextReader() throws IOException {
@@ -915,7 +934,8 @@ public class KvinParquet implements Kvin {
     }
 
     @Override
-    public IExtendedIterator<URI> properties(URI item) {
+    public synchronized IExtendedIterator<URI> properties(URI item) {
+        readLock.lock();
         return new NiceIterator<>() {
             KvinTupleMetadata currentTuple = getFirstTuple(item, null, null, null);
             KvinTupleMetadata previousTuple = null;
@@ -941,6 +961,7 @@ public class KvinParquet implements Kvin {
             @Override
             public void close() {
                 super.close();
+                readLock.unlock();
             }
         };
     }
@@ -952,6 +973,9 @@ public class KvinParquet implements Kvin {
 
     @Override
     public void close() {
+        readLock.unlock();
+        writeLock.unlock();
+        compactionTaskfuture.cancel(false);
     }
 
     // id enum
