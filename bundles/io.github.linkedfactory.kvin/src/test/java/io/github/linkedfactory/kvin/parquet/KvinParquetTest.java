@@ -7,11 +7,8 @@ import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
 import org.junit.*;
-import org.junit.runner.RunWith;
-import org.junit.runners.MethodSorters;
 
 import java.io.File;
-import java.io.FilenameFilter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -41,7 +38,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
     @AfterClass
     public static void cleanup() throws IOException {
-        //FileUtils.deleteDirectory(new File(tempDir.getPath()));
+        FileUtils.deleteDirectory(new File(tempDir.getPath()));
     }
 
     public static void nonSequentialPut() {
@@ -69,20 +66,31 @@ public class KvinParquetTest extends KvinParquetTestBase {
         kvinParquet.put(tuples);
     }
 
-    @Test
-    public void testNonSeqPut() {
+
+    private File getNonSeqInsertFolder() {
+        File nonSeqInsertFolder = null;
+
         File[] archiveFolders = tempDir.listFiles();
         for (File folder : archiveFolders) {
             if (folder.getName().startsWith("2023")) {
                 File[] subFolders = folder.listFiles();
                 for (File subFolder : subFolders) {
                     if (subFolder.getName().startsWith("41")) {
-                        assertTrue(subFolder.getName().startsWith("41_"));
-                        assertEquals(3, subFolder.listFiles().length);
+                        nonSeqInsertFolder = subFolder;
+                        break;
                     }
                 }
             }
+            if (nonSeqInsertFolder != null) break;
         }
+        return nonSeqInsertFolder;
+    }
+
+    @Test
+    public void testNonSeqPut() {
+        File nonSeqFolder = getNonSeqInsertFolder();
+        assertTrue(nonSeqFolder.getName().startsWith("41_"));
+        assertEquals(3, nonSeqFolder.listFiles().length);
     }
 
     @Test
@@ -97,7 +105,6 @@ public class KvinParquetTest extends KvinParquetTestBase {
             assertTrue(tuples.toList().size() > 0);
             tuples.close();
         } catch (Exception e) {
-            e.printStackTrace();
             fail("Something went wrong while testing KvinParquet fetch() method");
         }
     }
@@ -151,10 +158,16 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
     @Test
     public void mappingFileCompactionTest() throws InterruptedException {
-        kvinParquet.startCompactionWorker(0, 2, TimeUnit.SECONDS);
+        kvinParquet.startCompactionWorker(0, 5, TimeUnit.SECONDS);
         Thread.sleep(1000);
         File[] metadataFiles = new File(kvinParquet.archiveLocation + "metadata").listFiles((file, s) -> s.endsWith(".parquet"));
         assertEquals(3, metadataFiles.length);
+
+        File nonSeqFolder = getNonSeqInsertFolder();
+        File[] dataFiles = nonSeqFolder.listFiles((file, s) -> s.endsWith(".parquet"));
+        assertEquals(1, dataFiles.length);
+
+        kvinParquet.stopCompactionWorker();
     }
 
     @Test

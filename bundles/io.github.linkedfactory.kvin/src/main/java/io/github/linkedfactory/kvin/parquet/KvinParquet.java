@@ -100,6 +100,10 @@ public class KvinParquet implements Kvin {
         compactionTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new CompactionWorker(archiveLocation, this), initialDelay, period, unit);
     }
 
+    public void stopCompactionWorker() {
+        compactionTaskfuture.cancel(true);
+    }
+
     private IdMapping fetchMappingIds(Path mappingFile, FilterPredicate filter) throws IOException {
         IdMapping id;
         HadoopInputFile inputFile = getFile(mappingFile);
