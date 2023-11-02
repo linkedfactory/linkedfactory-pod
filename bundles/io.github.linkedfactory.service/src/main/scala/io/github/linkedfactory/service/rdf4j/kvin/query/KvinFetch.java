@@ -1,11 +1,10 @@
-package io.github.linkedfactory.service.rdf4j.query;
+package io.github.linkedfactory.service.rdf4j.kvin.query;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.algebra.QueryModelVisitor;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;

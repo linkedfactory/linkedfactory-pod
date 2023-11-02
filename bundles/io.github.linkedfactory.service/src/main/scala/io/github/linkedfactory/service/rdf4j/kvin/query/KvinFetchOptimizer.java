@@ -1,4 +1,4 @@
-package io.github.linkedfactory.service.rdf4j.query;
+package io.github.linkedfactory.service.rdf4j.kvin.query;
 
 import java.util.ArrayList;
 import java.util.Iterator;

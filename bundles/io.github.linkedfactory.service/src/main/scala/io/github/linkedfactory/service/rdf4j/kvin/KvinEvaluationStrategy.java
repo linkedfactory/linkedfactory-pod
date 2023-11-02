@@ -1,17 +1,17 @@
-package io.github.linkedfactory.service.rdf4j;
+package io.github.linkedfactory.service.rdf4j.kvin;
 
-import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.compareAndBind;
-import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.findFirstFetch;
-import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.toKommaUri;
-import static io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil.toRdfValue;
+import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.compareAndBind;
+import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.findFirstFetch;
+import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.toKommaUri;
+import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.toRdfValue;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
-import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
-import io.github.linkedfactory.service.rdf4j.query.KvinFetchEvaluationStep;
-import io.github.linkedfactory.service.rdf4j.query.ParameterScanner;
-import io.github.linkedfactory.service.rdf4j.query.Parameters;
+import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
+import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetchEvaluationStep;
+import io.github.linkedfactory.service.rdf4j.kvin.query.ParameterScanner;
+import io.github.linkedfactory.service.rdf4j.kvin.query.Parameters;
 import net.enilink.vocab.rdf.RDF;
 import java.util.Arrays;
 import java.util.Iterator;

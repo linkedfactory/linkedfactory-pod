@@ -1,4 +1,4 @@
-package io.github.linkedfactory.service.rdf4j;
+package io.github.linkedfactory.service.rdf4j.kvin;
 
 import java.util.NoSuchElementException;
 

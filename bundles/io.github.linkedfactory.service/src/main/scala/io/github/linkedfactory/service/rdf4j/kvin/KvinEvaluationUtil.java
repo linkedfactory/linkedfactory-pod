@@ -1,11 +1,11 @@
-package io.github.linkedfactory.service.rdf4j;
+package io.github.linkedfactory.service.rdf4j.kvin;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
-import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.BNodeWithValue;
-import io.github.linkedfactory.service.rdf4j.query.KvinFetch;
-import io.github.linkedfactory.service.rdf4j.query.Parameters;
+import io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationStrategy.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
+import io.github.linkedfactory.service.rdf4j.kvin.query.Parameters;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -25,14 +25,13 @@ import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
-import org.eclipse.rdf4j.query.algebra.Projection;
 import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
 import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
 
-import static io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.*;
+import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationStrategy.*;
 
 public class KvinEvaluationUtil {
 

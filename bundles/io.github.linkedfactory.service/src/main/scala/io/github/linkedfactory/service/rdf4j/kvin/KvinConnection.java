@@ -1,9 +1,9 @@
-package io.github.linkedfactory.service.rdf4j;
+package io.github.linkedfactory.service.rdf4j.kvin;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
-import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationStrategy.BNodeWithValue;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.ILiteral;
 import net.enilink.komma.core.IReference;

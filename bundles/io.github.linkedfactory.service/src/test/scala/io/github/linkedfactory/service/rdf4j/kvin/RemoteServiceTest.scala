@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.github.linkedfactory.service.rdf4j.test
+package io.github.linkedfactory.service.rdf4j.kvin
 
 import io.github.linkedfactory.kvin.http.KvinHttp
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.kvin.util.JsonFormatParser
 import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
-import io.github.linkedfactory.service.rdf4j.KvinFederatedService
+import io.github.linkedfactory.service.rdf4j.kvin.KvinFederatedService
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}
 import org.eclipse.rdf4j.model.Literal

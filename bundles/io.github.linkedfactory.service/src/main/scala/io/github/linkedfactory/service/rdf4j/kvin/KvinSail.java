@@ -1,21 +1,17 @@
-package io.github.linkedfactory.service.rdf4j;
+package io.github.linkedfactory.service.rdf4j.kvin;
 
 import io.github.linkedfactory.kvin.Kvin;
 import net.enilink.komma.core.KommaModule;
 import net.enilink.komma.em.ManagerCompositionModule;
-import net.enilink.komma.em.util.KommaCoreModule;
 import net.enilink.komma.literals.LiteralConverter;
 import net.enilink.komma.rdf4j.RDF4JValueConverter;
 
 import java.util.Locale;
 
 import org.eclipse.rdf4j.model.ValueFactory;
-import org.eclipse.rdf4j.sail.NotifyingSail;
-import org.eclipse.rdf4j.sail.NotifyingSailConnection;
 import org.eclipse.rdf4j.sail.Sail;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
-import org.eclipse.rdf4j.sail.helpers.NotifyingSailWrapper;
 import org.eclipse.rdf4j.sail.helpers.SailWrapper;
 
 import com.google.inject.AbstractModule;

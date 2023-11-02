@@ -1,4 +1,4 @@
-package io.github.linkedfactory.service.rdf4j;
+package io.github.linkedfactory.service.rdf4j.kvin;
 
 import net.enilink.commons.iterator.WrappedIterator;
 import java.util.Iterator;

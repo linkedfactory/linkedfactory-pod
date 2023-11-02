@@ -2,7 +2,7 @@ package io.github.linkedfactory.service.komma;
 
 import io.github.linkedfactory.kvin.DelegatingKvin;
 import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.service.rdf4j.KvinSail;
+import io.github.linkedfactory.service.rdf4j.kvin.KvinSail;
 import net.enilink.composition.annotations.Iri;
 import net.enilink.komma.model.MODELS;
 import net.enilink.komma.model.rdf4j.MemoryModelSetSupport;

@@ -1,7 +1,7 @@
-package io.github.linkedfactory.service.rdf4j.query;
+package io.github.linkedfactory.service.rdf4j.kvin.query;
 
-import io.github.linkedfactory.service.rdf4j.KvinEvaluationStrategy;
-import io.github.linkedfactory.service.rdf4j.KvinEvaluationUtil;
+import io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationStrategy;
+import io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil;
 
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.query.BindingSet;

@@ -1,4 +1,4 @@
-package io.github.linkedfactory.service.rdf4j.query;
+package io.github.linkedfactory.service.rdf4j.kvin.query;
 
 import org.eclipse.rdf4j.query.algebra.Var;
 

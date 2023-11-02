@@ -4,7 +4,7 @@ import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.parquet.KvinParquet;
-import io.github.linkedfactory.service.rdf4j.KvinFederatedService;
+import io.github.linkedfactory.service.rdf4j.kvin.KvinFederatedService;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
@@ -25,7 +25,6 @@ import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
-import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;

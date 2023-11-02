@@ -1,7 +1,7 @@
-package io.github.linkedfactory.service.rdf4j.query;
+package io.github.linkedfactory.service.rdf4j.kvin.query;
 
-import io.github.linkedfactory.service.rdf4j.KVIN;
-import scala.xml.PrettyPrinter.Para;
+import io.github.linkedfactory.service.rdf4j.kvin.KVIN;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

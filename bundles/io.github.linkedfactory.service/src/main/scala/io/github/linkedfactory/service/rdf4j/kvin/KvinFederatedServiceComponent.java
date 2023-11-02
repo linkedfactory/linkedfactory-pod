@@ -1,8 +1,8 @@
-package io.github.linkedfactory.service.rdf4j;
+package io.github.linkedfactory.service.rdf4j.kvin;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.http.KvinHttp;
-import io.github.linkedfactory.service.rdf4j.functions.DateTimeFunction;
+import io.github.linkedfactory.service.rdf4j.kvin.functions.DateTimeFunction;
 import net.enilink.komma.model.IModelSet;
 import java.util.Optional;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
