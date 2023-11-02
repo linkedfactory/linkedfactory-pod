@@ -1,13 +1,9 @@
 package io.github.linkedfactory.service.rdf4j.kvin;
 
-import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.compareAndBind;
-import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.findFirstFetch;
-import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.toKommaUri;
-import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.toRdfValue;
-
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.service.rdf4j.common.Conversions.BNodeWithValue;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
@@ -15,32 +11,17 @@ import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetchEvaluationStep;
 import io.github.linkedfactory.service.rdf4j.kvin.query.ParameterScanner;
 import io.github.linkedfactory.service.rdf4j.kvin.query.Parameters;
 import net.enilink.vocab.rdf.RDF;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
-
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
-import org.eclipse.rdf4j.common.iteration.Iteration;
-import org.eclipse.rdf4j.common.iteration.IterationWrapper;
 import org.eclipse.rdf4j.common.iteration.SingletonIteration;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
-import org.eclipse.rdf4j.model.impl.SimpleBNode;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
-import org.eclipse.rdf4j.query.algebra.Join;
-import org.eclipse.rdf4j.query.algebra.LeftJoin;
-import org.eclipse.rdf4j.query.algebra.StatementPattern;
-import org.eclipse.rdf4j.query.algebra.TupleExpr;
-import org.eclipse.rdf4j.query.algebra.Var;
+import org.eclipse.rdf4j.query.algebra.*;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
@@ -48,6 +29,13 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext.Minimal;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
+
+import java.util.*;
+
+import static io.github.linkedfactory.service.rdf4j.common.Conversions.toRdfValue;
+import static io.github.linkedfactory.service.rdf4j.common.query.Helpers.compareAndBind;
+import static io.github.linkedfactory.service.rdf4j.common.query.Helpers.findFirstFetch;
+import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.toKommaUri;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
@@ -199,7 +187,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
             return bindingSet -> new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
         } else {
             // strictly use lateral joins if left arg contains a KVIN fetch as right arg probably depends on the results
-            KvinFetch fetch = findFirstFetch(join.getLeftArg());
+            KvinFetch fetch = (KvinFetch) findFirstFetch(join.getLeftArg());
             boolean lateral = fetch != null;
             // do not use lateral join if left fetch requires a binding from the right join argument
             if (lateral) {
@@ -270,21 +258,5 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
     public ValueFactory getValueFactory() {
         return vf;
-    }
-
-    static class BNodeWithValue extends SimpleBNode {
-
-        private static final String uniqueIdPrefix = UUID.randomUUID().toString().replace("-", "");
-        private static final AtomicLong uniqueIdSuffix = new AtomicLong();
-        Object value;
-
-        BNodeWithValue(Object value) {
-            super(generateId());
-            this.value = value;
-        }
-
-        static String generateId() {
-            return uniqueIdPrefix + uniqueIdSuffix.incrementAndGet();
-        }
     }
 }

@@ -2,37 +2,29 @@ package io.github.linkedfactory.service.rdf4j.kvin;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
-import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.service.rdf4j.common.Conversions.BNodeWithValue;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
-import io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationStrategy.BNodeWithValue;
-import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.kvin.query.Parameters;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
-import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.util.ArrayDeque;
-import java.util.List;
-import java.util.NoSuchElementException;
-
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
-import org.eclipse.rdf4j.common.iteration.SingletonIteration;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
-import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
-import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
-import org.eclipse.rdf4j.query.algebra.helpers.TupleExprs;
 
-import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationStrategy.*;
+import java.util.NoSuchElementException;
+
+import static io.github.linkedfactory.service.rdf4j.common.Conversions.getLongValue;
+import static io.github.linkedfactory.service.rdf4j.common.Conversions.toRdfValue;
+import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationStrategy.getVarValue;
 
 public class KvinEvaluationUtil {
 
@@ -40,40 +32,6 @@ public class KvinEvaluationUtil {
 
     public KvinEvaluationUtil(Kvin kvin) {
         this.kvin = kvin;
-    }
-
-    public static long getLongValue(Value v, long defaultValue) {
-        if (v instanceof Literal) {
-            return ((Literal) v).longValue();
-        }
-        return defaultValue;
-    }
-
-    static Value toRdfValue(Object value, ValueFactory vf) {
-        Value rdfValue;
-        if (value instanceof URI) {
-            String valueStr = ((URI) value).isRelative() ? "r:" + value : value.toString();
-            rdfValue = vf.createIRI(valueStr);
-        } else if (value instanceof Double) {
-            rdfValue = vf.createLiteral((Double) value);
-        } else if (value instanceof Float) {
-            rdfValue = vf.createLiteral((Float) value);
-        } else if (value instanceof Integer) {
-            rdfValue = vf.createLiteral((Integer) value);
-        } else if (value instanceof Long) {
-            rdfValue = vf.createLiteral((Long) value);
-        } else if (value instanceof BigDecimal) {
-            rdfValue = vf.createLiteral((BigDecimal) value);
-        } else if (value instanceof BigInteger) {
-            rdfValue = vf.createLiteral((BigInteger) value);
-        } else if (value instanceof Record) {
-            return new BNodeWithValue(value);
-        } else if (value instanceof Object[] || value instanceof List<?>) {
-            return new BNodeWithValue(value);
-        } else {
-            rdfValue = vf.createLiteral(value.toString());
-        }
-        return rdfValue;
     }
 
     public static net.enilink.komma.core.URI toKommaUri(Value value) {
@@ -279,41 +237,5 @@ public class KvinEvaluationUtil {
             }
         };
         return iteration;
-    }
-
-    public static KvinFetch findFirstFetch(TupleExpr t) {
-        TupleExpr n = t;
-        ArrayDeque queue = null;
-        do {
-            if (n instanceof KvinFetch) {
-                return (KvinFetch) n;
-            }
-
-            if (n instanceof Service) {
-                return null;
-            }
-
-            List<TupleExpr> children = TupleExprs.getChildren(n);
-            if (!children.isEmpty()) {
-                if (queue == null) {
-                    queue = new ArrayDeque();
-                }
-                queue.addAll(children);
-            }
-            n = queue != null ? (TupleExpr) queue.poll() : null;
-        } while (n != null);
-        return null;
-    }
-
-    public static CloseableIteration<BindingSet, QueryEvaluationException>  compareAndBind(BindingSet bs, Var variable, Value valueToBind) {
-        Value varValue = getVarValue(variable, bs);
-        if (varValue == null) {
-            CompositeBindingSet newBs = new CompositeBindingSet(bs);
-            newBs.addBinding(variable.getName(), valueToBind);
-            return new SingletonIteration<>(newBs);
-        } else if (varValue.equals(valueToBind)) {
-            return new SingletonIteration<>(bs);
-        }
-        return new EmptyIteration<>();
     }
 }
