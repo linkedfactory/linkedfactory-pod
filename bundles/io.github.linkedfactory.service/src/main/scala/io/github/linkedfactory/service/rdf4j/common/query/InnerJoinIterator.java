@@ -1,4 +1,4 @@
-package io.github.linkedfactory.service.rdf4j.kvin;
+package io.github.linkedfactory.service.rdf4j.common.query;
 
 import java.util.NoSuchElementException;
 
@@ -12,7 +12,7 @@ import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 
-public class KvinJoinIterator extends LookAheadIteration<BindingSet, QueryEvaluationException> {
+public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvaluationException> {
 
 	/*-----------*
 	 * Variables *
@@ -21,17 +21,15 @@ public class KvinJoinIterator extends LookAheadIteration<BindingSet, QueryEvalua
 	private final EvaluationStrategy strategy;
 
 	private final CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
-
-	private volatile CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
-
 	private final QueryEvaluationStep preparedJoinArg;
+	private volatile CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
 
 	/*--------------*
 	 * Constructors *
 	 *--------------*/
 
-	public KvinJoinIterator(EvaluationStrategy strategy, QueryEvaluationStep leftPrepared,
-		QueryEvaluationStep rightPrepared, BindingSet bindings, boolean lateral) throws QueryEvaluationException {
+	public InnerJoinIterator(EvaluationStrategy strategy, QueryEvaluationStep leftPrepared,
+	                         QueryEvaluationStep rightPrepared, BindingSet bindings, boolean lateral) throws QueryEvaluationException {
 		this.strategy = strategy;
 
 		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = leftPrepared.evaluate(bindings);

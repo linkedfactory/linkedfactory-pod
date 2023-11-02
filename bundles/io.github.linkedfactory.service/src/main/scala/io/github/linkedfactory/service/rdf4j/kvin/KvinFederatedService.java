@@ -1,10 +1,11 @@
 package io.github.linkedfactory.service.rdf4j.kvin;
 
 import io.github.linkedfactory.kvin.Kvin;
+import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetchOptimizer;
 import io.github.linkedfactory.service.rdf4j.kvin.query.ParameterScanner;
-import io.github.linkedfactory.service.rdf4j.kvin.query.QueryJoinOptimizer;
-import io.github.linkedfactory.service.rdf4j.kvin.query.QueryModelPruner;
+import io.github.linkedfactory.service.rdf4j.common.query.QueryJoinOptimizer;
+import io.github.linkedfactory.service.rdf4j.common.query.QueryModelPruner;
 
 import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.common.iteration.*;

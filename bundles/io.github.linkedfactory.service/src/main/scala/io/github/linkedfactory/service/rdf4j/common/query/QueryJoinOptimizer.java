@@ -8,7 +8,7 @@
  *
  * SPDX-License-Identifier: BSD-3-Clause
  *******************************************************************************/
-package io.github.linkedfactory.service.rdf4j.kvin.query;
+package io.github.linkedfactory.service.rdf4j.common.query;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -246,7 +246,7 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 		protected List<TupleExpr> getFetches(List<TupleExpr> expressions) {
 			List<TupleExpr> fetches = new ArrayList<>();
 			for (TupleExpr expr : expressions) {
-				if (expr instanceof KvinFetch) {
+				if (expr instanceof Fetch) {
 					fetches.add(expr);
 				}
 			}

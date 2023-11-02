@@ -8,6 +8,8 @@ import static io.github.linkedfactory.service.rdf4j.kvin.KvinEvaluationUtil.toRd
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
+import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetchEvaluationStep;
 import io.github.linkedfactory.service.rdf4j.kvin.query.ParameterScanner;
@@ -207,12 +209,12 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                     .anyMatch(name -> assured.contains(name));
                 if (leftDependsOnRight) {
                     // swap left and right argument
-                    return bindingSet -> new KvinJoinIterator(KvinEvaluationStrategy.this,
+                    return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this,
                         rightPrepared, leftPrepared, bindingSet, true
                     );
                 }
             }
-            return bindingSet -> new KvinJoinIterator(KvinEvaluationStrategy.this,
+            return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this,
                 leftPrepared, rightPrepared, bindingSet, lateral
             );
         }
@@ -282,16 +284,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
         }
 
         static String generateId() {
-            String var10001 = uniqueIdPrefix;
-            return var10001 + uniqueIdSuffix.incrementAndGet();
-        }
-    }
-
-    // IterationWrapper has a protected constructor
-    class KvinIterationWrapper<E, X extends Exception> extends IterationWrapper<E, X> {
-
-        KvinIterationWrapper(Iteration<? extends E, ? extends X> iter) {
-            super(iter);
+            return uniqueIdPrefix + uniqueIdSuffix.incrementAndGet();
         }
     }
 }

@@ -5,12 +5,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.github.linkedfactory.service.rdf4j.common.query.Fetch;
 import org.eclipse.rdf4j.query.algebra.QueryModelVisitor;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.UnaryTupleOperator;
 
-public class KvinFetch extends UnaryTupleOperator implements TupleExpr {
+public class KvinFetch extends UnaryTupleOperator implements Fetch {
     final Parameters params;
     final Set<String> requiredBindings;
 
