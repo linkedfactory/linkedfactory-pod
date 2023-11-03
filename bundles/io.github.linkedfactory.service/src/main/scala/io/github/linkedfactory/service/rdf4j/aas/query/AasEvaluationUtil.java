@@ -35,7 +35,8 @@ public class AasEvaluationUtil {
 		final Value subjValue = getVarValue(stmt.getSubjectVar(), bs);
 		final Value predValue = getVarValue(predVar, bs);
 
-		if (subjValue != null && AAS.SHELLS.equals(predValue)) {
+		if (subjValue != null &&
+				(AAS.SHELLS.equals(predValue) || AAS.SUBMODELS.equals(predValue))) {
 			final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<>() {
 				IExtendedIterator<?> it;
 
@@ -43,7 +44,11 @@ public class AasEvaluationUtil {
 				public boolean hasNext() throws QueryEvaluationException {
 					if (it == null && !isClosed()) {
 						try {
-							it = client.shells(subjValue.stringValue());
+							if (AAS.SHELLS.equals(predValue)) {
+								it = client.shells(subjValue.stringValue());
+							} else if (AAS.SUBMODELS.equals(predValue)) {
+								it = client.submodels(subjValue.stringValue());
+							}
 						} catch (URISyntaxException e) {
 							throw new QueryEvaluationException(e);
 						} catch (IOException e) {

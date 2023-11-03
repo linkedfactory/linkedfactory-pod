@@ -24,11 +24,43 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 public class AasClient implements Closeable {
+	static class LazyIterator<T> extends NiceIterator<T> {
+		Supplier<IExtendedIterator<T>> factory;
+		IExtendedIterator<T> it;
+
+		public LazyIterator(Supplier<IExtendedIterator<T>> factory) {
+			this.factory = factory;
+		}
+
+		@Override
+		public boolean hasNext() {
+			if (it == null && factory != null) {
+				it = factory.get();
+			}
+			return it.hasNext();
+		}
+
+		@Override
+		public T next() {
+			ensureHasNext();
+			return it.next();
+		}
+
+		@Override
+		public void close() {
+			if (it != null) {
+				it.close();
+				it = null;
+			}
+			factory = null;
+		}
+	}
+
 	ObjectMapper mapper = new ObjectMapper();
 	CloseableHttpClient httpClient;
-	JsonFactory jsonFactory = new JsonFactory();
 
 	public AasClient() {
 		this.httpClient = createHttpClient();
@@ -39,8 +71,19 @@ public class AasClient implements Closeable {
 	}
 
 	public IExtendedIterator<Object> shells(String endpoint) throws URISyntaxException, IOException {
+		return query(endpoint, "shells", null);
+	}
+
+	public IExtendedIterator<Object> submodels(String endpoint) throws URISyntaxException, IOException {
+		return query(endpoint, "submodels", null);
+	}
+
+	protected IExtendedIterator<Object> query(String endpoint, String collection, String cursor) throws URISyntaxException, IOException {
 		URIBuilder uriBuilder = new URIBuilder(endpoint);
-		uriBuilder.setPath("shells");
+		uriBuilder.setPath(collection);
+		if (cursor != null) {
+			uriBuilder.setParameter("cursor", cursor);
+		}
 		java.net.URI getRequestUri = uriBuilder.build();
 
 		// sending get request to the endpoint
@@ -51,9 +94,26 @@ public class AasClient implements Closeable {
 			return NiceIterator.emptyIterator();
 		}
 		JsonNode node = mapper.readTree(entity.getContent());
+		JsonNode pagingMetaData = node.get("paging_metadata");
+		JsonNode cursorNode = null;
+		if (pagingMetaData != null) {
+			cursorNode = pagingMetaData.get("cursor");
+		}
 		JsonNode result = node.get("result");
 		if (result != null && result.isArray()) {
-			return WrappedIterator.create(result.iterator()).mapWith(n -> nodeToValue(n));
+			IExtendedIterator<Object> it = WrappedIterator.create(result.iterator()).mapWith(n -> nodeToValue(n));
+			if (cursorNode != null) {
+				String nextCursor = cursorNode.asText();
+				// use lazy iterator here to ensure that request is only executed when required
+				it = it.andThen(new LazyIterator<>(() -> {
+					try {
+						return query(endpoint, collection, nextCursor);
+					} catch (Exception e) {
+						throw new RuntimeException(e);
+					}
+				}));
+			}
+			return it;
 		}
 		return NiceIterator.emptyIterator();
 	}

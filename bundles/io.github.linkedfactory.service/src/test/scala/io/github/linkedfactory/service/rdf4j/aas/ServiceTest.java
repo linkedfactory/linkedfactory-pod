@@ -42,11 +42,27 @@ public class ServiceTest {
 	}
 
 	@Test
-	public void basicTest() {
+	public void shellsTest() {
 		try (RepositoryConnection conn = repository.getConnection()) {
 			String query = "select * where { " +
 					"service <aas:> { " +
 					"{ select ?shell { <https://v3.admin-shell-io.com> <aas:shells> ?shell } limit 1 } ?shell <r:submodels> ?sm . ?sm (!<:>)* ?s . ?s ?p ?o " +
+					"} " +
+					"}";
+			try (TupleQueryResult result = conn.prepareTupleQuery(query).evaluate()) {
+				while (result.hasNext()) {
+					System.out.println(result.next());
+				}
+			}
+		}
+	}
+
+	@Test
+	public void submodelsTest() {
+		try (RepositoryConnection conn = repository.getConnection()) {
+			String query = "select (count(*) as ?cnt) where { " +
+					"service <aas:> { " +
+					"<https://v3.admin-shell-io.com> <aas:submodels> ?sm . " + // ?sm (!<:>)* ?s . ?s ?p ?o " +
 					"} " +
 					"}";
 			try (TupleQueryResult result = conn.prepareTupleQuery(query).evaluate()) {

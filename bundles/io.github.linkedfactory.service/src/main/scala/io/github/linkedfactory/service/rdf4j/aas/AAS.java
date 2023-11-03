@@ -9,4 +9,5 @@ public interface AAS {
 	IRI PARAMS = SimpleValueFactory.getInstance().createIRI(AAS + "params");
 
 	IRI SHELLS = SimpleValueFactory.getInstance().createIRI(AAS + "shells");
+	IRI SUBMODELS = SimpleValueFactory.getInstance().createIRI(AAS + "submodels");
 }
