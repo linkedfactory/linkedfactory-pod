@@ -3,7 +3,7 @@ package io.github.linkedfactory.service.rdf4j.kvin;
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
-import io.github.linkedfactory.service.rdf4j.common.Conversions.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
@@ -121,23 +121,39 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
             }
         } else if (data instanceof Object[] || data instanceof List<?>) {
             List<?> list = data instanceof Object[] ? Arrays.asList((Object[]) data) : (List<?>) data;
-            Value predValue = getVarValue(stmt.getPredicateVar(), bs);
+            Var predVar = stmt.getPredicateVar();
+            Value predValue = getVarValue(predVar, bs);
             if (predValue == null) {
                 Iterator<?> it = list.iterator();
-                Var variable = stmt.getObjectVar();
+                Value objValue = getVarValue(stmt.getObjectVar(), bs);
                 return new AbstractCloseableIteration<>() {
+                    BindingSet next = null;
                     int i = 0;
 
                     @Override
                     public boolean hasNext() throws QueryEvaluationException {
-                        return it.hasNext();
+                        while (next == null && it.hasNext()) {
+                            Value elementValue = toRdfValue(it.next(), vf);
+                            if (objValue == null || objValue.equals(elementValue)) {
+                                QueryBindingSet newBs = new QueryBindingSet(bs);
+                                newBs.addBinding(predVar.getName(), vf.createIRI(RDF.NAMESPACE, "_" + (++i)));
+                                newBs.addBinding(stmt.getObjectVar().getName(), elementValue);
+                                next = newBs;
+                            } else {
+                                continue;
+                            }
+                        }
+                        return next != null;
                     }
 
                     @Override
                     public BindingSet next() throws QueryEvaluationException {
-                        QueryBindingSet newBs = new QueryBindingSet(bs);
-                        newBs.addBinding(variable.getName(), toRdfValue(vf.createIRI(RDF.NAMESPACE, "_" + (++i)), vf));
-                        return newBs;
+                        if (next == null) {
+                            throw new QueryEvaluationException("No such element");
+                        }
+                        BindingSet result = next;
+                        next = null;
+                        return result;
                     }
 
                     @Override

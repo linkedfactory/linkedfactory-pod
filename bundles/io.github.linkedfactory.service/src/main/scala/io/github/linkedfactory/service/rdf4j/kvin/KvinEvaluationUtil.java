@@ -2,7 +2,7 @@ package io.github.linkedfactory.service.rdf4j.kvin;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
-import io.github.linkedfactory.service.rdf4j.common.Conversions.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.kvin.query.Parameters;
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -198,7 +198,7 @@ public class KvinEvaluationUtil {
 
                     CompositeBindingSet newBs = new CompositeBindingSet(bs);
                     if (!objectVar.isConstant() && !bs.hasBinding(objectVar.getName())) {
-                        Value objectValue = new BNodeWithValue(tuple);
+                        Value objectValue = BNodeWithValue.create(tuple);
                         newBs.addBinding(objectVar.getName(), objectValue);
                     }
                     if (!predVar.isConstant()) {
