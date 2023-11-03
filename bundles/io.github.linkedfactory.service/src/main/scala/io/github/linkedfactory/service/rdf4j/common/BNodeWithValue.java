@@ -6,13 +6,13 @@ import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class BNodeWithValue extends SimpleBNode {
+public class BNodeWithValue extends SimpleBNode implements HasValue {
 
 	private static WeakHashMap<Object, BNodeWithValue> cache = new WeakHashMap<>();
 
 	private static final String uniqueIdPrefix = UUID.randomUUID().toString().replace("-", "");
 	private static final AtomicLong uniqueIdSuffix = new AtomicLong();
-	public final Object value;
+	protected final Object value;
 
 	private BNodeWithValue(Object value) {
 		super(generateId());
@@ -27,5 +27,10 @@ public class BNodeWithValue extends SimpleBNode {
 		synchronized (cache) {
 			return cache.computeIfAbsent(value, v -> new BNodeWithValue(v));
 		}
+	}
+
+	@Override
+	public Object getValue() {
+		return value;
 	}
 }

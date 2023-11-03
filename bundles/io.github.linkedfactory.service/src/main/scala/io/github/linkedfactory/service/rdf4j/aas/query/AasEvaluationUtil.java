@@ -3,6 +3,7 @@ package io.github.linkedfactory.service.rdf4j.aas.query;
 import io.github.linkedfactory.service.rdf4j.aas.AAS;
 import io.github.linkedfactory.service.rdf4j.aas.AasClient;
 import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.common.Conversions;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import net.enilink.commons.iterator.IExtendedIterator;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
@@ -63,7 +64,7 @@ public class AasEvaluationUtil {
 					Object value = it.next();
 					CompositeBindingSet newBs = new CompositeBindingSet(bs);
 					if (!objectVar.isConstant() && !bs.hasBinding(objectVar.getName())) {
-						Value objectValue = BNodeWithValue.create(value);
+						Value objectValue = AAS.toRdfValue(value, vf);
 						newBs.addBinding(objectVar.getName(), objectValue);
 					}
 					return newBs;

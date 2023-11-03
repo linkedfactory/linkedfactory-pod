@@ -4,6 +4,7 @@ import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.common.HasValue;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
@@ -66,7 +67,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
             return new EmptyIteration<>();
         }
 
-        Object data = subjectValue instanceof BNodeWithValue ? ((BNodeWithValue) subjectValue).value : null;
+        Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : null;
         if (data instanceof KvinTuple) {
             KvinTuple tuple = (KvinTuple) data;
             Value predValue = getVarValue(stmt.getPredicateVar(), bs);

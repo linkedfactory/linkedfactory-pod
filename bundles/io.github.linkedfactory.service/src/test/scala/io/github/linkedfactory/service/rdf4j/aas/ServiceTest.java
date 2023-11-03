@@ -1,6 +1,5 @@
 package io.github.linkedfactory.service.rdf4j.aas;
 
-import io.github.linkedfactory.service.rdf4j.kvin.KvinFederatedService;
 import org.eclipse.rdf4j.query.TupleQueryResult;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
@@ -46,7 +45,8 @@ public class ServiceTest {
 		try (RepositoryConnection conn = repository.getConnection()) {
 			String query = "select * where { " +
 					"service <aas:> { " +
-					"{ select ?shell { <https://v3.admin-shell-io.com> <aas:shells> ?shell } limit 1 } ?shell <r:submodels> ?sm . ?sm (!<:>)* ?s . ?s ?p ?o " +
+					"{ select ?shell { <https://v3.admin-shell-io.com> <aas:shells> ?shell } limit 1 } " +
+					"?shell <r:submodels> ?list . ?list !<:> ?sm . ?sm ?p ?o " +
 					"} " +
 					"}";
 			try (TupleQueryResult result = conn.prepareTupleQuery(query).evaluate()) {

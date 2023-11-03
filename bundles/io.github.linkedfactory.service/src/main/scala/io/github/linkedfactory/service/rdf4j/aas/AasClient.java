@@ -1,6 +1,5 @@
 package io.github.linkedfactory.service.rdf4j.aas;
 
-import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.linkedfactory.kvin.Record;
@@ -70,15 +69,15 @@ public class AasClient implements Closeable {
 		return new HttpGet(endpoint);
 	}
 
-	public IExtendedIterator<Object> shells(String endpoint) throws URISyntaxException, IOException {
+	public IExtendedIterator<Record> shells(String endpoint) throws URISyntaxException, IOException {
 		return query(endpoint, "shells", null);
 	}
 
-	public IExtendedIterator<Object> submodels(String endpoint) throws URISyntaxException, IOException {
+	public IExtendedIterator<Record> submodels(String endpoint) throws URISyntaxException, IOException {
 		return query(endpoint, "submodels", null);
 	}
 
-	protected IExtendedIterator<Object> query(String endpoint, String collection, String cursor) throws URISyntaxException, IOException {
+	protected IExtendedIterator<Record> query(String endpoint, String collection, String cursor) throws URISyntaxException, IOException {
 		URIBuilder uriBuilder = new URIBuilder(endpoint);
 		uriBuilder.setPath(collection);
 		if (cursor != null) {
@@ -101,7 +100,7 @@ public class AasClient implements Closeable {
 		}
 		JsonNode result = node.get("result");
 		if (result != null && result.isArray()) {
-			IExtendedIterator<Object> it = WrappedIterator.create(result.iterator()).mapWith(n -> nodeToValue(n));
+			IExtendedIterator<Record> it = WrappedIterator.create(result.iterator()).mapWith(n -> (Record) nodeToValue(n));
 			if (cursorNode != null) {
 				String nextCursor = cursorNode.asText();
 				// use lazy iterator here to ensure that request is only executed when required

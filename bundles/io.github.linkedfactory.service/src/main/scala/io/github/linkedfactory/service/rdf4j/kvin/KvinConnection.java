@@ -4,6 +4,7 @@ import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.common.HasValue;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.ILiteral;
 import net.enilink.komma.core.IReference;
@@ -93,8 +94,8 @@ public class KvinConnection extends SailConnectionWrapper {
 		int seqNr = 0;
 		Object value = null;
 		if (rdfValue.isBNode()) {
-			if (rdfValue instanceof BNodeWithValue && ((BNodeWithValue) rdfValue).value instanceof KvinTuple) {
-				KvinTuple t = (KvinTuple) ((BNodeWithValue) rdfValue).value;
+			if (rdfValue instanceof HasValue && ((HasValue) rdfValue).getValue() instanceof KvinTuple) {
+				KvinTuple t = (KvinTuple) ((HasValue) rdfValue).getValue();
 				value = t.value;
 				time = t.time;
 				seqNr = t.seqNr;

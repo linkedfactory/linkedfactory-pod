@@ -1,8 +1,10 @@
 package io.github.linkedfactory.service.rdf4j.aas.query;
 
 import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.service.rdf4j.aas.AAS;
 import io.github.linkedfactory.service.rdf4j.aas.AasClient;
 import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
+import io.github.linkedfactory.service.rdf4j.common.HasValue;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
@@ -62,7 +64,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 			return new EmptyIteration<>();
 		}
 
-		Object data = subjectValue instanceof BNodeWithValue ? ((BNodeWithValue) subjectValue).value : null;
+		Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : null;
 		if (data instanceof Record) {
 			Value predValue = getVarValue(stmt.getPredicateVar(), bs);
 			if (predValue != null) {
@@ -76,7 +78,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				Record r = ((Record) data).first(predicate);
 				if (r != Record.NULL) {
 					Var objectVar = stmt.getObjectVar();
-					Value newValue = toRdfValue(r.getValue(), vf);
+					Value newValue = AAS.toRdfValue(r.getValue(), vf);
 					return compareAndBind(bs, objectVar, newValue);
 				}
 			} else {
@@ -92,8 +94,8 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 					public BindingSet next() throws QueryEvaluationException {
 						Record r = it.next();
 						CompositeBindingSet newBs = new CompositeBindingSet(bs);
-						newBs.addBinding(stmt.getPredicateVar().getName(), toRdfValue(r.getProperty(), vf));
-						newBs.addBinding(variable.getName(), toRdfValue(r.getValue(), vf));
+						newBs.addBinding(stmt.getPredicateVar().getName(), AAS.toRdfValue(r.getProperty(), vf));
+						newBs.addBinding(variable.getName(), AAS.toRdfValue(r.getValue(), vf));
 						return newBs;
 					}
 
@@ -117,7 +119,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 					@Override
 					public boolean hasNext() throws QueryEvaluationException {
 						while (next == null && it.hasNext()) {
-							Value elementValue = toRdfValue(it.next(), vf);
+							Value elementValue = AAS.toRdfValue(it.next(), vf);
 							if (objValue == null || objValue.equals(elementValue)) {
 								QueryBindingSet newBs = new QueryBindingSet(bs);
 								newBs.addBinding(predVar.getName(), vf.createIRI(RDF.NAMESPACE, "_" + (++i)));
@@ -150,7 +152,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				if (localName.matches("_[0-9]+")) {
 					int index = Integer.parseInt(localName.substring(1));
 					if (index > 0 && index <= list.size()) {
-						return compareAndBind(bs, stmt.getObjectVar(), toRdfValue(list.get(index - 1), vf));
+						return compareAndBind(bs, stmt.getObjectVar(), AAS.toRdfValue(list.get(index - 1), vf));
 					}
 				}
 			}
