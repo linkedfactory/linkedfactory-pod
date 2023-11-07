@@ -19,49 +19,17 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
 import java.util.function.Supplier;
 
 public class AasClient implements Closeable {
-	static class LazyIterator<T> extends NiceIterator<T> {
-		Supplier<IExtendedIterator<T>> factory;
-		IExtendedIterator<T> it;
-
-		public LazyIterator(Supplier<IExtendedIterator<T>> factory) {
-			this.factory = factory;
-		}
-
-		@Override
-		public boolean hasNext() {
-			if (it == null && factory != null) {
-				it = factory.get();
-			}
-			return it.hasNext();
-		}
-
-		@Override
-		public T next() {
-			ensureHasNext();
-			return it.next();
-		}
-
-		@Override
-		public void close() {
-			if (it != null) {
-				it.close();
-				it = null;
-			}
-			factory = null;
-		}
-	}
-
+	final String endpoint;
 	ObjectMapper mapper = new ObjectMapper();
 	CloseableHttpClient httpClient;
 
-	public AasClient() {
+	public AasClient(String endpoint) {
+		this.endpoint = endpoint;
 		this.httpClient = createHttpClient();
 	}
 
@@ -69,17 +37,25 @@ public class AasClient implements Closeable {
 		return new HttpGet(endpoint);
 	}
 
-	public IExtendedIterator<Record> shells(String endpoint) throws URISyntaxException, IOException {
-		return query(endpoint, "shells", null);
+	public IExtendedIterator<Record> shells() throws URISyntaxException, IOException {
+		return query(endpoint, "shells", null, null);
 	}
 
-	public IExtendedIterator<Record> submodels(String endpoint) throws URISyntaxException, IOException {
-		return query(endpoint, "submodels", null);
+	public IExtendedIterator<Record> submodels() throws URISyntaxException, IOException {
+		return query(endpoint, "submodels", null, null);
 	}
 
-	protected IExtendedIterator<Record> query(String endpoint, String collection, String cursor) throws URISyntaxException, IOException {
+	public IExtendedIterator<Record> submodel(String id) throws URISyntaxException, IOException {
+		return query(endpoint, "submodels/" + Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)),
+				null, null);
+	}
+
+	protected IExtendedIterator<Record> query(String endpoint, String path, Map<String, String> params, String cursor) throws URISyntaxException, IOException {
 		URIBuilder uriBuilder = new URIBuilder(endpoint);
-		uriBuilder.setPath(collection);
+		uriBuilder.setPath(path);
+		if (params != null) {
+			params.forEach((k, v) -> uriBuilder.setParameter(k, v));
+		}
 		if (cursor != null) {
 			uriBuilder.setParameter("cursor", cursor);
 		}
@@ -93,28 +69,29 @@ public class AasClient implements Closeable {
 			return NiceIterator.emptyIterator();
 		}
 		JsonNode node = mapper.readTree(entity.getContent());
-		JsonNode pagingMetaData = node.get("paging_metadata");
-		JsonNode cursorNode = null;
-		if (pagingMetaData != null) {
-			cursorNode = pagingMetaData.get("cursor");
-		}
 		JsonNode result = node.get("result");
 		if (result != null && result.isArray()) {
+			JsonNode pagingMetaData = node.get("paging_metadata");
+			JsonNode cursorNode = null;
+			if (pagingMetaData != null) {
+				cursorNode = pagingMetaData.get("cursor");
+			}
 			IExtendedIterator<Record> it = WrappedIterator.create(result.iterator()).mapWith(n -> (Record) nodeToValue(n));
 			if (cursorNode != null) {
 				String nextCursor = cursorNode.asText();
 				// use lazy iterator here to ensure that request is only executed when required
 				it = it.andThen(new LazyIterator<>(() -> {
 					try {
-						return query(endpoint, collection, nextCursor);
+						return query(endpoint, path, params, nextCursor);
 					} catch (Exception e) {
 						throw new RuntimeException(e);
 					}
 				}));
 			}
 			return it;
+		} else {
+			return WrappedIterator.create(Collections.singleton((Record) nodeToValue(node)).iterator());
 		}
-		return NiceIterator.emptyIterator();
 	}
 
 	private Object nodeToValue(JsonNode node) {
@@ -172,6 +149,38 @@ public class AasClient implements Closeable {
 		if (this.httpClient != null) {
 			this.httpClient.close();
 			this.httpClient = null;
+		}
+	}
+
+	static class LazyIterator<T> extends NiceIterator<T> {
+		Supplier<IExtendedIterator<T>> factory;
+		IExtendedIterator<T> it;
+
+		public LazyIterator(Supplier<IExtendedIterator<T>> factory) {
+			this.factory = factory;
+		}
+
+		@Override
+		public boolean hasNext() {
+			if (it == null && factory != null) {
+				it = factory.get();
+			}
+			return it.hasNext();
+		}
+
+		@Override
+		public T next() {
+			ensureHasNext();
+			return it.next();
+		}
+
+		@Override
+		public void close() {
+			if (it != null) {
+				it.close();
+				it = null;
+			}
+			factory = null;
 		}
 	}
 }

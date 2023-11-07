@@ -29,8 +29,8 @@ public class AasFederatedService implements FederatedService {
     protected boolean initialized = false;
     AasClient client;
 
-    public AasFederatedService() {
-        this.client = new AasClient();
+    public AasFederatedService(String endpoint) {
+        this.client = new AasClient(endpoint);
     }
 
     @Override

@@ -3,11 +3,11 @@ package io.github.linkedfactory.service.rdf4j.aas.query;
 import io.github.linkedfactory.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.aas.AAS;
 import io.github.linkedfactory.service.rdf4j.aas.AasClient;
-import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
 import io.github.linkedfactory.service.rdf4j.common.HasValue;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
+import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URIs;
 import net.enilink.vocab.rdf.RDF;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
@@ -29,9 +29,10 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext.Mi
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 
+import java.io.IOException;
+import java.net.URISyntaxException;
 import java.util.*;
 
-import static io.github.linkedfactory.service.rdf4j.common.Conversions.toRdfValue;
 import static io.github.linkedfactory.service.rdf4j.common.query.Helpers.compareAndBind;
 import static io.github.linkedfactory.service.rdf4j.common.query.Helpers.findFirstFetch;
 
@@ -53,7 +54,6 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(StatementPattern stmt, final BindingSet bs)
 			throws QueryEvaluationException {
 		// System.out.println("Stmt: " + stmt);
-
 		final Var subjectVar = stmt.getSubjectVar();
 		final Value subjectValue = getVarValue(subjectVar, bs);
 
@@ -163,10 +163,20 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				return new SingletonIteration<>(bs);
 			}
 
-			if (subjectValue != null && subjectValue.isIRI()) {
-				Parameters params = scanner.getParameters(stmt.getObjectVar());
-
-				//return new KvinEvaluationUtil(kvin).evaluate(vf, bs, params == null ? new Parameters() : params, stmt);
+			// retrieve submodel if IRI starts with urn:aas:Submodel:
+			if (subjectValue.isIRI() && subjectValue.stringValue().startsWith(AasEvaluationUtil.SUBMODEL_PREFIX)) {
+				String submodelId = subjectValue.stringValue().substring(AasEvaluationUtil.SUBMODEL_PREFIX.length());
+				try (IExtendedIterator<Record> it = client.submodel(submodelId)) {
+					Record submodel = it.next();
+					QueryBindingSet newBs = new QueryBindingSet(bs);
+					newBs.removeBinding(subjectVar.getName());
+					newBs.addBinding(subjectVar.getName(), AAS.toRdfValue(submodel, getValueFactory()));
+					return evaluate(stmt, newBs);
+				} catch (URISyntaxException e) {
+					throw new QueryEvaluationException(e);
+				} catch (IOException e) {
+					throw new QueryEvaluationException(e);
+				}
 			}
 		}
 		return new EmptyIteration<>();

@@ -2,8 +2,6 @@ package io.github.linkedfactory.service.rdf4j.aas.query;
 
 import io.github.linkedfactory.service.rdf4j.aas.AAS;
 import io.github.linkedfactory.service.rdf4j.aas.AasClient;
-import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
-import io.github.linkedfactory.service.rdf4j.common.Conversions;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import net.enilink.commons.iterator.IExtendedIterator;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
@@ -23,6 +21,7 @@ import static org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationSt
 
 public class AasEvaluationUtil {
 	private final AasClient client;
+	static final String SUBMODEL_PREFIX = "urn:aas:Submodel:";
 
 	public AasEvaluationUtil(AasClient client) {
 		this.client = client;
@@ -36,8 +35,7 @@ public class AasEvaluationUtil {
 		final Value subjValue = getVarValue(stmt.getSubjectVar(), bs);
 		final Value predValue = getVarValue(predVar, bs);
 
-		if (subjValue != null &&
-				(AAS.SHELLS.equals(predValue) || AAS.SUBMODELS.equals(predValue))) {
+		if (subjValue != null) {
 			final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<>() {
 				IExtendedIterator<?> it;
 
@@ -46,9 +44,9 @@ public class AasEvaluationUtil {
 					if (it == null && !isClosed()) {
 						try {
 							if (AAS.SHELLS.equals(predValue)) {
-								it = client.shells(subjValue.stringValue());
+								it = client.shells();
 							} else if (AAS.SUBMODELS.equals(predValue)) {
-								it = client.submodels(subjValue.stringValue());
+								it = client.submodels();
 							}
 						} catch (URISyntaxException e) {
 							throw new QueryEvaluationException(e);

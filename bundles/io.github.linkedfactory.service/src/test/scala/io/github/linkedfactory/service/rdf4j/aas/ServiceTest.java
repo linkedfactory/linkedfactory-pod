@@ -31,7 +31,7 @@ public class ServiceTest {
 		sailRepository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
 			@Override
 			public FederatedService createService(String url) {
-				var service = new AasFederatedService();
+				var service = new AasFederatedService(url.replaceFirst("^aas:", ""));
 				return service;
 			}
 		});
@@ -44,9 +44,9 @@ public class ServiceTest {
 	public void shellsTest() {
 		try (RepositoryConnection conn = repository.getConnection()) {
 			String query = "select * where { " +
-					"service <aas:> { " +
-					"{ select ?shell { <https://v3.admin-shell-io.com> <aas:shells> ?shell } limit 1 } " +
-					"?shell <r:submodels> ?list . ?list !<:> ?sm . ?sm ?p ?o " +
+					"service <aas:https://v3.admin-shell-io.com> { " +
+					"{ select ?shell { <aas:endpoint> <aas:shells> ?shell } limit 1 } " +
+					"?shell <r:submodels> ?list . ?list !<:> ?sm . ?sm (!<:>)* ?element . ?element ?p ?o " +
 					"} " +
 					"}";
 			try (TupleQueryResult result = conn.prepareTupleQuery(query).evaluate()) {
@@ -61,8 +61,8 @@ public class ServiceTest {
 	public void submodelsTest() {
 		try (RepositoryConnection conn = repository.getConnection()) {
 			String query = "select (count(*) as ?cnt) where { " +
-					"service <aas:> { " +
-					"<https://v3.admin-shell-io.com> <aas:submodels> ?sm . " + // ?sm (!<:>)* ?s . ?s ?p ?o " +
+					"service <aas:https://v3.admin-shell-io.com> { " +
+					"<aas:endpoint> <aas:submodels> ?sm . " + // ?sm (!<:>)* ?s . ?s ?p ?o " +
 					"} " +
 					"}";
 			try (TupleQueryResult result = conn.prepareTupleQuery(query).evaluate()) {

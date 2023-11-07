@@ -24,6 +24,7 @@ public interface AAS {
 		if (value instanceof Record) {
 			Record r = (Record) value;
 			Record id = r.first(URIs.createURI("id"));
+			String type = null;
 			String idStr = null;
 			if (id != Record.NULL) {
 				idStr = id.getValue() != null ? id.getValue().toString() : null;
@@ -32,25 +33,42 @@ public interface AAS {
 				Object keys = r.first(URIs.createURI("keys")).getValue();
 				if (keys instanceof List<?> && ((List<?>) keys).size() == 1) {
 					Record firstKey = (Record) ((List<?>) keys).get(0);
+					Object typeValue = firstKey.first(URIs.createURI("type")).getValue();
+					if (typeValue != null) {
+						type = typeValue.toString();
+					}
 					Object keyValue = firstKey.first(URIs.createURI("value")).getValue();
 					if (keyValue != null) {
 						idStr = keyValue.toString();
 					}
 				}
+
+				if (type != null && idStr != null) {
+					// System.out.println("ref: " + "urn:aas:" + type + ":" + idStr);
+					return vf.createIRI("urn:aas:" + type + ":" + idStr);
+				}
 			}
+
 			if (idStr != null) {
-				String iriStr = null;
-				int colonIdx = idStr.indexOf(':');
-				if (colonIdx >= 0) {
-					String scheme = idStr.substring(0, colonIdx);
-					if (URIs.validScheme(scheme)) {
-						iriStr = idStr;
+				if (type == null ) {
+					Object modelTypeValue =  r.first(URIs.createURI("modelType")).getValue();
+					if (modelTypeValue != null) {
+						type = modelTypeValue.toString();
+					} else {
+						Object kindValue = r.first(URIs.createURI("kind")).getValue();
+						if ("Instance".equals(kindValue)) {
+							type = "Submodel";
+						} else if ("Template".equals(kindValue)) {
+							type = "Template";
+						}
 					}
 				}
-				if (iriStr == null) {
-					iriStr = "r:" + idStr;
+
+				if (type != null) {
+					String iriStr = "urn:aas:" + type + ":" + idStr;
+					// System.out.println("with value: " + iriStr);
+					return IRIWithValue.create(iriStr, value);
 				}
-				return IRIWithValue.create(iriStr, value);
 			}
 		}
 		return Conversions.toRdfValue(value, vf);
