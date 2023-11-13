@@ -43,9 +43,9 @@ public class AasEvaluationUtil {
 				public boolean hasNext() throws QueryEvaluationException {
 					if (it == null && !isClosed()) {
 						try {
-							if (AAS.SHELLS.equals(predValue)) {
+							if (AAS.API_SHELLS.equals(predValue)) {
 								it = client.shells();
-							} else if (AAS.SUBMODELS.equals(predValue)) {
+							} else if (AAS.API_SUBMODELS.equals(predValue)) {
 								it = client.submodels();
 							}
 						} catch (URISyntaxException e) {

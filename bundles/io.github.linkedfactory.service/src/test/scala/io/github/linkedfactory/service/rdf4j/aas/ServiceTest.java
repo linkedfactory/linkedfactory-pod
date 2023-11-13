@@ -31,7 +31,7 @@ public class ServiceTest {
 		sailRepository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
 			@Override
 			public FederatedService createService(String url) {
-				var service = new AasFederatedService(url.replaceFirst("^aas:", ""));
+				var service = new AasFederatedService(url.replaceFirst("^aas-api:", ""));
 				return service;
 			}
 		});
@@ -43,12 +43,14 @@ public class ServiceTest {
 	@Test
 	public void shellsTest() {
 		try (RepositoryConnection conn = repository.getConnection()) {
-			String query = "select * where { " +
-					"service <aas:https://v3.admin-shell-io.com> { " +
-					"{ select ?shell { <aas:endpoint> <aas:shells> ?shell } limit 1 } " +
-					"?shell <r:submodels> ?list . ?list !<:> ?sm . ?sm (!<:>)* ?element . ?element ?p ?o " +
+			String query = "select distinct ?idShort where { " +
+					"service <aas-api:https://v3.admin-shell-io.com> { " +
+					"{ select ?shell { <aas-api:endpoint> <aas-api:shells> ?shell } } " +
+					"?shell <aas:submodels> ?list . ?list !<:> ?sm . ?sm (!<:>)+ ?element . " +
+					"{ ?element a <aas:Property> } union { ?element a <aas:MultiLanguageProperty> } " +
+					"?element a ?type ; <aas:idShort> ?idShort . " +
 					"} " +
-					"}";
+					"} order by ?idShort";
 			try (TupleQueryResult result = conn.prepareTupleQuery(query).evaluate()) {
 				while (result.hasNext()) {
 					System.out.println(result.next());
@@ -61,8 +63,8 @@ public class ServiceTest {
 	public void submodelsTest() {
 		try (RepositoryConnection conn = repository.getConnection()) {
 			String query = "select (count(*) as ?cnt) where { " +
-					"service <aas:https://v3.admin-shell-io.com> { " +
-					"<aas:endpoint> <aas:submodels> ?sm . " + // ?sm (!<:>)* ?s . ?s ?p ?o " +
+					"service <aas-api:https://v3.admin-shell-io.com> { " +
+					"<aas-api:endpoint> <aas-api:submodels> ?sm . " + // ?sm (!<:>)* ?s . ?s ?p ?o " +
 					"} " +
 					"}";
 			try (TupleQueryResult result = conn.prepareTupleQuery(query).evaluate()) {

@@ -7,6 +7,7 @@ import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URIs;
+import net.enilink.vocab.rdf.RDF;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
@@ -16,6 +17,7 @@ import org.apache.http.impl.client.HttpClients;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URISyntaxException;
@@ -45,9 +47,9 @@ public class AasClient implements Closeable {
 		return query(endpoint, "submodels", null, null);
 	}
 
-	public IExtendedIterator<Record> submodel(String id) throws URISyntaxException, IOException {
-		return query(endpoint, "submodels/" + Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)),
-				null, null);
+	public IExtendedIterator<Record> submodel(String id, boolean encodeBase64) throws URISyntaxException, IOException {
+		return query(endpoint, "submodels/" + (encodeBase64 ?
+				Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)) : id), null, null);
 	}
 
 	protected IExtendedIterator<Record> query(String endpoint, String path, Map<String, String> params, String cursor) throws URISyntaxException, IOException {
@@ -60,37 +62,40 @@ public class AasClient implements Closeable {
 			uriBuilder.setParameter("cursor", cursor);
 		}
 		java.net.URI getRequestUri = uriBuilder.build();
+		System.out.println(getRequestUri);
 
 		// sending get request to the endpoint
 		HttpGet httpGet = createHttpGet(getRequestUri.toString());
 		HttpResponse response = this.httpClient.execute(httpGet);
 		HttpEntity entity = response.getEntity();
-		if (response.getStatusLine().getStatusCode() != 200) {
-			return NiceIterator.emptyIterator();
-		}
-		JsonNode node = mapper.readTree(entity.getContent());
-		JsonNode result = node.get("result");
-		if (result != null && result.isArray()) {
-			JsonNode pagingMetaData = node.get("paging_metadata");
-			JsonNode cursorNode = null;
-			if (pagingMetaData != null) {
-				cursorNode = pagingMetaData.get("cursor");
+		try (InputStream content = entity.getContent()) {
+			if (response.getStatusLine().getStatusCode() != 200) {
+				return NiceIterator.emptyIterator();
 			}
-			IExtendedIterator<Record> it = WrappedIterator.create(result.iterator()).mapWith(n -> (Record) nodeToValue(n));
-			if (cursorNode != null) {
-				String nextCursor = cursorNode.asText();
-				// use lazy iterator here to ensure that request is only executed when required
-				it = it.andThen(new LazyIterator<>(() -> {
-					try {
-						return query(endpoint, path, params, nextCursor);
-					} catch (Exception e) {
-						throw new RuntimeException(e);
-					}
-				}));
+			JsonNode node = mapper.readTree(content);
+			JsonNode result = node.get("result");
+			if (result != null && result.isArray()) {
+				JsonNode pagingMetaData = node.get("paging_metadata");
+				JsonNode cursorNode = null;
+				if (pagingMetaData != null) {
+					cursorNode = pagingMetaData.get("cursor");
+				}
+				IExtendedIterator<Record> it = WrappedIterator.create(result.iterator()).mapWith(n -> (Record) nodeToValue(n));
+				if (cursorNode != null) {
+					String nextCursor = cursorNode.asText();
+					// use lazy iterator here to ensure that request is only executed when required
+					it = it.andThen(new LazyIterator<>(() -> {
+						try {
+							return query(endpoint, path, params, nextCursor);
+						} catch (Exception e) {
+							throw new RuntimeException(e);
+						}
+					}));
+				}
+				return it;
+			} else {
+				return WrappedIterator.create(Collections.singleton((Record) nodeToValue(node)).iterator());
 			}
-			return it;
-		} else {
-			return WrappedIterator.create(Collections.singleton((Record) nodeToValue(node)).iterator());
 		}
 	}
 
@@ -99,7 +104,6 @@ public class AasClient implements Closeable {
 			return null;
 		}
 
-		Record value = null;
 		if (node.isArray()) {
 			List<Object> values = new ArrayList<>();
 			for (JsonNode element : node) {
@@ -107,14 +111,19 @@ public class AasClient implements Closeable {
 			}
 			return values;
 		} else if (node.isObject()) {
+			Record value = Record.NULL;
 			Iterator<Map.Entry<String, JsonNode>> records = node.fields();
+			String modelType = null;
 			while (records.hasNext()) {
 				Map.Entry<String, JsonNode> recordNode = records.next();
-				if (value != null) {
-					value = value.append(new Record(URIs.createURI(recordNode.getKey()), nodeToValue(recordNode.getValue())));
-				} else {
-					value = new Record(URIs.createURI(recordNode.getKey()), nodeToValue(recordNode.getValue()));
+				if ("modelType".equals(recordNode.getKey())) {
+					modelType = recordNode.getValue().asText();
 				}
+				value = value.append(new Record(URIs.createURI("aas:" + recordNode.getKey()), nodeToValue(recordNode.getValue())));
+			}
+			if (modelType != null) {
+				Record newRecord = new Record(RDF.PROPERTY_TYPE, URIs.createURI("aas:" + modelType));
+				value = value.append(newRecord);
 			}
 			return value;
 		} else if (node.isDouble()) {

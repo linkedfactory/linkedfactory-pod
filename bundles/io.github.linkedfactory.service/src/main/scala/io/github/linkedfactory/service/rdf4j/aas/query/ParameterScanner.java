@@ -65,11 +65,11 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 		Value pValue = p.getValue();
 		final Var o = sp.getObjectVar();
 		boolean remove = true;
-		if (AAS.SHELLS.equals(pValue) || AAS.SUBMODELS.equals(pValue)) {
+		if (AAS.API_SHELLS.equals(pValue) || AAS.API_SUBMODELS.equals(pValue)) {
 			Parameters params = createParameters(sp.getObjectVar());
 			parameterIndex.put(sp.getSubjectVar(), params);
 			remove = false;
-		} else if (AAS.PARAMS.equals(pValue)) {
+		} else if (AAS.API_PARAMS.equals(pValue)) {
 			// can be used to specify default parameters on an item
 			// <> aas:params [ <aas:limit> 1 ]
 			Parameters params = createParameters(sp.getObjectVar());

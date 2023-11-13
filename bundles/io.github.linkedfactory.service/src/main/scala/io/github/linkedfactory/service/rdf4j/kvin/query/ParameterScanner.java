@@ -1,7 +1,6 @@
 package io.github.linkedfactory.service.rdf4j.kvin.query;
 
 import io.github.linkedfactory.service.rdf4j.aas.AAS;
-import io.github.linkedfactory.service.rdf4j.kvin.KVIN;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -66,7 +65,7 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 		Value pValue = p.getValue();
 		final Var o = sp.getObjectVar();
 		boolean remove = true;
-		if (AAS.PARAMS.equals(pValue)) {
+		if (AAS.API_PARAMS.equals(pValue)) {
 			// can be used to specify default parameters on an item
 			// <> aas:params [ <aas:p1> 1 ; ...]
 			Parameters params = createParameters(sp.getObjectVar());

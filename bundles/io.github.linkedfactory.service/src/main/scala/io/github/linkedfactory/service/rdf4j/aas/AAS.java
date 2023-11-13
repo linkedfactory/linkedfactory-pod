@@ -9,16 +9,17 @@ import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 
-import java.util.Collection;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 
 public interface AAS {
 	String AAS = "aas:";
 
-	IRI PARAMS = SimpleValueFactory.getInstance().createIRI(AAS + "params");
+	IRI API_PARAMS = SimpleValueFactory.getInstance().createIRI("aas-api:params");
 
-	IRI SHELLS = SimpleValueFactory.getInstance().createIRI(AAS + "shells");
-	IRI SUBMODELS = SimpleValueFactory.getInstance().createIRI(AAS + "submodels");
+	IRI API_SHELLS = SimpleValueFactory.getInstance().createIRI("aas-api:shells");
+	IRI API_SUBMODELS = SimpleValueFactory.getInstance().createIRI("aas-api:submodels");
 
 	static Value toRdfValue(Object value, ValueFactory vf) {
 		if (value instanceof Record) {
@@ -29,15 +30,15 @@ public interface AAS {
 			if (id != Record.NULL) {
 				idStr = id.getValue() != null ? id.getValue().toString() : null;
 			}
-			if (idStr == null && "ModelReference".equals(r.first(URIs.createURI("type")).getValue())) {
-				Object keys = r.first(URIs.createURI("keys")).getValue();
+			if (idStr == null && "ModelReference".equals(r.first(URIs.createURI(AAS + "type")).getValue())) {
+				Object keys = r.first(URIs.createURI(AAS + "keys")).getValue();
 				if (keys instanceof List<?> && ((List<?>) keys).size() == 1) {
 					Record firstKey = (Record) ((List<?>) keys).get(0);
-					Object typeValue = firstKey.first(URIs.createURI("type")).getValue();
+					Object typeValue = firstKey.first(URIs.createURI(AAS + "type")).getValue();
 					if (typeValue != null) {
 						type = typeValue.toString();
 					}
-					Object keyValue = firstKey.first(URIs.createURI("value")).getValue();
+					Object keyValue = firstKey.first(URIs.createURI(AAS + "value")).getValue();
 					if (keyValue != null) {
 						idStr = keyValue.toString();
 					}
@@ -45,17 +46,18 @@ public interface AAS {
 
 				if (type != null && idStr != null) {
 					// System.out.println("ref: " + "urn:aas:" + type + ":" + idStr);
-					return vf.createIRI("urn:aas:" + type + ":" + idStr);
+					return vf.createIRI("urn:aas:" + type + ":" +
+							Base64.getEncoder().encodeToString(idStr.getBytes(StandardCharsets.UTF_8)));
 				}
 			}
 
 			if (idStr != null) {
-				if (type == null ) {
-					Object modelTypeValue =  r.first(URIs.createURI("modelType")).getValue();
+				if (type == null) {
+					Object modelTypeValue = r.first(URIs.createURI(AAS + "modelType")).getValue();
 					if (modelTypeValue != null) {
 						type = modelTypeValue.toString();
 					} else {
-						Object kindValue = r.first(URIs.createURI("kind")).getValue();
+						Object kindValue = r.first(URIs.createURI(AAS + "kind")).getValue();
 						if ("Instance".equals(kindValue)) {
 							type = "Submodel";
 						} else if ("Template".equals(kindValue)) {
@@ -65,7 +67,8 @@ public interface AAS {
 				}
 
 				if (type != null) {
-					String iriStr = "urn:aas:" + type + ":" + idStr;
+					String iriStr = "urn:aas:" + type + ":" +
+							Base64.getEncoder().encodeToString(idStr.getBytes(StandardCharsets.UTF_8));
 					// System.out.println("with value: " + iriStr);
 					return IRIWithValue.create(iriStr, value);
 				}

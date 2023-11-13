@@ -15,6 +15,7 @@ import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.common.iteration.SingletonIteration;
 import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
@@ -61,6 +62,8 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 			// this happens for patterns like (:subject :property [ <kvin:value> ?someValue ])
 			// where [ <kvin:value> ?someValue ] is evaluated first
 			// this case should be handled by correctly defining the evaluation order by reordering the SPARQL AST nodes
+			return new EmptyIteration<>();
+		} else if (! (subjectValue instanceof Resource)) {
 			return new EmptyIteration<>();
 		}
 
@@ -166,7 +169,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 			// retrieve submodel if IRI starts with urn:aas:Submodel:
 			if (subjectValue.isIRI() && subjectValue.stringValue().startsWith(AasEvaluationUtil.SUBMODEL_PREFIX)) {
 				String submodelId = subjectValue.stringValue().substring(AasEvaluationUtil.SUBMODEL_PREFIX.length());
-				try (IExtendedIterator<Record> it = client.submodel(submodelId)) {
+				try (IExtendedIterator<Record> it = client.submodel(submodelId, false)) {
 					Record submodel = it.next();
 					QueryBindingSet newBs = new QueryBindingSet(bs);
 					newBs.removeBinding(subjectVar.getName());
