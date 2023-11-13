@@ -123,7 +123,9 @@ public class AasClient implements Closeable {
 				}
 				URI property = URIs.createURI(AAS.AAS_NAMESPACE + recordNode.getKey());
 				JsonNode nodeValue = recordNode.getValue();
-				if (nodeValue.isArray() && !"keys".equals(recordNode.getKey())) {
+				if (nodeValue.isArray() && !("keys".equals(recordNode.getKey())
+						|| "SubmodelElementList".equals(recordNode.getKey())
+						|| "ValueList".equals(recordNode.getKey()))) {
 					// each element of the array is added as (unordered) property value
 					for (JsonNode element : nodeValue) {
 						value = value.append(new Record(property, nodeToValue(element)));
