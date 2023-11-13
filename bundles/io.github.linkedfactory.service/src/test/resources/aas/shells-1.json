@@ -1,0 +1,181 @@
+[
+  {
+    "idShort": "REGISTRY",
+    "id": "AssetAdministrationShell---012F46AF",
+    "assetInformation": {
+      "assetKind": "Instance",
+      "globalAssetId": "Asset---06A9FE4F"
+    },
+    "submodels": [
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://example.com/ids/sm/8202_6011_3022_1620"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://example.com/ids/sm/0154_9092_1122_2220"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "idShort": "AAS_WEISS_HN400607",
+    "administration": {
+      "version": "1",
+      "revision": "0"
+    },
+    "id": "https://aas.digitaltwin-vdma.org/aas/HN400607",
+    "derivedFrom": {
+      "type": "ModelReference",
+      "keys": [
+        {
+          "type": "AssetAdministrationShell",
+          "value": "https://aas.digitaltwin-vdma.org/aas/HN400607"
+        }
+      ]
+    },
+    "assetInformation": {
+      "assetKind": "Instance",
+      "globalAssetId": "https://aas.digitaltwin-vdma.org/HN400607",
+      "defaultThumbnail": {
+        "path": "/HN200.png"
+      }
+    },
+    "submodels": [
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://aas.digitaltwin-vdma.org/sm/0200_3113_3022_3161"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://aas.digitaltwin-vdma.org/sm/4444_3113_3022_1716"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://aas.digitaltwin-vdma.org/sm/9110_1111_3022_8966"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://aas.digitaltwin-vdma.org/sm/9140_4411_3022_8966"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://aas.digitaltwin-vdma.org/sm/4321_3113_3022_6366"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": []
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://aas.digitaltwin-vdma.org/sm/1240_3113_3022_4726"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "https://aas.digitaltwin-vdma.org/sm/9404_3272_4022_9046"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "idShort": "Festo_3S7PM0CP4BD",
+    "id": "smart.festo.com/demo/aas/1/1/454576463545648365874",
+    "assetInformation": {
+      "assetKind": "Instance",
+      "globalAssetId": "HTTP://PK.FESTO.COM/3S7PM0CP4BD",
+      "defaultThumbnail": {
+        "path": "/Festo_OVEL_product_rendering.png"
+      }
+    },
+    "submodels": [
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "www.company.com/ids/sm/4343_5072_7091_3242"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "www.company.com/ids/sm/2543_5072_7091_2660"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "www.company.com/ids/sm/6053_5072_7091_5102"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "www.company.com/ids/sm/6563_5072_7091_4267"
+          }
+        ]
+      },
+      {
+        "type": "ModelReference",
+        "keys": [
+          {
+            "type": "Submodel",
+            "value": "smart.festo.com/demo/sm/instance/1/1/13B7CCD9BF7A3F24"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,930 @@
+[
+  {
+    "idShort": "Nameplate",
+    "id": "https://aas.digitaltwin-vdma.org/sm/0200_3113_3022_3161",
+    "kind": "Instance",
+    "semanticId": {
+      "type": "ExternalReference",
+      "keys": [
+        {
+          "type": "Submodel",
+          "value": "https://admin-shell.io/zvei/nameplate/1/0/Nameplate"
+        }
+      ]
+    },
+    "submodelElements": [
+      {
+        "category": "PARAMETER",
+        "idShort": "ManufacturerName",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": "0173-1#02-AAO677#002"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "value": [
+          {
+            "language": "de",
+            "text": "WEISS"
+          },
+          {
+            "language": "en",
+            "text": "WEISS"
+          }
+        ]
+      },
+      {
+        "category": "PARAMETER",
+        "idShort": "ManufacturerProductDesignation",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": "0173-1#02-AAW338#001"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "value": [
+          {
+            "language": "de",
+            "text": "Linearmotorachse"
+          },
+          {
+            "language": "en",
+            "text": "Linear motor axis"
+          }
+        ]
+      },
+      {
+        "category": "PARAMETER",
+        "idShort": "ManufacturerProductFamily",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": "0173-1#02-AAU731#001"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "value": [
+          {
+            "language": "de",
+            "text": "HN"
+          },
+          {
+            "language": "en",
+            "text": "HN"
+          }
+        ]
+      },
+      {
+        "category": "CONSTANT",
+        "idShort": "OrderCode",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": " 0173-1#02-AAO227#002"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "valueType": "xs:string",
+        "value": "1004139"
+      },
+      {
+        "category": "PARAMETER",
+        "idShort": "SerialNumber",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": "0173-1#02-AAM556#002"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "valueType": "xs:string",
+        "value": "HN400607"
+      },
+      {
+        "category": "PARAMETER",
+        "idShort": "YearOfConstruction",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": "0173-1#02-AAP906#001"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "valueType": "xs:string",
+        "value": "2018"
+      },
+      {
+        "category": "PARAMETER",
+        "idShort": "Address",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": "0173-1#02-AAQ832#005"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "value": [
+          {
+            "category": "PARAMETER",
+            "idShort": "Department",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO127#003"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Kontakt zu WEISS"
+              },
+              {
+                "language": "en",
+                "text": "Contact to WEISS"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "Street",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO128#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Siemensstraße 17"
+              },
+              {
+                "language": "en",
+                "text": "Siemensstraße 17"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "ZipCode",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO129#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "74722"
+              },
+              {
+                "language": "en",
+                "text": "74722"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "City_Town",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO132#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Buchen (Odenwald)"
+              },
+              {
+                "language": "en",
+                "text": "Buchen (Odenwald)"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "State_County",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO133#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Baden-Wuerttemberg"
+              },
+              {
+                "language": "en",
+                "text": "Baden-Württemberg"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "VATNumber",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO135#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "DE 811 970 111"
+              },
+              {
+                "language": "en",
+                "text": "DE 811 970 111"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "AddressOfAdditionalLink",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ326#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "valueType": "xs:string",
+            "value": "https://www.weiss-world.com/de-de"
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "Phone",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ833#005"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "category": "PARAMETER",
+                "idShort": "TelephoneNumber",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAO136#002"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "value": [
+                  {
+                    "language": "de",
+                    "text": "+49 6281 5208 0"
+                  },
+                  {
+                    "language": "en",
+                    "text": "+49 6281 5208 0"
+                  }
+                ]
+              },
+              {
+                "category": "PARAMETER",
+                "idShort": "TypeOfTelephone",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAO137#003"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "valueType": "xs:string",
+                "value": "office"
+              }
+            ]
+          },
+          {
+            "category": "VARIABLE",
+            "idShort": "Email01",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ836#005"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "category": "VARIABLE",
+                "idShort": "EmailAddress",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAO198#002"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "valueType": "xs:string",
+                "value": "info@weiss-world.com"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "idShort": "ContactInformation",
+    "id": "https://aas.digitaltwin-vdma.org/sm/9110_1111_3022_8966",
+    "kind": "Instance",
+    "semanticId": {
+      "type": "ExternalReference",
+      "keys": [
+        {
+          "type": "Submodel",
+          "value": "https://admin-shell.io/zvei/nameplate/1/0/ContactInformation"
+        }
+      ]
+    },
+    "submodelElements": [
+      {
+        "category": "PARAMETER",
+        "idShort": "ContactInformation00",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": "https://admin-shell.io/zvei/nameplate/1/0/ContactInformation"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "value": [
+          {
+            "category": "PARAMETER",
+            "idShort": "NameOfSupplier",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO735#003"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "WEISS GmbH"
+              },
+              {
+                "language": "en",
+                "text": "WEISS GmbH"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "Department",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO127#003"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Kontakt zu WEISS Sales"
+              },
+              {
+                "language": "en",
+                "text": "Contact to WEISS Sales"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "E_Mail",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ836#005"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "category": "PARAMETER",
+                "idShort": "E_MailAddress",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAO198#002"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "valueType": "xs:string",
+                "value": "sales@weiss-world.com"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "Phone",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ833#005"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "category": "PARAMETER",
+                "idShort": "TelephoneNumber",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAO136#002"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "value": [
+                  {
+                    "language": "de",
+                    "text": "+49 (0) 6281 5208 5998"
+                  },
+                  {
+                    "language": "en",
+                    "text": "+49 (0) 6281 5208 5998"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "IPCommunication",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "https://admin-shell.io/zvei/nameplate/1/0/ContactInformation/IPCommunication"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "category": "PARAMETER",
+                "idShort": "AddressOfAdditionalLink",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAQ326#002"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "valueType": "xs:string",
+                "value": "https://www.weiss-world.com/de-de"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "Street",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO128#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Siemensstraße 17"
+              },
+              {
+                "language": "en",
+                "text": "Siemensstraße 17"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "ZipCode",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO129#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "74722"
+              },
+              {
+                "language": "en",
+                "text": "74722"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "State_County",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO133#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Baden-Wuerttemberg"
+              },
+              {
+                "language": "en",
+                "text": "Baden-Württemberg"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "AddressOfAdditionalLink",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ326#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "valueType": "xs:string",
+            "value": "https://www.weiss-world.com/de-de"
+          }
+        ]
+      },
+      {
+        "category": "PARAMETER",
+        "idShort": "ContactInformation01",
+        "semanticId": {
+          "type": "ExternalReference",
+          "keys": [
+            {
+              "type": "GlobalReference",
+              "value": "https://admin-shell.io/zvei/nameplate/1/0/ContactInformation"
+            }
+          ]
+        },
+        "embeddedDataSpecifications": [],
+        "value": [
+          {
+            "category": "PARAMETER",
+            "idShort": "NameOfSupplier",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO735#003"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "WEISS GmbH"
+              },
+              {
+                "language": "en",
+                "text": "WEISS GmbH"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "Department",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO127#003"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Kontakt zu WEISS Service"
+              },
+              {
+                "language": "en",
+                "text": "Contact to WEISS Service"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "E_Mail",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ836#005"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "category": "PARAMETER",
+                "idShort": "E_MailAddress",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAO198#002"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "valueType": "xs:string",
+                "value": "service@weiss-world.com"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "Phone",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ833#005"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "category": "PARAMETER",
+                "idShort": "TelephoneNumber",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAO136#002"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "value": [
+                  {
+                    "language": "de",
+                    "text": "+49 (0) 6281 5208 5999"
+                  },
+                  {
+                    "language": "en",
+                    "text": "+49 (0) 6281 5208 5999"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "IPCommunication",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "https://admin-shell.io/zvei/nameplate/1/0/ContactInformation/IPCommunication"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "category": "PARAMETER",
+                "idShort": "AddressOfAdditionalLink",
+                "semanticId": {
+                  "type": "ExternalReference",
+                  "keys": [
+                    {
+                      "type": "GlobalReference",
+                      "value": "0173-1#02-AAQ326#002"
+                    }
+                  ]
+                },
+                "embeddedDataSpecifications": [],
+                "valueType": "xs:string",
+                "value": "https://www.weiss-world.com/de-de"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "Street",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO128#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Siemensstraße 17"
+              },
+              {
+                "language": "en",
+                "text": "Siemensstraße 17"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "ZipCode",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO129#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "74722"
+              },
+              {
+                "language": "en",
+                "text": "74722"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "State_County",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAO133#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "value": [
+              {
+                "language": "de",
+                "text": "Baden-Wuerttemberg"
+              },
+              {
+                "language": "en",
+                "text": "Baden-Württemberg"
+              }
+            ]
+          },
+          {
+            "category": "PARAMETER",
+            "idShort": "AddressOfAdditionalLink",
+            "semanticId": {
+              "type": "ExternalReference",
+              "keys": [
+                {
+                  "type": "GlobalReference",
+                  "value": "0173-1#02-AAQ326#002"
+                }
+              ]
+            },
+            "embeddedDataSpecifications": [],
+            "valueType": "xs:string",
+            "value": "https://www.weiss-world.com/de-de"
+          }
+        ]
+      }
+    ]
+  }
+]
