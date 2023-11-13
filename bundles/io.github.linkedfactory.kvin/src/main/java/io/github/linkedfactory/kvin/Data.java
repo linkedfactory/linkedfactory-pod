@@ -19,6 +19,8 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -31,8 +33,6 @@ import net.enilink.komma.core.URIs;
  * This is inspired by RDF and the scala.xml.MetaData implementation.
  */
 public abstract class Data<T extends Data<T>> implements Iterable<T> {
-	public static final URI PROPERTY_VALUE = URIs.createURI("lf:value");
-
 	protected final URI property;
 	protected final T next;
 	protected final Object value;
@@ -137,6 +137,25 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 				current.removeFirst(current.property);
 			}
 		};
+	}
+
+	/**
+	 * Returns a stream of the contained elements.
+	 *
+	 * @return Stream of the data elements.
+	 */
+	public Stream<T> stream() {
+		Iterable<T> iterable = () -> iterator();
+		return StreamSupport.stream(iterable.spliterator(), false);
+	}
+
+	/**
+	 * Return the next element.
+	 *
+	 * @return The next element or {@link #NULL()}
+	 */
+	public T next() {
+		return next == null ? NULL() : next;
 	}
 
 	/**

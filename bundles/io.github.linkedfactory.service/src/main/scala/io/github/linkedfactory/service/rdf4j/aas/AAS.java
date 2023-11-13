@@ -24,7 +24,7 @@ public interface AAS {
 	static Value toRdfValue(Object value, ValueFactory vf) {
 		if (value instanceof Record) {
 			Record r = (Record) value;
-			Record id = r.first(URIs.createURI("id"));
+			Record id = r.first(URIs.createURI(AAS_NAMESPACE + "id"));
 			String type = null;
 			String idStr = null;
 			if (id != Record.NULL) {

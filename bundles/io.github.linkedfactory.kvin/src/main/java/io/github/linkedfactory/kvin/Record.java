@@ -27,8 +27,6 @@ import net.enilink.komma.core.URI;
 public class Record extends Data<Record> {
 	public static final Record NULL = new Record(null, null);
 
-	public static final URI PROPERTY_VALUE = Data.PROPERTY_VALUE;
-
 	public Record(URI property, Object value) {
 		this(property, value, null);
 	}

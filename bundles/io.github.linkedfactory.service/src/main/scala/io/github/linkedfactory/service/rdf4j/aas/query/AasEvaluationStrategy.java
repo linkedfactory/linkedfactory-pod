@@ -8,6 +8,7 @@ import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
 import net.enilink.commons.iterator.IExtendedIterator;
+import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URIs;
 import net.enilink.vocab.rdf.RDF;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
@@ -63,51 +64,66 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 			// where [ <kvin:value> ?someValue ] is evaluated first
 			// this case should be handled by correctly defining the evaluation order by reordering the SPARQL AST nodes
 			return new EmptyIteration<>();
-		} else if (! (subjectValue instanceof Resource)) {
+		} else if (!(subjectValue instanceof Resource)) {
 			return new EmptyIteration<>();
 		}
 
 		Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : null;
 		if (data instanceof Record) {
 			Value predValue = getVarValue(stmt.getPredicateVar(), bs);
+			final Iterator<Record> it;
 			if (predValue != null) {
 				String predValueStr = predValue.stringValue();
-				// remove scheme for relative URIs
-				if (predValueStr.startsWith("r:")) {
-					predValueStr = predValueStr.substring(2);
-				}
-				net.enilink.komma.core.URI predicate = predValue != null ? URIs.createURI(predValueStr) : null;
-
-				Record r = ((Record) data).first(predicate);
-				if (r != Record.NULL) {
-					Var objectVar = stmt.getObjectVar();
-					Value newValue = AAS.toRdfValue(r.getValue(), vf);
-					return compareAndBind(bs, objectVar, newValue);
-				}
+				it = WrappedIterator.create(((Record) data).iterator())
+						.filterKeep(r -> predValueStr.equals(r.getProperty().toString()));
 			} else {
-				Iterator<Record> it = ((Record) data).iterator();
-				Var variable = stmt.getObjectVar();
-				return new AbstractCloseableIteration<>() {
-					@Override
-					public boolean hasNext() throws QueryEvaluationException {
-						return it.hasNext();
-					}
-
-					@Override
-					public BindingSet next() throws QueryEvaluationException {
-						Record r = it.next();
-						CompositeBindingSet newBs = new CompositeBindingSet(bs);
-						newBs.addBinding(stmt.getPredicateVar().getName(), AAS.toRdfValue(r.getProperty(), vf));
-						newBs.addBinding(variable.getName(), AAS.toRdfValue(r.getValue(), vf));
-						return newBs;
-					}
-
-					@Override
-					public void remove() throws QueryEvaluationException {
-						throw new UnsupportedOperationException();
-					}
-				};
+				it =  ((Record) data).iterator();
 			}
+
+			Var variable = stmt.getObjectVar();
+			Value objectValue = getVarValue(variable, bs);
+			return new AbstractCloseableIteration<>() {
+				CompositeBindingSet next;
+
+				@Override
+				public boolean hasNext() throws QueryEvaluationException {
+					if (next == null && it.hasNext()) {
+						Record r = it.next();
+						Value newObjectValue = AAS.toRdfValue(r.getValue(), vf);
+						if (objectValue != null && !objectValue.equals(newObjectValue)) {
+							return false;
+						}
+
+						CompositeBindingSet newBs = new CompositeBindingSet(bs);
+						if (predValue == null) {
+							newBs.addBinding(stmt.getPredicateVar().getName(), AAS.toRdfValue(r.getProperty(), vf));
+						}
+						if (objectValue == null) {
+							newBs.addBinding(variable.getName(), newObjectValue);
+						}
+						next = newBs;
+					}
+					return next != null;
+				}
+
+				@Override
+				public BindingSet next() throws QueryEvaluationException {
+					if (next == null) {
+						hasNext();
+					}
+					if (next == null) {
+						throw new QueryEvaluationException("No such element");
+					}
+					BindingSet result = next;
+					next = null;
+					return result;
+				}
+
+				@Override
+				public void remove() throws QueryEvaluationException {
+					throw new UnsupportedOperationException();
+				}
+			};
 		} else if (data instanceof Object[] || data instanceof List<?>) {
 			List<?> list = data instanceof Object[] ? Arrays.asList((Object[]) data) : (List<?>) data;
 			Var predVar = stmt.getPredicateVar();

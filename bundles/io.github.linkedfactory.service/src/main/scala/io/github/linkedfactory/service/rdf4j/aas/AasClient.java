@@ -6,6 +6,7 @@ import io.github.linkedfactory.kvin.Record;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.commons.iterator.WrappedIterator;
+import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import net.enilink.vocab.rdf.RDF;
 import org.apache.http.HttpEntity;
@@ -52,7 +53,8 @@ public class AasClient implements Closeable {
 				Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)) : id), null, null);
 	}
 
-	protected IExtendedIterator<Record> query(String endpoint, String path, Map<String, String> params, String cursor) throws URISyntaxException, IOException {
+	protected IExtendedIterator<Record> query(String endpoint, String path, Map<String, String> params, String cursor)
+			throws URISyntaxException, IOException {
 		URIBuilder uriBuilder = new URIBuilder(endpoint);
 		uriBuilder.setPath(path);
 		if (params != null) {
@@ -119,7 +121,17 @@ public class AasClient implements Closeable {
 				if ("modelType".equals(recordNode.getKey())) {
 					modelType = recordNode.getValue().asText();
 				}
-				value = value.append(new Record(URIs.createURI(AAS.AAS_NAMESPACE + recordNode.getKey()), nodeToValue(recordNode.getValue())));
+				URI property = URIs.createURI(AAS.AAS_NAMESPACE + recordNode.getKey());
+				JsonNode nodeValue = recordNode.getValue();
+				if (nodeValue.isArray() && !"keys".equals(recordNode.getKey())) {
+					// each element of the array is added as (unordered) property value
+					for (JsonNode element : nodeValue) {
+						value = value.append(new Record(property, nodeToValue(element)));
+					}
+				} else {
+					// convert value as whole (object or ordered list/array)
+					value = value.append(new Record(property, nodeToValue(nodeValue)));
+				}
 			}
 			if (modelType != null) {
 				Record newRecord = new Record(RDF.PROPERTY_TYPE, URIs.createURI(AAS.AAS_NAMESPACE + modelType));
