@@ -1,6 +1,7 @@
 package io.github.linkedfactory.service.rdf4j.aas;
 
 import org.eclipse.rdf4j.query.TupleQueryResult;
+import org.eclipse.rdf4j.query.Update;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.repository.Repository;
@@ -67,7 +68,7 @@ public class ServiceTest {
 					"select ?sm ?element ?p ?o { " +
 					"service <aas-api:https://v3.admin-shell-io.com> { " +
 					"{ select ?shell { <aas-api:endpoint> <aas-api:shells> ?shell } limit 2 } " +
-					"?shell aas:submodels ?sm . ?sm aas:semanticId ?semId . ?semId aas:keys [ !<:> ?key ] . "+
+					"?shell aas:submodels ?sm . ?sm aas:semanticId ?semId . ?semId aas:keys [ !<:> ?key ] . " +
 					"?key aas:value \"https://admin-shell.io/zvei/nameplate/1/0/Nameplate\" . " +
 					"?sm (!<:>)+ ?element . " +
 					"{ ?element a aas:Property } union { ?element a aas:MultiLanguageProperty } " +
@@ -79,6 +80,25 @@ public class ServiceTest {
 					System.out.println(result.next());
 				}
 			}
+		}
+	}
+
+	@Test
+	public void copyShellTest() {
+		try (RepositoryConnection conn = repository.getConnection()) {
+			String query = "prefix aas: <https://admin-shell.io/aas/3/0/> " +
+					"insert { " +
+					"?s ?p ?o . " +
+					"} where { " +
+					"service <aas-api:https://v3.admin-shell-io.com> { " +
+					"{ select ?shell { <aas-api:endpoint> <aas-api:shells> ?shell } limit 2 } " +
+					"?shell aas:submodels ?sm . ?sm (!<:>)* ?s . ?s ?p ?o " +
+					"} " +
+					"}";
+			conn.prepareUpdate(query).execute();
+			conn.getStatements(null, null, null).stream().forEach(stmt -> {
+				System.out.println(stmt);
+			});
 		}
 	}
 
