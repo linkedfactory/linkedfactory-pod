@@ -43,12 +43,13 @@ public class ServiceTest {
 	@Test
 	public void shellsTest() {
 		try (RepositoryConnection conn = repository.getConnection()) {
-			String query = "select distinct ?idShort where { " +
+			String query = "prefix aas: <https://admin-shell.io/aas/3/0/> " +
+					"select distinct ?idShort where { " +
 					"service <aas-api:https://v3.admin-shell-io.com> { " +
-					"{ select ?shell { <aas-api:endpoint> <aas-api:shells> ?shell } } " +
-					"?shell <aas:submodels> ?list . ?list !<:> ?sm . ?sm (!<:>)+ ?element . " +
-					"{ ?element a <aas:Property> } union { ?element a <aas:MultiLanguageProperty> } " +
-					"?element a ?type ; <aas:idShort> ?idShort . " +
+					"{ select ?shell { <aas-api:endpoint> <aas-api:shells> ?shell } limit 2 } " +
+					"?shell aas:submodels ?list . ?list !<:> ?sm . ?sm (!<:>)+ ?element . " +
+					"{ ?element a aas:Property } union { ?element a aas:MultiLanguageProperty } " +
+					"?element a ?type ; aas:idShort ?idShort . " +
 					"} " +
 					"} order by ?idShort";
 			try (TupleQueryResult result = conn.prepareTupleQuery(query).evaluate()) {
@@ -62,7 +63,8 @@ public class ServiceTest {
 	@Test
 	public void submodelsTest() {
 		try (RepositoryConnection conn = repository.getConnection()) {
-			String query = "select (count(*) as ?cnt) where { " +
+			String query = "prefix aas: <https://admin-shell.io/aas/3/0/> " +
+					"select (count(*) as ?cnt) where { " +
 					"service <aas-api:https://v3.admin-shell-io.com> { " +
 					"<aas-api:endpoint> <aas-api:submodels> ?sm . " + // ?sm (!<:>)* ?s . ?s ?p ?o " +
 					"} " +

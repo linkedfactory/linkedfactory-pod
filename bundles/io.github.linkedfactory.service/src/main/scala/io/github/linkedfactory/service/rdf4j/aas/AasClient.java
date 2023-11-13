@@ -119,10 +119,10 @@ public class AasClient implements Closeable {
 				if ("modelType".equals(recordNode.getKey())) {
 					modelType = recordNode.getValue().asText();
 				}
-				value = value.append(new Record(URIs.createURI("aas:" + recordNode.getKey()), nodeToValue(recordNode.getValue())));
+				value = value.append(new Record(URIs.createURI(AAS.AAS_NAMESPACE + recordNode.getKey()), nodeToValue(recordNode.getValue())));
 			}
 			if (modelType != null) {
-				Record newRecord = new Record(RDF.PROPERTY_TYPE, URIs.createURI("aas:" + modelType));
+				Record newRecord = new Record(RDF.PROPERTY_TYPE, URIs.createURI(AAS.AAS_NAMESPACE + modelType));
 				value = value.append(newRecord);
 			}
 			return value;

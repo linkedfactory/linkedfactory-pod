@@ -14,7 +14,7 @@ import java.util.Base64;
 import java.util.List;
 
 public interface AAS {
-	String AAS = "aas:";
+	String AAS_NAMESPACE = "https://admin-shell.io/aas/3/0/";
 
 	IRI API_PARAMS = SimpleValueFactory.getInstance().createIRI("aas-api:params");
 
@@ -30,15 +30,15 @@ public interface AAS {
 			if (id != Record.NULL) {
 				idStr = id.getValue() != null ? id.getValue().toString() : null;
 			}
-			if (idStr == null && "ModelReference".equals(r.first(URIs.createURI(AAS + "type")).getValue())) {
-				Object keys = r.first(URIs.createURI(AAS + "keys")).getValue();
+			if (idStr == null && "ModelReference".equals(r.first(URIs.createURI(AAS_NAMESPACE + "type")).getValue())) {
+				Object keys = r.first(URIs.createURI(AAS_NAMESPACE + "keys")).getValue();
 				if (keys instanceof List<?> && ((List<?>) keys).size() == 1) {
 					Record firstKey = (Record) ((List<?>) keys).get(0);
-					Object typeValue = firstKey.first(URIs.createURI(AAS + "type")).getValue();
+					Object typeValue = firstKey.first(URIs.createURI(AAS_NAMESPACE + "type")).getValue();
 					if (typeValue != null) {
 						type = typeValue.toString();
 					}
-					Object keyValue = firstKey.first(URIs.createURI(AAS + "value")).getValue();
+					Object keyValue = firstKey.first(URIs.createURI(AAS_NAMESPACE + "value")).getValue();
 					if (keyValue != null) {
 						idStr = keyValue.toString();
 					}
@@ -53,11 +53,11 @@ public interface AAS {
 
 			if (idStr != null) {
 				if (type == null) {
-					Object modelTypeValue = r.first(URIs.createURI(AAS + "modelType")).getValue();
+					Object modelTypeValue = r.first(URIs.createURI(AAS_NAMESPACE + "modelType")).getValue();
 					if (modelTypeValue != null) {
 						type = modelTypeValue.toString();
 					} else {
-						Object kindValue = r.first(URIs.createURI(AAS + "kind")).getValue();
+						Object kindValue = r.first(URIs.createURI(AAS_NAMESPACE + "kind")).getValue();
 						if ("Instance".equals(kindValue)) {
 							type = "Submodel";
 						} else if ("Template".equals(kindValue)) {
