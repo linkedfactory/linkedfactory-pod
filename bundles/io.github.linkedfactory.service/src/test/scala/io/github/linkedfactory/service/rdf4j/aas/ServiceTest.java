@@ -7,10 +7,14 @@ import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.repository.Repository;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.repository.sail.SailRepository;
+import org.eclipse.rdf4j.repository.util.RepositoryUtil;
+import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+
+import java.io.IOException;
 
 public class ServiceTest {
 	private Repository repository;
@@ -38,6 +42,14 @@ public class ServiceTest {
 		});
 
 		sailRepository.init();
+
+		// the following data influences the query optimizer somehow
+		try (RepositoryConnection connection = sailRepository.getConnection()) {
+			connection.add(getClass().getResource("/META-INF/ontologies/rdfs.rdf"), RDFFormat.RDFXML);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
 		this.repository = sailRepository;
 	}
 
@@ -70,7 +82,7 @@ public class ServiceTest {
 					"{ select ?shell { <aas-api:endpoint> <aas-api:shells> ?shell } limit 2 } " +
 					"?shell aas:submodels ?sm . ?sm aas:semanticId ?semId . ?semId aas:keys [ !<:> ?key ] . " +
 					"?key aas:value \"https://admin-shell.io/zvei/nameplate/1/0/Nameplate\" . " +
-					"?sm (!<:>)+ ?element . " +
+					"?sm !<:> ?element . " +
 					"{ ?element a aas:Property } union { ?element a aas:MultiLanguageProperty } " +
 					"?element ?p ?o . " +
 					"} " +
