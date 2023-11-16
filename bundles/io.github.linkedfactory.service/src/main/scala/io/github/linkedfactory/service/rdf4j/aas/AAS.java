@@ -21,6 +21,8 @@ public interface AAS {
 	IRI API_SHELLS = SimpleValueFactory.getInstance().createIRI("aas-api:shells");
 	IRI API_SUBMODELS = SimpleValueFactory.getInstance().createIRI("aas-api:submodels");
 
+	String SUBMODEL_PREFIX = "urn:aas:Submodel:";
+
 	static Value toRdfValue(Object value, ValueFactory vf) {
 		if (value instanceof Record) {
 			Record r = (Record) value;

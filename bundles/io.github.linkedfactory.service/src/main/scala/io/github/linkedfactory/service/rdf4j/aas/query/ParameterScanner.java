@@ -75,10 +75,10 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 			Parameters params = createParameters(sp.getObjectVar());
 			parameterIndex.put(sp.getSubjectVar(), params);
 		} else {
-			if (KVIN.VALUE.equals(pValue)) {
+			// if (KVIN.VALUE.equals(pValue)) {
 				// ensure that parameters are created if only kvin:value is present
-				createParameters(sp.getSubjectVar());
-			}
+				// createParameters(sp.getSubjectVar());
+			// }
 
 			// normal statement
 			remove = false;

@@ -9,7 +9,6 @@ import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetch;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.WrappedIterator;
-import net.enilink.komma.core.URIs;
 import net.enilink.vocab.rdf.RDF;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
@@ -43,6 +42,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 	final AasClient client;
 	final ParameterScanner scanner;
 	final ValueFactory vf;
+	final Map<Value, Object> valueCache = new HashMap<>();
 
 	public AasEvaluationStrategy(AasClient client, ParameterScanner scanner, ValueFactory vf, Dataset dataset,
 	                             FederatedServiceResolver serviceResolver, Map<Value, Object> valueToData) {
@@ -68,7 +68,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 			return new EmptyIteration<>();
 		}
 
-		Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : null;
+		Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : valueCache.get(subjectValue);
 		if (data instanceof Record) {
 			Value predValue = getVarValue(stmt.getPredicateVar(), bs);
 			final Iterator<Record> it;
@@ -77,7 +77,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				it = WrappedIterator.create(((Record) data).iterator())
 						.filterKeep(r -> predValueStr.equals(r.getProperty().toString()));
 			} else {
-				it =  ((Record) data).iterator();
+				it = ((Record) data).iterator();
 			}
 
 			Var variable = stmt.getObjectVar();
@@ -89,14 +89,14 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				public boolean hasNext() throws QueryEvaluationException {
 					if (next == null && it.hasNext()) {
 						Record r = it.next();
-						Value newObjectValue = AAS.toRdfValue(r.getValue(), vf);
+						Value newObjectValue = toRdfValue(r.getValue());
 						if (objectValue != null && !objectValue.equals(newObjectValue)) {
 							return false;
 						}
 
 						CompositeBindingSet newBs = new CompositeBindingSet(bs);
 						if (predValue == null) {
-							newBs.addBinding(stmt.getPredicateVar().getName(), AAS.toRdfValue(r.getProperty(), vf));
+							newBs.addBinding(stmt.getPredicateVar().getName(), toRdfValue(r.getProperty()));
 						}
 						if (objectValue == null) {
 							newBs.addBinding(variable.getName(), newObjectValue);
@@ -138,7 +138,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 					@Override
 					public boolean hasNext() throws QueryEvaluationException {
 						while (next == null && it.hasNext()) {
-							Value elementValue = AAS.toRdfValue(it.next(), vf);
+							Value elementValue = toRdfValue(it.next());
 							if (objValue == null || objValue.equals(elementValue)) {
 								QueryBindingSet newBs = new QueryBindingSet(bs);
 								newBs.addBinding(predVar.getName(), vf.createIRI(RDF.NAMESPACE, "_" + (++i)));
@@ -183,13 +183,13 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 			}
 
 			// retrieve submodel if IRI starts with urn:aas:Submodel:
-			if (subjectValue.isIRI() && subjectValue.stringValue().startsWith(AasEvaluationUtil.SUBMODEL_PREFIX)) {
-				String submodelId = subjectValue.stringValue().substring(AasEvaluationUtil.SUBMODEL_PREFIX.length());
+			if (subjectValue.isIRI() && subjectValue.stringValue().startsWith(AAS.SUBMODEL_PREFIX)) {
+				String submodelId = subjectValue.stringValue().substring(AAS.SUBMODEL_PREFIX.length());
 				try (IExtendedIterator<Record> it = client.submodel(submodelId, false)) {
 					Record submodel = it.next();
 					QueryBindingSet newBs = new QueryBindingSet(bs);
 					newBs.removeBinding(subjectVar.getName());
-					newBs.addBinding(subjectVar.getName(), AAS.toRdfValue(submodel, getValueFactory()));
+					newBs.addBinding(subjectVar.getName(), toRdfValue(submodel));
 					return evaluate(stmt, newBs);
 				} catch (URISyntaxException e) {
 					throw new QueryEvaluationException(e);
@@ -197,6 +197,65 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 					throw new QueryEvaluationException(e);
 				}
 			}
+		}
+		return new EmptyIteration<>();
+	}
+
+	public CloseableIteration<BindingSet, QueryEvaluationException> evaluateFetch(BindingSet bs, Parameters params, StatementPattern stmt) {
+		final Var predVar = stmt.getPredicateVar();
+		final Var objectVar = stmt.getObjectVar();
+
+		final Value subjValue = getVarValue(stmt.getSubjectVar(), bs);
+		final Value predValue = getVarValue(predVar, bs);
+
+		if (subjValue != null) {
+			final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<>() {
+				IExtendedIterator<?> it;
+
+				@Override
+				public boolean hasNext() throws QueryEvaluationException {
+					if (it == null && !isClosed()) {
+						try {
+							if (AAS.API_SHELLS.equals(predValue)) {
+								it = client.shells();
+							} else if (AAS.API_SUBMODELS.equals(predValue)) {
+								it = client.submodels();
+							}
+						} catch (URISyntaxException e) {
+							throw new QueryEvaluationException(e);
+						} catch (IOException e) {
+							throw new QueryEvaluationException(e);
+						}
+					}
+					return it != null && it.hasNext();
+				}
+
+				@Override
+				public BindingSet next() throws QueryEvaluationException {
+					Object value = it.next();
+					CompositeBindingSet newBs = new CompositeBindingSet(bs);
+					if (!objectVar.isConstant() && !bs.hasBinding(objectVar.getName())) {
+						Value objectValue = toRdfValue(value);
+						newBs.addBinding(objectVar.getName(), objectValue);
+					}
+					return newBs;
+				}
+
+				@Override
+				public void remove() throws QueryEvaluationException {
+					throw new UnsupportedOperationException();
+				}
+
+				@Override
+				protected void handleClose() throws QueryEvaluationException {
+					if (it != null) {
+						it.close();
+						it = null;
+					}
+					super.handleClose();
+				}
+			};
+			return iteration;
 		}
 		return new EmptyIteration<>();
 	}
@@ -290,5 +349,13 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 
 	public ValueFactory getValueFactory() {
 		return vf;
+	}
+
+	public Value toRdfValue(Object value) {
+		Value rdfValue = AAS.toRdfValue(value, getValueFactory());
+		if (rdfValue instanceof HasValue) {
+			valueCache.putIfAbsent(rdfValue, ((HasValue) rdfValue).getValue());
+		}
+		return rdfValue;
 	}
 }

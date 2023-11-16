@@ -43,7 +43,7 @@ public class AasFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException>
 
     @Override
     public void meet(StatementPattern stmt) throws RDF4JException {
-        Parameters params = scanner.getParameters(stmt.getObjectVar());
+        Parameters params = scanner.getParameters(stmt);
         if (params != null) {
             stmt.replaceWith(new AasFetch(stmt.clone(), scanner.getParameters(stmt)));
         }
@@ -59,7 +59,7 @@ public class AasFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException>
             TupleExpr expr = it.next();
             if (expr instanceof StatementPattern) {
                 StatementPattern stmt = (StatementPattern) expr;
-                Parameters params = scanner.getParameters(stmt.getObjectVar());
+                Parameters params = scanner.getParameters(stmt);
                 if (params != null) {
                     stmt.replaceWith(new SingletonSet());
                     fetches.add(new AasFetch(stmt, scanner.getParameters(stmt)));
