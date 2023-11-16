@@ -30,6 +30,7 @@ import net.enilink.vocab.rdfs.RDFS;
 import org.eclipse.milo.opcua.sdk.core.Reference;
 import org.eclipse.milo.opcua.stack.core.types.builtin.ExpandedNodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
+import org.eclipse.milo.opcua.stack.core.types.builtin.QualifiedName;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 
 import javax.xml.bind.JAXBException;
@@ -72,6 +73,11 @@ public class NodeSetToRdf {
         // remove namespace index
         id = id.replaceFirst("[^;]+;", "");
         return URIs.createURI(nsUri).appendLocalPart(id);
+    }
+
+    URI toUri(QualifiedName name) {
+        String nsUri = nodeSet.getNamespaceTable().getUri(name.getNamespaceIndex());
+        return URIs.createURI(nsUri).appendLocalPart(name.getName());
     }
 
     /**
@@ -142,6 +148,10 @@ public class NodeSetToRdf {
             IResource rdfNode = em.createNamed(toUri(id), nodeType).as(IResource.class);
             rdfNode.setRdfsLabel(attrs.getDisplayName().getText());
             rdfNode.setRdfsComment(attrs.getDescription().getText());
+            QualifiedName browseName = attrs.getBrowseName();
+            if (browseName != null) {
+                rdfNode.addProperty(UA_NAMESPACE.appendLocalPart("browseName"), toUri(browseName));
+            }
             switch (attrs.getNodeClass()) {
                 case ReferenceType:
                     // mark defined references also as object properties
@@ -166,6 +176,7 @@ public class NodeSetToRdf {
             }
 
             // map references to RDF
+            boolean nodeIsReference = attrs.getNodeClass() == NodeClass.ReferenceType;
             List<Reference> refs = nodeSet.getExplicitReferences().get(id);
             refs.stream().forEach(ref -> {
                 ExpandedNodeId targetIdExpanded = ref.getTargetNodeId();
@@ -178,12 +189,13 @@ public class NodeSetToRdf {
                         em.add(new Statement(rdfTarget, refUri, rdfNode));
                     }
 
-                    // convert HasSubType to rdfs:subClassOf
+                    // convert HasSubType to rdfs:subClassOf / rdfs:subPropertyOf
                     if (PROPERTY_HASSUBTYPE.equals(refUri)) {
+                        URI property = nodeIsReference ? RDFS.PROPERTY_SUBPROPERTYOF : RDFS.PROPERTY_SUBCLASSOF;
                         if (ref.isForward()) {
-                            em.add(new Statement(rdfTarget, RDFS.PROPERTY_SUBCLASSOF, rdfNode));
+                            em.add(new Statement(rdfTarget, property, rdfNode));
                         } else {
-                            em.add(new Statement(rdfNode, RDFS.PROPERTY_SUBCLASSOF, rdfTarget));
+                            em.add(new Statement(rdfNode, property, rdfTarget));
                         }
                     }
 
