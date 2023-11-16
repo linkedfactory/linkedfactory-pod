@@ -119,7 +119,7 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 					}
 				}
 
-				// get all KVIN fetches
+				// get all (possibly remote and slow) fetches
 				List<TupleExpr> fetches = getFetches(joinArgs);
 				joinArgs.removeAll(fetches);
 				TupleExpr fetchJoins = null;
@@ -452,10 +452,25 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 					cost /= nonConstantVarCount;
 				}
 			} else {
-				// different from the standard QueryJoinOptimizer this always prefers tuple expressions with fewer unbound vars
-				int boundVarsCount = vars.size() - unboundVars.size();
-				if (boundVarsCount > 0) {
-					cost /= 1 + boundVarsCount;
+				// costs are only reduced if the subject variable is bound
+				// should ensure that statement patterns with bound subjects are
+				// evaluated first
+				boolean subjectBound = true;
+				for (Var unboundVar : vars) {
+					if (unboundVar.getParentNode() instanceof StatementPattern) {
+						StatementPattern stmt = (StatementPattern) unboundVar.getParentNode();
+						if (unboundVar == stmt.getSubjectVar()) {
+							subjectBound = false;
+							break;
+						}
+					}
+				}
+				if (subjectBound) {
+					// different from the standard QueryJoinOptimizer this always prefers tuple expressions with fewer unbound vars
+					int boundVarsCount = vars.size() - unboundVars.size();
+					if (boundVarsCount > 0) {
+						cost /= boundVarsCount;
+					}
 				}
 			}
 
