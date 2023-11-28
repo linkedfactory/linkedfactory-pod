@@ -52,7 +52,7 @@ public class KvinParquetTestBase {
                 URI property = null;
                 // adding multiple property to the same item
                 if (itemCounter == 2 && samePropCounter < 20) {
-                    property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + propertyCounter + "/measured-point-1");
+                    property = URIs.createURI("http://example.org/" + propertyCounter + "/measured-point-1");
                     samePropCounter++;
                     if (samePropCounter == 10) {
                         time = time + (604800 * chunkCounter);
@@ -62,7 +62,7 @@ public class KvinParquetTestBase {
                         chunkCounter++;
                     }
                 } else {
-                    property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + ++propertyCounter + "/measured-point-1");
+                    property = URIs.createURI("http://example.org/" + ++propertyCounter + "/measured-point-1");
                 }
                 Object value = generateRandomValue();
                 // adding only int as a value in item with id 2

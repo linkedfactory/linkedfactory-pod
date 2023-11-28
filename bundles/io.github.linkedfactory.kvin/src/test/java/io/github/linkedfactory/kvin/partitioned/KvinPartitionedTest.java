@@ -76,7 +76,7 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
     public void shouldDoFetch() {
         try {
             URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1);
-            URI property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + 1 + "/measured-point-1");
+            URI property = URIs.createURI("http://example.org/" + 1 + "/measured-point-1");
             long limit = 0;
 
             IExtendedIterator<KvinTuple> tuples = kvinPartitioned.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
