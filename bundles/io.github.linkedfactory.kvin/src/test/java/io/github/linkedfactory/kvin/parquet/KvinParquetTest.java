@@ -136,16 +136,15 @@ public class KvinParquetTest extends KvinParquetTestBase {
 
 	@Test
 	public void mappingFileCompactionTest() throws InterruptedException {
-		kvinParquet.startCompactionWorker(0, 5, TimeUnit.SECONDS);
-		Thread.sleep(1000);
-		File[] metadataFiles = new File(kvinParquet.archiveLocation + "metadata").listFiles((file, s) -> s.endsWith(".parquet"));
+		new CompactionWorker(kvinParquet.archiveLocation, kvinParquet).run();
+
+		File[] metadataFiles = new File(kvinParquet.archiveLocation + "metadata")
+				.listFiles((file, s) -> s.endsWith(".parquet"));
 		assertEquals(3, metadataFiles.length);
 
 		File nonSeqFolder = getNonSeqInsertFolder();
 		File[] dataFiles = nonSeqFolder.listFiles((file, s) -> s.endsWith(".parquet"));
 		assertEquals(1, dataFiles.length);
-
-		kvinParquet.stopCompactionWorker();
 	}
 
 	@Test
