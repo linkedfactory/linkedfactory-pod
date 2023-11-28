@@ -49,7 +49,7 @@ public class KvinPartitionedTestBase {
                 }
 
                 URI property;
-                property = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/febric/" + ++propertyCounter + "/measured-point-1");
+                property = URIs.createURI("http://example.org/" + ++propertyCounter + "/measured-point-1");
                 Object value = generateRandomValue();
                 int seqNr = 0;
                 URI context = Kvin.DEFAULT_CONTEXT;
