@@ -70,7 +70,7 @@ public class KvinParquet implements Kvin {
 	}
 
 	public void startCompactionWorker(long initialDelay, long period, TimeUnit unit) {
-		//compactionTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new CompactionWorker(archiveLocation, this), initialDelay, period, unit);
+		compactionTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new CompactionWorker(archiveLocation, this), initialDelay, period, unit);
 	}
 
 	public void stopCompactionWorker() {
@@ -541,9 +541,9 @@ public class KvinParquet implements Kvin {
 			final FilterPredicate filterFinal = filter;
 			List<List<Path>> dataFiles = getFilePath(idMappings);
 			return new NiceIterator<KvinTuple>() {
-				KvinTupleInternal internalTuple;
-				List<ParquetReader<KvinTupleInternal>> readers;
-				KvinTupleInternal[] nextTuples;
+				PriorityQueue<Pair<KvinTupleInternal, ParquetReader<KvinTupleInternal>>> nextTuples =
+						new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
+				KvinTupleInternal nextTuple;
 				long propertyValueCount;
 				int fileIndex = -1;
 				String currentProperty;
@@ -551,41 +551,50 @@ public class KvinParquet implements Kvin {
 				{
 					try {
 						nextReaders();
+						if (property == null) {
+							// directly load all relevant files if property is not given
+							// as data might be distributed over multiple files for one property
+							while (fileIndex < dataFiles.size() - 1) {
+								nextReaders();
+							}
+						}
 					} catch (IOException e) {
 						throw new RuntimeException(e);
 					}
 				}
 
 				KvinTupleInternal selectNextTuple() throws IOException {
-					int minIndex = 0;
-					KvinTupleInternal minTuple = null;
-					for (int i = 0; i < nextTuples.length; i++) {
-						KvinTupleInternal candidate = nextTuples[i];
-						if (candidate == null) {
-							continue;
-						}
-						if (minTuple == null ||
-								candidate.time < minTuple.time ||
-								candidate.time.equals(minTuple.time) &&
-										candidate.seqNr < minTuple.seqNr
-						) {
-							minTuple = candidate;
-							minIndex = i;
-						}
+					if (nextTuples.isEmpty() && fileIndex < dataFiles.size() - 1) {
+						nextReaders();
 					}
-					if (minTuple != null) {
-						nextTuples[minIndex] = readers.get(minIndex).read();
+					var min = nextTuples.isEmpty() ? null : nextTuples.poll();
+					if (min != null) {
+						var tuple = min.getSecond().read();
+						if (tuple != null) {
+							if (tuple != null) {
+								nextTuples.add(new Pair<>(tuple, min.getSecond()));
+							} else {
+								try {
+									min.getSecond().close();
+								} catch (IOException e) {
+								}
+							}
+						}
+						return min.getFirst();
 					}
-					return minTuple;
+					return null;
 				}
 
 				@Override
 				public boolean hasNext() {
+					if (nextTuple != null) {
+						return true;
+					}
 					try {
 						// skipping properties if limit is reached
 						if (limit != 0 && propertyValueCount >= limit) {
-							while ((internalTuple = selectNextTuple()) != null) {
-								String property = getProperty(internalTuple);
+							while ((nextTuple = selectNextTuple()) != null) {
+								String property = getProperty(nextTuple);
 								if (!property.equals(currentProperty)) {
 									propertyValueCount = 0;
 									currentProperty = property;
@@ -593,33 +602,20 @@ public class KvinParquet implements Kvin {
 								}
 							}
 						}
-						internalTuple = selectNextTuple();
-
-						if (internalTuple == null && fileIndex >= dataFiles.size() - 1) { // terminating condition
-							closeCurrentReaders();
-							return false;
-						} else if (internalTuple == null && fileIndex < dataFiles.size() - 1 && propertyValueCount >= limit && limit != 0) { // moving on to the next reader upon limit reach
-							closeCurrentReaders();
-							nextReaders();
-							return hasNext();
-						} else if (internalTuple == null && fileIndex < dataFiles.size() - 1) { // moving on to the next available reader
-							closeCurrentReaders();
-							nextReaders();
-							internalTuple = selectNextTuple();
-						}
+						nextTuple = selectNextTuple();
 					} catch (IOException e) {
 						throw new RuntimeException(e);
 					}
-					return true;
+					return nextTuple != null;
 				}
 
 				@Override
 				public KvinTuple next() {
-					if (internalTuple == null) {
+					if (! hasNext()) {
 						throw new NoSuchElementException();
 					} else {
-						KvinTupleInternal tuple = internalTuple;
-						internalTuple = null;
+						KvinTupleInternal tuple = nextTuple;
+						nextTuple = null;
 						return internalTupleToKvinTuple(tuple);
 					}
 				}
@@ -658,41 +654,34 @@ public class KvinParquet implements Kvin {
 
 				@Override
 				public void close() {
-					closeCurrentReaders();
+					while (! nextTuples.isEmpty()) {
+						try {
+							nextTuples.poll().getSecond().close();
+						} catch (IOException e) {
+						}
+					}
 					readLock.unlock();
 				}
 
 				void nextReaders() throws IOException {
 					fileIndex++;
 					List<Path> currentFiles = dataFiles.get(fileIndex);
-					readers = new ArrayList<>();
 					for (Path file : currentFiles) {
 						HadoopInputFile inputFile = getFile(file);
-						readers.add(AvroParquetReader.<KvinTupleInternal>builder(inputFile)
+						ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(inputFile)
 								.withDataModel(reflectData)
 								.useStatsFilter()
 								.withFilter(FilterCompat.get(filterFinal))
-								.build());
-					}
-					nextTuples = new KvinTupleInternal[readers.size()];
-					int i = 0;
-					for (ParquetReader<KvinTupleInternal> reader: readers) {
+								.build();
 						KvinTupleInternal tuple = reader.read();
 						if (tuple != null) {
-							nextTuples[i++] = tuple;
-						}
-					}
-				}
-
-				void closeCurrentReaders() {
-					if (readers != null) {
-						for (ParquetReader<?> reader : readers) {
+							nextTuples.add(new Pair<>(tuple, reader));
+						} else {
 							try {
 								reader.close();
 							} catch (IOException e) {
 							}
 						}
-						readers = null;
 					}
 				}
 			};

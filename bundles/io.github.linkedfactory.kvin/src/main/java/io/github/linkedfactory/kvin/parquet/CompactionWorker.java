@@ -48,7 +48,6 @@ public class CompactionWorker implements Runnable {
                 replaceCompactedMappingFiles(archiveLocation, compactionFolder);
                 kvinParquet.writeLock.unlock();
             }
-
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -87,7 +86,7 @@ public class CompactionWorker implements Runnable {
 
             for (Pair<String, Integer> file : mapping.getValue()) {
                 ParquetReader<IdMapping> mappingFileReader = getParquetMappingReader(
-                        HadoopInputFile.fromPath(new Path(file.getFirst()), new Configuration()));
+                        HadoopInputFile.fromPath(new Path(archiveLocation + "metadata/" + file.getFirst()), new Configuration()));
                 IdMapping idMapping = mappingFileReader.read();
                 while (idMapping != null) {
                     compactedFileWriter.write(idMapping);
@@ -144,7 +143,7 @@ public class CompactionWorker implements Runnable {
         // moving files
         File[] compactedFiles = new File(compactionFolder.toString()).listFiles();
         for (File compactedFile : compactedFiles) {
-            Files.move(Paths.get(compactedFile.getPath()), Paths.get(weekFolder.getPath() + "/" + compactedFile.getName()));
+            Files.move(Paths.get(compactedFile.getPath()), Paths.get(weekFolder.getPath(), compactedFile.getName()));
         }
 
         // deleting compaction folder
@@ -156,25 +155,42 @@ public class CompactionWorker implements Runnable {
         List<java.nio.file.Path> dataFiles = Files.walk(weekFolder.toPath(), 1)
                 .skip(1)
                 .filter(path -> path.getFileName().toString().startsWith("data_"))
-                .sorted(Comparator.naturalOrder())
                 .collect(Collectors.toList());
 
-        long compactedFileStartTime = Long.parseLong(dataFiles.get(0).getFileName().toString().split("_")[1]);
-        long compactedFileEndTime = Long.parseLong(dataFiles.get(dataFiles.size() - 1).getFileName().toString().split("_")[2].split(".parquet")[0]);
         Path compactionFolder = new Path(weekFolder.getPath(), ".compaction");
-        Path compactionFile = new Path(compactionFolder, "data_" + compactedFileStartTime + "_" + compactedFileEndTime + ".parquet");
+        Path compactionFile = new Path(compactionFolder, "data__1.parquet");
         ParquetWriter<KvinTupleInternal> compactionFileWriter = getParquetDataWriter(compactionFile);
 
+        PriorityQueue<Pair<KvinTupleInternal, ParquetReader<KvinTupleInternal>>> nextTuples =
+                new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
         for (java.nio.file.Path dataFile : dataFiles) {
-            ParquetReader<KvinTupleInternal> dataFileReader = getParquetDataReader(HadoopInputFile.fromPath(new Path(new File(dataFile.toString()).toString()), new Configuration()));
-            KvinTupleInternal tuple = dataFileReader.read();
-
-            while (tuple != null) {
-                compactionFileWriter.write(tuple);
-                tuple = dataFileReader.read();
+            ParquetReader<KvinTupleInternal> reader = getParquetDataReader(
+                    HadoopInputFile.fromPath(new Path(dataFile.toString()), new Configuration()));
+            KvinTupleInternal tuple = reader.read();
+            if (tuple != null) {
+                nextTuples.add(new Pair<>(tuple, reader));
+            } else {
+                try {
+                    reader.close();
+                } catch (IOException e) {
+                }
             }
-            dataFileReader.close();
         }
+
+        while (! nextTuples.isEmpty()) {
+            var pair = nextTuples.poll();
+            compactionFileWriter.write(pair.getFirst());
+            KvinTupleInternal tuple = pair.getSecond().read();
+            if (tuple != null) {
+                nextTuples.add(new Pair<>(tuple, pair.getSecond()));
+            } else {
+                try {
+                    pair.getSecond().close();
+                } catch (IOException e) {
+                }
+            }
+        }
+
         compactionFileWriter.close();
         kvinParquet.readLock.unlock();
 

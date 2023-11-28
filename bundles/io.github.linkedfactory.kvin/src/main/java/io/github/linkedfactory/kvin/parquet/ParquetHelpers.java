@@ -44,7 +44,7 @@ public class ParquetHelpers {
 			.name("valueBool").type().nullable().intType().noDefault()
 			.name("valueObject").type().nullable().bytesType().noDefault().endRecord();
 
-	static Pattern fileWithSeqNr = Pattern.compile("^(.*)__([0-9]+)\\..*$");
+	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
 
 	static ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
 		Configuration writerConf = new Configuration();

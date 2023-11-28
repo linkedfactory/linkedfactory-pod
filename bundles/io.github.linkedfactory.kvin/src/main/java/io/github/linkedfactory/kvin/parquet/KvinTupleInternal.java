@@ -1,6 +1,8 @@
 package io.github.linkedfactory.kvin.parquet;
 
-public class KvinTupleInternal {
+import java.util.Arrays;
+
+public class KvinTupleInternal implements Comparable<KvinTupleInternal> {
 	protected byte[] id;
 	protected Long time;
 	protected Integer seqNr;
@@ -90,5 +92,24 @@ public class KvinTupleInternal {
 
 	public void setValueBool(Integer valueBool) {
 		this.valueBool = valueBool;
+	}
+
+	@Override
+	public int compareTo(KvinTupleInternal o) {
+		int diff = Arrays.compare(id, o.id);
+		if (diff != 0) {
+			return diff;
+		}
+		diff = time.compareTo(o.time);
+		if (diff != 0) {
+			// time is reverse
+			return -diff;
+		}
+		diff = seqNr.compareTo(o.seqNr);
+		if (diff != 0) {
+			// seqNr is reverse
+			return -diff;
+		}
+		return 0;
 	}
 }
