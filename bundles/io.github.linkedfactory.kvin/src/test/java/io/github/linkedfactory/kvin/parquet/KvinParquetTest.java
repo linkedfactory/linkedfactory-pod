@@ -60,30 +60,13 @@ public class KvinParquetTest extends KvinParquetTestBase {
 		kvinParquet.put(tuples);
 	}
 
-
 	private File getNonSeqInsertFolder() {
-		File nonSeqInsertFolder = null;
-
-		File[] archiveFolders = tempDir.listFiles();
-		for (File folder : archiveFolders) {
-			if (folder.getName().startsWith("2023")) {
-				File[] subFolders = folder.listFiles();
-				for (File subFolder : subFolders) {
-					if (subFolder.getName().startsWith("41")) {
-						nonSeqInsertFolder = subFolder;
-						break;
-					}
-				}
-			}
-			if (nonSeqInsertFolder != null) break;
-		}
-		return nonSeqInsertFolder;
+		return new File(new File(tempDir, "2023"), "41");
 	}
 
 	@Test
 	public void testNonSeqPut() {
 		File nonSeqFolder = getNonSeqInsertFolder();
-		assertTrue(nonSeqFolder.getName().startsWith("41_"));
 		assertEquals(2, nonSeqFolder.listFiles().length);
 	}
 
@@ -135,7 +118,7 @@ public class KvinParquetTest extends KvinParquetTestBase {
 	}
 
 	@Test
-	public void mappingFileCompactionTest() throws InterruptedException {
+	public void mappingFileCompactionTest() {
 		new CompactionWorker(kvinParquet.archiveLocation, kvinParquet).run();
 
 		File[] metadataFiles = new File(kvinParquet.archiveLocation + "metadata")

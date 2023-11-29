@@ -22,6 +22,8 @@ import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.io.api.Binary;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,7 +38,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -47,6 +48,8 @@ import static io.github.linkedfactory.kvin.parquet.Records.encodeRecord;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
+	static final Logger log = LoggerFactory.getLogger(KvinParquet.class);
+
 	// used by reader
 	final Cache<URI, Long> itemIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final Cache<URI, Long> propertyIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
@@ -57,6 +60,7 @@ public class KvinParquet implements Kvin {
 	final Lock readLock = readWriteLock.readLock();
 	Map<Path, HadoopInputFile> inputFileCache = new HashMap<>(); // hadoop input file cache
 	Cache<Long, String> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	Cache<java.nio.file.Path, Properties> metaCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	String archiveLocation;
 
 	long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0; // global id counter
@@ -198,28 +202,6 @@ public class KvinParquet implements Kvin {
 			contextMappingWriter.close();
 			propertyMappingWriter.close();
 
-			Map<Integer, java.nio.file.Path> yearFolders = new HashMap<>();
-			List<java.nio.file.Path> existingPaths = Files.walk(Paths.get(archiveLocation), 1).skip(1)
-					.flatMap(parent -> {
-						if (!tempPath.equals(parent) && Files.isDirectory(parent)) {
-							try {
-								int year = Integer.parseInt(parent.getFileName().toString().split("_")[0]);
-								yearFolders.put(year, parent);
-
-								// TODO maybe directly filter non-relevant years and weeks
-								try {
-									return Files.walk(parent, 1).skip(1);
-								} catch (IOException e) {
-									throw new RuntimeException(e);
-								}
-							} catch (NumberFormatException e) {
-								return Stream.empty();
-							}
-						} else {
-							return Stream.empty();
-						}
-					}).collect(Collectors.toList());
-
 			Map<Integer, long[]> minMaxYears = new HashMap<>();
 			for (WriterState state : writers.values()) {
 				minMaxYears.compute(state.year, (k, v) -> {
@@ -233,53 +215,74 @@ public class KvinParquet implements Kvin {
 				});
 			}
 
-			existingPaths.forEach(p -> {
-				String yearFolder = p.getParent().getFileName().toString();
-				String weekFolder = p.getFileName().toString();
-				int year = Integer.parseInt(yearFolder.split("_")[0]);
-				int week = Integer.parseInt(weekFolder.split("_")[0]);
-
-				String key = year + "_" + week;
-				WriterState state = writers.get(key);
-				if (state != null) {
-					state.existingWeek = weekFolder;
-
-					long[] minMaxWeek = toMinMaxId(weekFolder);
-					if (minMaxWeek != null) {
-						state.minMax[0] = Math.min(state.minMax[0], minMaxWeek[0]);
-						state.minMax[1] = Math.max(state.minMax[1], minMaxWeek[1]);
-					}
-				}
-				minMaxYears.computeIfPresent(year, (k, v) -> {
-					long[] minMaxYear = toMinMaxId(yearFolder);
+			java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
+			Properties meta = new Properties();
+			if (Files.exists(metaPath)) {
+				meta.load(Files.newInputStream(metaPath));
+			}
+			meta.stringPropertyNames().forEach(yearStr -> {
+				String idRange = String.valueOf(meta.get(yearStr));
+				minMaxYears.computeIfPresent(Integer.parseInt(yearStr), (k, v) -> {
+					long[] minMaxYear = splitRange(idRange);
 					v[0] = Math.min(v[0], minMaxYear[0]);
 					v[1] = Math.max(v[1], minMaxYear[1]);
 					return v;
 				});
 			});
+			Files.walk(Paths.get(archiveLocation), 1).skip(1).forEach(parent -> {
+				if (!tempPath.equals(parent) && Files.isDirectory(parent)) {
+					java.nio.file.Path yearMetaPath = parent.resolve("meta.properties");
+					if (Files.exists(yearMetaPath)) {
+						Properties yearMeta = new Properties();
+						try {
+							yearMeta.load(Files.newInputStream(yearMetaPath));
+						} catch (IOException e) {
+							log.error("Error while loading meta data", e);
+						}
+						yearMeta.stringPropertyNames().forEach(week -> {
+							String idRange = String.valueOf(yearMeta.get(week));
+							String key = parent.getFileName() + "_" + week;
 
+							WriterState state = writers.get(key);
+							if (state != null) {
+								long[] minMaxWeek = splitRange(idRange);
+								if (minMaxWeek != null) {
+									state.minMax[0] = Math.min(state.minMax[0], minMaxWeek[0]);
+									state.minMax[1] = Math.max(state.minMax[1], minMaxWeek[1]);
+								}
+							}
+						});
+					}
+				}
+			});
 
 			Map<Integer, List<WriterState>> writersPerYear = writers.values().stream()
 					.collect(Collectors.groupingBy(s -> s.year));
 			for (Map.Entry<Integer, List<WriterState>> entry : writersPerYear.entrySet()) {
 				int year = entry.getKey();
-				java.nio.file.Path yearFolder = yearFolders.get(year);
+				String yearFolderName = String.format("%04d", year);
 				long[] minMaxYear = minMaxYears.get(year);
-				String yearFolderName = String.format("%04d", year) + "_" + minMaxYear[0] + "-" + minMaxYear[1];
-				if (yearFolder != null) {
-					yearFolder = Files.move(yearFolder, yearFolder.resolveSibling(yearFolderName));
-				} else {
-					yearFolder = Files.createDirectory(Paths.get(archiveLocation, yearFolderName));
+				meta.put(yearFolderName, minMaxYear[0] + "-" + minMaxYear[1]);
+			}
+			meta.store(Files.newOutputStream(metaPath), null);
+
+			for (Map.Entry<Integer, List<WriterState>> entry : writersPerYear.entrySet()) {
+				int year = entry.getKey();
+				String yearFolderName = String.format("%04d", year);
+				java.nio.file.Path yearFolder = Paths.get(archiveLocation, yearFolderName);
+				Files.createDirectories(yearFolder);
+
+				java.nio.file.Path yearMetaPath = yearFolder.resolve("meta.properties");
+				Properties yearMeta = new Properties();
+				if (Files.exists(yearMetaPath)) {
+					yearMeta.load(Files.newInputStream(yearMetaPath));
 				}
 				for (WriterState state : entry.getValue()) {
-					String weekFolderName = String.format("%02d", state.week) + "_" +
-							state.minMax[0] + "-" + state.minMax[1];
-					java.nio.file.Path weekFolder;
-					if (state.existingWeek != null) {
-						weekFolder = Files.move(yearFolder.resolve(state.existingWeek), yearFolder.resolve(weekFolderName));
-					} else {
-						weekFolder = Files.createDirectory(yearFolder.resolve(weekFolderName));
-					}
+					String weekFolderName = String.format("%02d", state.week);
+					yearMeta.put(weekFolderName, state.minMax[0] + "-" + state.minMax[1]);
+
+					java.nio.file.Path weekFolder = yearFolder.resolve(weekFolderName);
+					Files.createDirectories(weekFolder);
 					int maxSeqNr = Files.list(weekFolder).map(p -> {
 						String name = p.getFileName().toString();
 						if (name.startsWith("data")) {
@@ -293,6 +296,7 @@ public class KvinParquet implements Kvin {
 					String filename = "data__" + (maxSeqNr + 1) + ".parquet";
 					Files.move(state.file, weekFolder.resolve(filename));
 				}
+				yearMeta.store(Files.newOutputStream(yearMetaPath), null);
 			}
 
 			java.nio.file.Path tempMetadataPath = tempPath.resolve("metadata");
@@ -313,6 +317,9 @@ public class KvinParquet implements Kvin {
 			Files.walk(tempPath).sorted(Comparator.reverseOrder())
 					.map(java.nio.file.Path::toFile)
 					.forEach(File::delete);
+
+			// clear cache with meta data
+			metaCache.invalidateAll();
 		} finally {
 			writeLock.unlock();
 		}
@@ -539,13 +546,16 @@ public class KvinParquet implements Kvin {
 			}
 
 			final FilterPredicate filterFinal = filter;
-			List<List<Path>> dataFiles = getFilePath(idMappings);
+			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
+			if (dataFolders.isEmpty()) {
+				return NiceIterator.emptyIterator();
+			}
 			return new NiceIterator<KvinTuple>() {
 				PriorityQueue<Pair<KvinTupleInternal, ParquetReader<KvinTupleInternal>>> nextTuples =
 						new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
 				KvinTupleInternal nextTuple;
 				long propertyValueCount;
-				int fileIndex = -1;
+				int folderIndex = -1;
 				String currentProperty;
 
 				{
@@ -554,7 +564,7 @@ public class KvinParquet implements Kvin {
 						if (property == null) {
 							// directly load all relevant files if property is not given
 							// as data might be distributed over multiple files for one property
-							while (fileIndex < dataFiles.size() - 1) {
+							while (folderIndex < dataFolders.size() - 1) {
 								nextReaders();
 							}
 						}
@@ -564,7 +574,7 @@ public class KvinParquet implements Kvin {
 				}
 
 				KvinTupleInternal selectNextTuple() throws IOException {
-					if (nextTuples.isEmpty() && fileIndex < dataFiles.size() - 1) {
+					if (nextTuples.isEmpty() && folderIndex < dataFolders.size() - 1) {
 						nextReaders();
 					}
 					var min = nextTuples.isEmpty() ? null : nextTuples.poll();
@@ -611,7 +621,7 @@ public class KvinParquet implements Kvin {
 
 				@Override
 				public KvinTuple next() {
-					if (! hasNext()) {
+					if (!hasNext()) {
 						throw new NoSuchElementException();
 					} else {
 						KvinTupleInternal tuple = nextTuple;
@@ -654,7 +664,7 @@ public class KvinParquet implements Kvin {
 
 				@Override
 				public void close() {
-					while (! nextTuples.isEmpty()) {
+					while (!nextTuples.isEmpty()) {
 						try {
 							nextTuples.poll().getSecond().close();
 						} catch (IOException e) {
@@ -664,8 +674,8 @@ public class KvinParquet implements Kvin {
 				}
 
 				void nextReaders() throws IOException {
-					fileIndex++;
-					List<Path> currentFiles = dataFiles.get(fileIndex);
+					folderIndex++;
+					List<Path> currentFiles = getDataFiles(dataFolders.get(folderIndex).toString());
 					for (Path file : currentFiles) {
 						HadoopInputFile inputFile = getFile(file);
 						ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(inputFile)
@@ -685,7 +695,7 @@ public class KvinParquet implements Kvin {
 					}
 				}
 			};
-		} catch (IOException e) {
+		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
 	}
@@ -700,61 +710,56 @@ public class KvinParquet implements Kvin {
 		return false;
 	}
 
-	private long[] toMinMaxId(String name) {
-		String[] partitionMinMax = name.split("_");
-		if (partitionMinMax.length <= 1) {
-			return null;
-		}
-		String[] minMaxId = partitionMinMax[1].split("-");
+	private long[] splitRange(String range) {
+		String[] minMaxId = range.split("-");
 		if (minMaxId.length <= 1) {
 			return null;
 		}
 		return new long[]{Long.parseLong(minMaxId[0]), Long.parseLong(minMaxId[1])};
 	}
 
-	private List<List<Path>> getFilePath(IdMappings idMappings) {
-		long itemId = idMappings.itemId;
-		Predicate<java.nio.file.Path> idFilter = p -> {
-			long[] minMax = toMinMaxId(p.getFileName().toString());
-			if (minMax == null) {
-				return false;
-			}
-			return itemId >= minMax[0] && itemId <= minMax[1];
-		};
+	private List<Path> getDataFiles(String path) throws IOException {
+		return Files.walk(Paths.get(path), 1).skip(1)
+				.filter(p -> p.getFileName().toString().startsWith("data__"))
+				.map(p -> new Path(p.toString()))
+				.collect(Collectors.toList());
+	}
 
-		try {
-			return Files.walk(Paths.get(archiveLocation), 1)
-					.skip(1)
-					.filter(idFilter)
-					.sorted(Comparator.reverseOrder())
-					.flatMap(parent -> {
-						try {
-							return Files.walk(parent, 1)
-									.skip(1)
-									.filter(idFilter)
-									.sorted(Comparator.reverseOrder())
-									.map(weekParent -> {
-										try {
-											return Files.walk(weekParent, 1)
-													.skip(1)
-													.filter(path ->
-															path.getFileName().toString().startsWith("data__"))
-													.sorted(Comparator.reverseOrder())
-													// convert to Hadoop path
-													.map(p -> new Path(p.toString()))
-													.collect(Collectors.toList());
-										} catch (IOException e) {
-											throw new RuntimeException(e);
-										}
-									});
-						} catch (IOException e) {
-							throw new RuntimeException(e);
+	private List<java.nio.file.Path> getDataFolders(IdMappings idMappings) throws IOException, ExecutionException {
+		long itemId = idMappings.itemId;
+		java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
+		Properties meta = metaCache.get(metaPath, () -> {
+			Properties p = new Properties();
+			if (Files.exists(metaPath)) {
+				p.load(Files.newInputStream(metaPath));
+			}
+			return p;
+		});
+		return meta.entrySet().stream().flatMap(entry -> {
+			String idRange = (String) entry.getValue();
+			long[] minMax = splitRange(idRange);
+			if (minMax != null && itemId >= minMax[0] && itemId <= minMax[1]) {
+				java.nio.file.Path yearFolder = Paths.get(archiveLocation, entry.getKey().toString());
+				java.nio.file.Path yearMetaPath = yearFolder.resolve("meta.properties");
+				try {
+					Properties yearMeta = metaCache.get(yearMetaPath, () -> {
+						Properties p = new Properties();
+						if (Files.exists(yearMetaPath)) {
+							p.load(Files.newInputStream(yearMetaPath));
 						}
-					})
-					.collect(Collectors.toList());
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+						return p;
+					});
+					return yearMeta.entrySet().stream().filter(weekEntry -> {
+						String weekIdRange = (String) weekEntry.getValue();
+						long[] weekMinMax = splitRange(weekIdRange);
+						return weekMinMax != null && itemId >= weekMinMax[0] && itemId <= weekMinMax[1];
+					}).map(weekEntry -> yearFolder.resolve(weekEntry.getKey().toString()));
+				} catch (Exception e) {
+					log.error("Error while loading meta data", e);
+				}
+			}
+			return Stream.empty();
+		}).collect(Collectors.toList());
 	}
 
 	@Override
@@ -781,10 +786,10 @@ public class KvinParquet implements Kvin {
 			}
 
 			FilterPredicate filter = generatePropertyFetchFilter(idMappings);
-			List<List<Path>> dataFiles = getFilePath(idMappings);
+			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
 			ParquetReader<KvinTupleInternal> reader;
 
-			HadoopInputFile inputFile = getFile(dataFiles.get(0).get(0));
+			HadoopInputFile inputFile = getFile(getDataFiles(dataFolders.get(0).toString()).get(0));
 			reader = AvroParquetReader.<KvinTupleInternal>builder(inputFile)
 					.withDataModel(reflectData)
 					.useStatsFilter()
@@ -803,7 +808,7 @@ public class KvinParquet implements Kvin {
 
 			return foundTuple;
 
-		} catch (IOException e) {
+		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
 	}
@@ -864,7 +869,6 @@ public class KvinParquet implements Kvin {
 		int year;
 		int week;
 		long[] minMax = {Long.MAX_VALUE, Long.MIN_VALUE};
-		String existingWeek;
 
 		WriterState(java.nio.file.Path file, ParquetWriter<KvinTupleInternal> writer, int year, int weak) {
 			this.file = file;
