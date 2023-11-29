@@ -66,9 +66,9 @@ public class CompactionWorker implements Runnable {
 
     private ArrayList<File> getCompactionEligibleWeekFolders() {
         ArrayList<File> weekFolderList = new ArrayList<>();
-        File[] yearFolders = new File(archiveLocation).listFiles((file, s) -> !s.startsWith("metadata"));
+        File[] yearFolders = new File(archiveLocation).listFiles((file, s) -> !s.startsWith("meta"));
         for (File yearFolder : yearFolders) {
-            File[] weekFolders = yearFolder.listFiles();
+            File[] weekFolders = yearFolder.listFiles((file) -> file.isDirectory());
             for (File weekFolder : weekFolders) {
                 File[] dataFiles = weekFolder.listFiles((file, s) -> s.endsWith("parquet"));
                 if (dataFiles.length >= dataFileCompactionTrigger) {
