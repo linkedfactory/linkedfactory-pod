@@ -1,17 +1,14 @@
-package io.github.linkedfactory.kvin.archive
+package io.github.linkedfactory.kvin.leveldb
 
 import io.github.linkedfactory.kvin.KvinTuple
 import io.github.linkedfactory.kvin.parquet.KvinParquet
-import io.github.linkedfactory.kvin.leveldb.Utils.RichBuffer
-import io.github.linkedfactory.kvin.leveldb.{KvinLevelDb, KvinLevelDbBase}
 import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator}
 import net.enilink.komma.core.{URI, URIs}
 import org.iq80.leveldb.{DB, DBIterator, ReadOptions, Snapshot}
 
-import java.nio.ByteBuffer
 import java.util.Map.Entry
 
-class DatabaseArchiver(var databaseStore: KvinLevelDb, var archiveStore: KvinParquet) extends KvinLevelDbBase {
+class KvinLevelDbArchiver(var databaseStore: KvinLevelDb, var archiveStore: KvinParquet) extends KvinLevelDbBase {
 
   val ids: DB = databaseStore.getIdStore()
   val EntryType = databaseStore.getEntryTypeObj();

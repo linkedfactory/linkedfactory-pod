@@ -2,7 +2,7 @@ package io.github.linkedfactory.kvin.partitioned;
 
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinTuple;
-import io.github.linkedfactory.kvin.archive.DatabaseArchiver;
+import io.github.linkedfactory.kvin.leveldb.KvinLevelDbArchiver;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
@@ -14,7 +14,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.*;
 import static org.junit.Assert.assertEquals;
@@ -45,7 +44,7 @@ public class KvinPartitionedTest extends KvinPartitionedTestBase {
 		kvinPartitioned.runArchival();
 		kvinPartitioned.put(generateTestTuples(10, 10, 1673823600L));
 
-		NiceIterator<KvinTuple> storeIterator = new DatabaseArchiver(kvinPartitioned.hotStore, null)
+		NiceIterator<KvinTuple> storeIterator = new KvinLevelDbArchiver(kvinPartitioned.hotStore, null)
 				.getDatabaseIterator();
 		assertTrue(kvinPartitioned.archiveStorePath.listFiles().length > 0); // main folder
 		assertEquals(2, new File(kvinPartitioned.archiveStorePath, "2023").listFiles(f -> f.isDirectory()).length); // folder for year 2023

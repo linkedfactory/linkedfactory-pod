@@ -1,13 +1,11 @@
 package io.github.linkedfactory.kvin.partitioned;
 
-import com.google.common.collect.LinkedListMultimap;
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinListener;
 import io.github.linkedfactory.kvin.KvinTuple;
-import io.github.linkedfactory.kvin.archive.DatabaseArchiver;
+import io.github.linkedfactory.kvin.leveldb.KvinLevelDbArchiver;
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.kvin.parquet.KvinParquet;
-import io.github.linkedfactory.kvin.parquet.KvinTupleInternal;
 import io.github.linkedfactory.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
@@ -15,14 +13,12 @@ import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import org.apache.commons.io.FileUtils;
-import org.apache.parquet.hadoop.ParquetReader;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -52,7 +48,7 @@ public class KvinPartitioned implements Kvin {
 		try {
 			storeLock.writeLock().lock();
 			createNewHotDataStore();
-			new DatabaseArchiver(hotStoreArchive, archiveStore).archive();
+			new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
 			this.hotStoreArchive.close();
 			this.hotStoreArchive = null;
 			FileUtils.deleteDirectory(this.currentStoreArchivePath);
