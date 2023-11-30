@@ -1,8 +1,7 @@
-package io.github.linkedfactory.kvin.archive
+package io.github.linkedfactory.kvin
 
-import io.github.linkedfactory.kvin.KvinTuple
+import io.github.linkedfactory.kvin.leveldb.{KvinLevelDb, KvinLevelDbArchiver}
 import io.github.linkedfactory.kvin.parquet.{KvinParquet, KvinParquetTestBase}
-import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
 import net.enilink.commons.iterator.NiceIterator
 import org.apache.commons.io.FileUtils
 import org.junit.Assert.assertTrue
@@ -11,7 +10,7 @@ import org.junit.{After, Before, Test}
 import java.io.File
 import java.nio.file.Files
 
-class DatabaseArchiverTest {
+class KvinLevelDbArchiverTest {
 
   var archiveTempDir: File = null
   var leveldbTempDir: File = null
@@ -42,7 +41,7 @@ class DatabaseArchiverTest {
 
   @Test
   def testLevelDbToParquetArchival(): Unit = {
-    val dbArchiver: DatabaseArchiver = new DatabaseArchiver(databaseStore, archiveStore)
+    val dbArchiver: KvinLevelDbArchiver = new KvinLevelDbArchiver(databaseStore, archiveStore)
     dbArchiver.archive()
     assertTrue(new File(archiveTempDir.getPath).listFiles.length > 0)
   }
