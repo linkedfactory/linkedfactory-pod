@@ -71,6 +71,9 @@ public class KvinParquet implements Kvin {
 
 	public KvinParquet(String archiveLocation) {
 		this.archiveLocation = archiveLocation;
+		if (! this.archiveLocation.endsWith("/")) {
+			this.archiveLocation = this.archiveLocation + "/";
+		}
 	}
 
 	public void startCompactionWorker(long initialDelay, long period, TimeUnit unit) {
@@ -415,9 +418,10 @@ public class KvinParquet implements Kvin {
 						break;
 				}
 				FilterPredicate filter = eq(FilterApi.binaryColumn("value"), Binary.fromString(entity.toString()));
-				Path metadataFolder = new Path(this.archiveLocation + "metadata/");
-				File[] mappingFiles = new File(metadataFolder.toString()).listFiles((file, s) -> s.startsWith(name + "Mapping"));
-
+				File[] mappingFiles = new File(this.archiveLocation + "metadata/").listFiles((file, s) -> s.startsWith(name + "Mapping"));
+				if (mappingFiles == null) {
+					return 0L;
+				}
 				IdMapping mapping = null;
 				for (File mappingFile : mappingFiles) {
 					mapping = fetchMappingIds(new Path(mappingFile.getPath()), filter);
@@ -784,6 +788,9 @@ public class KvinParquet implements Kvin {
 				idMappings.propertyId = propertyId;
 				idMappings.contextId = contextId;
 			}
+			if (idMappings.itemId == 0L) {
+				return null;
+			}
 
 			FilterPredicate filter = generatePropertyFetchFilter(idMappings);
 			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
@@ -807,7 +814,6 @@ public class KvinParquet implements Kvin {
 			}
 
 			return foundTuple;
-
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
@@ -822,9 +828,7 @@ public class KvinParquet implements Kvin {
 
 			@Override
 			public boolean hasNext() {
-				if (currentTuple != null) {
-					return true;
-				} else {
+				if (currentTuple == null && previousTuple != null) {
 					currentTuple = getFirstTuple(URIs.createURI(previousTuple.getItem()), previousTuple.getItemId(), previousTuple.getPropertyId() + 1, previousTuple.contextId);
 				}
 				return currentTuple != null;
@@ -832,6 +836,9 @@ public class KvinParquet implements Kvin {
 
 			@Override
 			public URI next() {
+				if (currentTuple == null) {
+					throw new NoSuchElementException();
+				}
 				URI property = URIs.createURI(currentTuple.getProperty());
 				previousTuple = currentTuple;
 				currentTuple = null;

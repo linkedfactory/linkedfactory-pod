@@ -58,6 +58,8 @@ public class KvinPartitionedTestBase {
                 /*if (tupleCount % 1000 == 0) {
                     System.out.println("wrote " + tupleCount + " tuples");
                 }*/
+
+                // System.out.println(new KvinTuple(currentItem, property, context, time, seqNr, value));
                 return new KvinTuple(currentItem, property, context, time, seqNr, value);
             }
 
