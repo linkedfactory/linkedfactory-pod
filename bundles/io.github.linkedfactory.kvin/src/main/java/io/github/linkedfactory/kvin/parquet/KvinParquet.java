@@ -65,24 +65,11 @@ public class KvinParquet implements Kvin {
 
 	long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0; // global id counter
 	WriteContext writeContext = new WriteContext();
-	// compaction scheduler
-	ScheduledExecutorService scheduledExecutorService = new ScheduledThreadPoolExecutor(1);
-	Future<?> compactionTaskfuture;
 
 	public KvinParquet(String archiveLocation) {
 		this.archiveLocation = archiveLocation;
 		if (! this.archiveLocation.endsWith("/")) {
 			this.archiveLocation = this.archiveLocation + "/";
-		}
-	}
-
-	public void startCompactionWorker(long initialDelay, long period, TimeUnit unit) {
-		compactionTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new CompactionWorker(archiveLocation, this), initialDelay, period, unit);
-	}
-
-	public void stopCompactionWorker() {
-		if (compactionTaskfuture != null) {
-			compactionTaskfuture.cancel(true);
 		}
 	}
 
@@ -329,7 +316,7 @@ public class KvinParquet implements Kvin {
 	}
 
 	private Calendar getDate(long timestamp) {
-		Timestamp ts = new Timestamp(timestamp * 1000);
+		Timestamp ts = new Timestamp(timestamp);
 		Date date = new java.sql.Date(ts.getTime());
 		Calendar calendar = Calendar.getInstance();
 		calendar.setTime(date);
@@ -860,7 +847,6 @@ public class KvinParquet implements Kvin {
 
 	@Override
 	public void close() {
-		stopCompactionWorker();
 	}
 
 	// id enum

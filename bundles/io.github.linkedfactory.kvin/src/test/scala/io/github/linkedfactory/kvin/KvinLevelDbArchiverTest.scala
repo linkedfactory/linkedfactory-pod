@@ -1,7 +1,8 @@
 package io.github.linkedfactory.kvin
 
 import io.github.linkedfactory.kvin.leveldb.{KvinLevelDb, KvinLevelDbArchiver}
-import io.github.linkedfactory.kvin.parquet.{KvinParquet, KvinParquetTestBase}
+import io.github.linkedfactory.kvin.parquet.KvinParquet
+import io.github.linkedfactory.kvin.util.KvinTupleGenerator
 import net.enilink.commons.iterator.NiceIterator
 import org.apache.commons.io.FileUtils
 import org.junit.Assert.assertTrue
@@ -33,7 +34,9 @@ class KvinLevelDbArchiverTest {
   }
 
   def addTestData(): Unit = {
-    val data: NiceIterator[KvinTuple] = KvinParquetTestBase.generateRandomKvinTuples(50, 500, 10)
+    val data: NiceIterator[KvinTuple] = new KvinTupleGenerator().generate(1697407200000L, 10, 10, 10,
+      "http://localhost:8080/linkedfactory/demofactory/new-week/{}",
+      "http://example.org/{}");
     while (data.hasNext) {
       databaseStore.put(data.next)
     }
