@@ -1,292 +1,337 @@
 package io.github.linkedfactory.kvin.partitioned;
 
+import com.google.common.collect.LinkedListMultimap;
 import io.github.linkedfactory.kvin.Kvin;
 import io.github.linkedfactory.kvin.KvinListener;
 import io.github.linkedfactory.kvin.KvinTuple;
 import io.github.linkedfactory.kvin.archive.DatabaseArchiver;
 import io.github.linkedfactory.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.kvin.parquet.KvinParquet;
+import io.github.linkedfactory.kvin.parquet.KvinTupleInternal;
+import io.github.linkedfactory.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
+import net.enilink.commons.iterator.WrappedIterator;
+import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import org.apache.commons.io.FileUtils;
+import org.apache.parquet.hadoop.ParquetReader;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.*;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class KvinPartitioned implements Kvin {
-    ArrayList<KvinListener> listeners = new ArrayList<>();
-    ScheduledExecutorService scheduledExecutorService = new ScheduledThreadPoolExecutor(1);
-    Future<?> archivalTaskfuture;
-    File currentStorePath, oldLevelDbHotDataStorePath;
-    KvinLevelDb levelDbHotDataStore, oldLevelDbHotDataStore;
-    KvinParquet archiveStore;
-    AtomicBoolean isArchivalInProcess = new AtomicBoolean(false);
+	final ReadWriteLock storeLock = new ReentrantReadWriteLock();
+	protected List<KvinListener> listeners = new ArrayList<>();
+	protected ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(0);
+	protected Future<?> archivalTaskfuture;
+	protected File path;
+	protected File currentStorePath, currentStoreArchivePath, archiveStorePath;
+	protected volatile KvinLevelDb hotStore, hotStoreArchive;
+	protected KvinParquet archiveStore;
 
+	public KvinPartitioned(File path, long archivalSize, TimeUnit timeUnit) throws IOException {
+		this.path = path;
+		this.currentStorePath = new File(path, "current");
+		this.currentStoreArchivePath = new File(path, "current-archive");
+		this.archiveStorePath = new File(path, "archive");
+		Files.createDirectories(this.currentStorePath.toPath());
+		hotStore = new KvinLevelDb(this.currentStorePath);
+		hotStoreArchive = hotStore;
+		archiveStore = new KvinParquet(archiveStorePath.toString());
+		// archivalTaskfuture = scheduledExecutorService.scheduleAtFixedRate(this::runArchival, archivalSize, archivalSize, timeUnit);
+	}
 
-    public KvinPartitioned(File storePath, long archivalSize, TimeUnit timeUnit) {
-        this.currentStorePath = storePath;
-        levelDbHotDataStore = new KvinLevelDb(this.currentStorePath);
-        oldLevelDbHotDataStore = levelDbHotDataStore;
-        archiveStore = new KvinParquet("./target/archive/");
-        archivalTaskfuture = scheduledExecutorService.scheduleAtFixedRate(new ArchivalHandler(this), archivalSize, archivalSize, timeUnit);
-    }
+	void runArchival() {
+		try {
+			storeLock.writeLock().lock();
+			createNewHotDataStore();
+			new DatabaseArchiver(hotStoreArchive, archiveStore).archive();
+			this.hotStoreArchive.close();
+			this.hotStoreArchive = null;
+			FileUtils.deleteDirectory(this.currentStoreArchivePath);
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		} finally {
+			storeLock.writeLock().unlock();
+		}
+	}
 
-    @Override
-    public boolean addListener(KvinListener listener) {
-        try {
-            listeners.add(listener);
-            return true;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
+	@Override
+	public boolean addListener(KvinListener listener) {
+		try {
+			listeners.add(listener);
+			return true;
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
 
-    @Override
-    public boolean removeListener(KvinListener listener) {
-        try {
-            listeners.remove(listener);
-            return true;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
+	@Override
+	public boolean removeListener(KvinListener listener) {
+		try {
+			listeners.remove(listener);
+			return true;
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
 
-    @Override
-    public void put(KvinTuple... tuples) {
-        this.put(Arrays.asList(tuples));
-    }
+	@Override
+	public void put(KvinTuple... tuples) {
+		this.put(Arrays.asList(tuples));
+	}
 
-    @Override
-    public void put(Iterable<KvinTuple> tuples) {
-        try {
-            putInternal(tuples);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
+	@Override
+	public void put(Iterable<KvinTuple> tuples) {
+		hotStore.put(tuples);
+	}
 
-    private synchronized void putInternal(Iterable<KvinTuple> tuples) throws IOException {
-        for (KvinTuple tuple : tuples) {
-            levelDbHotDataStore.put(Collections.singletonList(tuple));
-        }
-    }
+	public void createNewHotDataStore() throws IOException {
+		hotStore.close();
+		FileUtils.deleteDirectory(this.currentStoreArchivePath);
+		Files.move(this.currentStorePath.toPath(), this.currentStoreArchivePath.toPath());
+		hotStore = new KvinLevelDb(currentStorePath);
+		hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
+	}
 
-    public synchronized void createNewHotDataStore() {
-        oldLevelDbHotDataStorePath = this.currentStorePath;
-        this.currentStorePath = new File(this.currentStorePath.getPath() + System.currentTimeMillis());
-        levelDbHotDataStore.close();
-        levelDbHotDataStore = new KvinLevelDb(currentStorePath);
-        oldLevelDbHotDataStore = new KvinLevelDb(oldLevelDbHotDataStorePath);
-    }
+	@Override
+	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
+		return fetch(item, property, context, KvinTuple.TIME_MAX_VALUE, 0, limit, 0, null);
+	}
 
-    public KvinLevelDb getOldLevelDbHotDataStore() {
-        return this.oldLevelDbHotDataStore;
-    }
+	@Override
+	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
+		IExtendedIterator<KvinTuple> internalResult = fetchInternal(item, property, context, end, begin, limit);
+		if (op != null) {
+			internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
+				@Override
+				protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
+					return new KvinTuple(item, property, context, time, seqNr, value);
+				}
+			};
+		}
+		return internalResult;
+	}
 
-    public void deleteOldLevelDbHotDataStore() throws IOException {
-        this.oldLevelDbHotDataStore.close();
-        FileUtils.deleteDirectory(new File(oldLevelDbHotDataStorePath.getAbsolutePath()));
-    }
+	protected IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, long end, long begin, long limit) {
+		return new NiceIterator<>() {
+			final PriorityQueue<Pair<KvinTuple, IExtendedIterator<KvinTuple>>> nextTuples = new PriorityQueue<>(
+					Comparator.comparing(Pair::getFirst, (a, b) -> {
+						int diff = a.property.equals(b.property) ? 0 : a.toString().compareTo(b.toString());
+						if (diff != 0) {
+							return diff;
+						}
+						diff = Long.compare(a.time, b.time);
+						if (diff != 0) {
+							// time is reverse
+							return -diff;
+						}
+						diff = Integer.compare(a.seqNr, b.seqNr);
+						if (diff != 0) {
+							// seqNr is reverse
+							return -diff;
+						}
+						return 0;
+					}));
+			long propertyValueCount;
+			URI currentProperty;
+			KvinTuple nextTuple;
 
-    public NiceIterator<KvinTuple> readCurrentHotStore() {
-        return new DatabaseArchiver(levelDbHotDataStore, archiveStore).getDatabaseIterator();
-    }
+			@Override
+			public boolean hasNext() {
+				if (nextTuple != null) {
+					return true;
+				}
+				if (currentProperty == null) {
+					// this is the case if the iterator is not yet initialized
+					storeLock.readLock().lock();
+					List<Kvin> stores = new ArrayList<>();
+					stores.add(hotStore);
+					if (hotStoreArchive != null) {
+						stores.add(hotStoreArchive);
+					}
+					stores.add(archiveStore);
+					for (Kvin store : stores) {
+						IExtendedIterator<KvinTuple> storeTuples = store.fetch(item, property, context, end, begin,
+								limit, 0L, null);
+						if (storeTuples.hasNext()) {
+							nextTuples.add(new Pair<>(storeTuples.next(), storeTuples));
+						} else {
+							storeTuples.close();
+						}
+					}
+				}
+				// skip properties if limit is reached
+				if (limit != 0 && propertyValueCount >= limit) {
+					while (!nextTuples.isEmpty()) {
+						var next = nextTuples.poll();
+						nextTuple = next.getFirst();
+						if (next.getSecond().hasNext()) {
+							nextTuples.add(new Pair<>(next.getSecond().next(), next.getSecond()));
+						} else {
+							next.getSecond().close();
+						}
+						if (!nextTuple.property.equals(currentProperty)) {
+							propertyValueCount = 1;
+							currentProperty = nextTuple.property;
+							break;
+						}
+					}
+				}
+				if (nextTuple == null && !nextTuples.isEmpty()) {
+					var next = nextTuples.poll();
+					nextTuple = next.getFirst();
+					if (currentProperty == null || !nextTuple.property.equals(currentProperty)) {
+						propertyValueCount = 1;
+						currentProperty = nextTuple.property;
+					}
+					if (next.getSecond().hasNext()) {
+						nextTuples.add(new Pair<>(next.getSecond().next(), next.getSecond()));
+					} else {
+						next.getSecond().close();
+					}
+					propertyValueCount++;
+				}
+				return nextTuple != null;
+			}
 
-    public boolean isArchivalInProcess() {
-        return isArchivalInProcess.get();
-    }
+			@Override
+			public KvinTuple next() {
+				if (hasNext()) {
+					KvinTuple result = nextTuple;
+					nextTuple = null;
+					return result;
+				}
+				throw new NoSuchElementException();
+			}
 
-    public void setArchivalInProcess(boolean status) {
-        isArchivalInProcess.set(status);
-    }
+			@Override
+			public void close() {
+				try {
+					while (!nextTuples.isEmpty()) {
+						try {
+							nextTuples.poll().getSecond().close();
+						} catch (Exception e) {
+							// TODO log exception
+						}
+					}
+				} finally {
+					storeLock.readLock().unlock();
+				}
+			}
+		};
+	}
 
-    @Override
-    public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
-        return fetchInternal(item, property, context, null, null, limit, null, null);
-    }
+	@Override
+	public long delete(URI item, URI property, URI context, long end, long begin) {
+		try {
+			storeLock.readLock().lock();
+			return hotStore.delete(item, property, context, end, begin);
+		} finally {
+			storeLock.readLock().unlock();
+		}
+	}
 
-    @Override
-    public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
-        return fetchInternal(item, property, context, end, begin, limit, interval, op);
-    }
+	@Override
+	public boolean delete(URI item) {
+		try {
+			storeLock.readLock().lock();
+			return hotStore.delete(item);
+		} finally {
+			storeLock.readLock().unlock();
+		}
+	}
 
-    private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
+	@Override
+	public IExtendedIterator<URI> descendants(URI item) {
+		storeLock.readLock().lock();
+		IExtendedIterator<URI> results = hotStore.descendants(item);
+		return new NiceIterator<>() {
+			@Override
+			public boolean hasNext() {
+				return results.hasNext();
+			}
 
-        return new NiceIterator<>() {
+			@Override
+			public URI next() {
+				return results.next();
+			}
 
-            boolean isReadingFromHotStore = true;
-            boolean isReadingFromArchiveStore = false;
-            boolean isEndOfAllRead = false;
-            IExtendedIterator<KvinTuple> hotStoreResult = null;
-            IExtendedIterator<KvinTuple> archiveStoreResult = null;
-            KvinTuple lazyReadInitialArchiveStoreTuple = null;
+			@Override
+			public void close() {
+				try {
+					results.close();
+				} finally {
+					storeLock.readLock().unlock();
+				}
+			}
+		};
+	}
 
+	@Override
+	public IExtendedIterator<URI> descendants(URI item, long limit) {
+		storeLock.readLock().lock();
+		IExtendedIterator<URI> results = hotStore.descendants(item, limit);
+		return new NiceIterator<>() {
+			@Override
+			public boolean hasNext() {
+				return results.hasNext();
+			}
 
-            @Override
-            public boolean hasNext() {
-                return !isEndOfAllRead && isItemRecordExist();
-            }
+			@Override
+			public URI next() {
+				return results.next();
+			}
 
-            @Override
-            public KvinTuple next() {
-                KvinTuple tuple = null;
-                if (isReadingFromHotStore) {
-                    tuple = readFromHotStore();
-                } else if (isReadingFromArchiveStore) {
-                    tuple = readFromArchiveStore(false);
-                }
-                return tuple;
-            }
+			@Override
+			public void close() {
+				try {
+					results.close();
+				} finally {
+					storeLock.readLock().unlock();
+				}
+			}
+		};
+	}
 
-            private KvinTuple readFromHotStore() {
-                KvinTuple tuple;
+	@Override
+	public IExtendedIterator<URI> properties(URI item) {
+		Set<URI> properties = new HashSet<>();
+		try {
+			storeLock.readLock().lock();
+			properties.addAll(hotStore.properties(item).toList());
+			if (hotStoreArchive != null) {
+				properties.addAll(hotStoreArchive.properties(item).toList());
+			}
+			properties.addAll(archiveStore.properties(item).toList());
+		} finally {
+			storeLock.readLock().unlock();
+		}
+		return WrappedIterator.create(properties.iterator());
+	}
 
-                tuple = hotStoreResult.hasNext() ? hotStoreResult.next() : null;
-                boolean isNextTupleAvailable = hotStoreResult.hasNext();
+	@Override
+	public long approximateSize(URI item, URI property, URI context, long end, long begin) {
+		return 0;
+	}
 
-                if (!isNextTupleAvailable || tuple == null) {
-                    isReadingFromHotStore = false;
-                    lazyReadInitialArchiveStoreTuple = readFromArchiveStore(true);
-                    if (lazyReadInitialArchiveStoreTuple == null) {
-                        isEndOfAllRead = true;
-                    }
-                }
-
-                return tuple;
-            }
-
-            private KvinTuple readFromArchiveStore(boolean lazyRead) {
-                KvinTuple tuple;
-
-                if (lazyRead) {
-                    if (interval != null && op != null) {
-                        archiveStoreResult = archiveStore.fetch(item, property, context, end, begin, limit, interval, op);
-                    } else {
-                        archiveStoreResult = archiveStore.fetch(item, property, context, limit);
-                    }
-                    tuple = archiveStoreResult.hasNext() ? archiveStoreResult.next() : null;
-                } else {
-                    if (lazyReadInitialArchiveStoreTuple == null) {
-                        if (archiveStoreResult == null) {
-                            if (interval != null && op != null) {
-                                archiveStoreResult = archiveStore.fetch(item, property, context, end, begin, limit, interval, op);
-                            } else {
-                                archiveStoreResult = archiveStore.fetch(item, property, context, limit);
-                            }
-                        }
-
-                        tuple = archiveStoreResult.next();
-                        boolean isNextTupleExist = archiveStoreResult.hasNext();
-                        if (tuple == null || !isNextTupleExist) {
-                            isReadingFromArchiveStore = false;
-                            isEndOfAllRead = true;
-                        }
-                    } else {
-                        tuple = lazyReadInitialArchiveStoreTuple;
-                        lazyReadInitialArchiveStoreTuple = null;
-                    }
-                }
-                return tuple;
-            }
-
-            private boolean isItemRecordExist() {
-                if (hotStoreResult == null) {
-                    // reading from oldHotStore(read-only store) if archival is in process
-                    if (isArchivalInProcess()) {
-                        if (interval != null && op != null) {
-                            hotStoreResult = oldLevelDbHotDataStore.fetch(item, property, context, end, begin, limit, interval, op);
-                        } else {
-                            hotStoreResult = oldLevelDbHotDataStore.fetch(item, property, context, limit);
-                        }
-                    }
-
-                    // reading from hotStore when archival is not in process
-                    if (hotStoreResult == null && interval != null && op != null) {
-                        hotStoreResult = levelDbHotDataStore.fetch(item, property, context, end, begin, limit, interval, op);
-                    } else if (hotStoreResult == null) {
-                        hotStoreResult = levelDbHotDataStore.fetch(item, property, context, limit);
-                    }
-                }
-
-                // fallback to archiveStore
-                if (!hotStoreResult.hasNext()) {
-                    if (interval != null && op != null) {
-                        archiveStoreResult = archiveStore.fetch(item, property, context, end, begin, limit, interval, op);
-                    } else {
-                        archiveStoreResult = archiveStore.fetch(item, property, context, limit);
-                    }
-                    isReadingFromArchiveStore = archiveStoreResult.hasNext();
-                    isReadingFromHotStore = false;
-                } else {
-                    isReadingFromHotStore = true;
-                }
-                return isReadingFromHotStore || isReadingFromArchiveStore;
-            }
-
-            @Override
-            public void close() {
-                super.close();
-            }
-        };
-    }
-
-    @Override
-    public long delete(URI item, URI property, URI context, long end, long begin) {
-        return 0;
-    }
-
-    @Override
-    public boolean delete(URI item) {
-        return false;
-    }
-
-    @Override
-    public IExtendedIterator<URI> descendants(URI item) {
-        return null;
-    }
-
-    @Override
-    public IExtendedIterator<URI> descendants(URI item, long limit) {
-        return null;
-    }
-
-    @Override
-    public IExtendedIterator<URI> properties(URI item) {
-        IExtendedIterator<URI> hotStoreResult = null;
-        IExtendedIterator<URI> archiveStoreResult = null;
-
-        // reading from oldHotStore(read-only store) if archival is in process
-        if (isArchivalInProcess()) {
-            hotStoreResult = oldLevelDbHotDataStore.properties(item);
-        }
-        // reading from hotStore when archival is not in process
-        if (hotStoreResult == null) {
-            hotStoreResult = levelDbHotDataStore.properties(item);
-        }
-        // fallback to archiveStore
-        if (!hotStoreResult.hasNext()) {
-            archiveStoreResult = archiveStore.properties(item);
-        }
-
-        return hotStoreResult.hasNext() ? hotStoreResult : archiveStoreResult;
-    }
-
-    @Override
-    public long approximateSize(URI item, URI property, URI context, long end, long begin) {
-        return 0;
-    }
-
-    @Override
-    public void close() {
-        levelDbHotDataStore.close();
-        if (oldLevelDbHotDataStore != null) oldLevelDbHotDataStore.close();
-        archivalTaskfuture.cancel(false);
-    }
+	@Override
+	public void close() {
+		try {
+			storeLock.readLock().lock();
+			hotStore.close();
+			if (hotStoreArchive != null) {
+				hotStoreArchive.close();
+			}
+		} finally {
+			storeLock.readLock().unlock();
+		}
+	}
 }

@@ -93,8 +93,10 @@ class DatabaseArchiver(var databaseStore: KvinLevelDb, var archiveStore: KvinPar
 
   def archive(): Unit = {
     val dbIterator: NiceIterator[KvinTuple] = getDatabaseIterator
-    archiveStore.put(dbIterator)
-    archiveStore.close()
-    dbIterator.close()
+    try {
+      archiveStore.put(dbIterator)
+    } finally {
+      dbIterator.close()
+    }
   }
 }
