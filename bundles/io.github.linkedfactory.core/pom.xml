@@ -12,7 +12,7 @@
 
 	<properties>
 		<parquet.version>1.13.1</parquet.version>
-		<hadoop.client.version>3.3.5</hadoop.client.version>
+		<hadoop.version>3.3.5</hadoop.version>
 	</properties>
 
 	<dependencies>
@@ -38,51 +38,103 @@
 					<artifactId>*</artifactId>
 				</exclusion>
 			</exclusions>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.iq80.snappy</groupId>
 			<artifactId>snappy</artifactId>
 			<version>0.4</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.influxdb</groupId>
 			<artifactId>influxdb-java</artifactId>
 			<version>2.10</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.parquet</groupId>
 			<artifactId>parquet-common</artifactId>
 			<version>${parquet.version}</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.parquet</groupId>
 			<artifactId>parquet-encoding</artifactId>
 			<version>${parquet.version}</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.parquet</groupId>
 			<artifactId>parquet-column</artifactId>
 			<version>${parquet.version}</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.parquet</groupId>
 			<artifactId>parquet-hadoop</artifactId>
 			<version>${parquet.version}</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.parquet</groupId>
 			<artifactId>parquet-avro</artifactId>
 			<version>${parquet.version}</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.avro</groupId>
 			<artifactId>avro</artifactId>
 			<version>1.11.1</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-client</artifactId>
-			<version>${hadoop.client.version}</version>
+			<version>${hadoop.version}</version>
+			<scope>provided</scope>
+			<exclusions>
+				<exclusion>
+					<artifactId>hadoop-auth</artifactId>
+					<groupId>org.apache.hadoop</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>*</artifactId>
+					<groupId>org.eclipse.jetty</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>*</artifactId>
+					<groupId>com.google.re2j</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>*</artifactId>
+					<groupId>ch.qos.reload4j</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>slf4j-reload4j</artifactId>
+					<groupId>org.slf4j</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>*</artifactId>
+					<groupId>org.apache.curator</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>*</artifactId>
+					<groupId>org.apache.kerby</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>*t</artifactId>
+					<groupId>com.sun.jersey</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>*</artifactId>
+					<groupId>com.fasterxml.jackson.jaxrs</groupId>
+				</exclusion>
+				<exclusion>
+					<artifactId>*</artifactId>
+					<groupId>com.fasterxml.jackson.module</groupId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.openjdk.jmh</groupId>
@@ -183,13 +235,18 @@
 				<artifactId>maven-dependency-plugin</artifactId>
 				<executions>
 					<execution>
-						<id>copy-libraries</id>
+						<id>unpack-libraries</id>
 						<phase>validate</phase>
-
+						<goals>
+							<goal>unpack-dependencies</goal>
+						</goals>
 						<configuration>
+							<outputDirectory>${project.build.outputDirectory}</outputDirectory>
+							<excludeTransitive>false</excludeTransitive>
 							<includeGroupIds>
-								org.iq80.leveldb,org.iq80.snappy,io.github.pcmind,org.influxdb,com.squareup.okhttp3,com.squareup.okio
+								io.github.pcmind,org.iq80.snappy,org.apache.parquet,org.apache.avro,org.apache.hadoop
 							</includeGroupIds>
+							<excludes>META-INF/versions/**</excludes>
 						</configuration>
 					</execution>
 				</executions>
