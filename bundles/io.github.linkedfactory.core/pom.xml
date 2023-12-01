@@ -95,10 +95,6 @@
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
-					<artifactId>hadoop-auth</artifactId>
-					<groupId>org.apache.hadoop</groupId>
-				</exclusion>
-				<exclusion>
 					<artifactId>*</artifactId>
 					<groupId>org.eclipse.jetty</groupId>
 				</exclusion>
