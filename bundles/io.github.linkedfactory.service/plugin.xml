@@ -2,6 +2,6 @@
 <?eclipse version="3.4"?>
 <plugin>
   <extension point="net.enilink.komma.model.modelModules">
-    <module class="io.github.linkedfactory.service.komma.ModelModule"></module>
+    <module class="io.github.linkedfactory.core.komma.ModelModule"></module>
   </extension>
 </plugin>

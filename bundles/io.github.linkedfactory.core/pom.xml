@@ -17,6 +17,18 @@
 
 	<dependencies>
 		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>osgi.core</artifactId>
+			<version>6.0.0</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>osgi.cmpn</artifactId>
+			<version>6.0.0</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
 			<groupId>io.github.pcmind</groupId>
 			<artifactId>leveldb</artifactId>
 			<version>1.1</version>
@@ -86,7 +98,7 @@
 		</dependency>
 		<dependency>
 			<groupId>net.enilink.komma</groupId>
-			<artifactId>net.enilink.komma.core</artifactId>
+			<artifactId>net.enilink.komma.model</artifactId>
 			<version>${komma.version}</version>
 		</dependency>
 		<dependency>
