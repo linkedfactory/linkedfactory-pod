@@ -16,7 +16,7 @@
 package io.github.linkedfactory.service
 
 import com.google.common.cache.CacheBuilder
-import io.github.linkedfactory.kvin.{Kvin, KvinListener}
+import io.github.linkedfactory.core.kvin.{Kvin, KvinListener}
 import io.github.linkedfactory.service.model.ssn._
 import io.github.linkedfactory.service.util.ResourceHelpers.withTransaction
 import net.enilink.komma.core._

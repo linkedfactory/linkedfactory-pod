@@ -1,6 +1,6 @@
 package io.github.linkedfactory.service.rdf4j.common;
 
-import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.core.kvin.Record;
 import net.enilink.komma.core.URI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;

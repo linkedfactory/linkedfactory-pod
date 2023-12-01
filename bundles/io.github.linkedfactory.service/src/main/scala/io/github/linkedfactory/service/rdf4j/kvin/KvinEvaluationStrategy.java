@@ -1,9 +1,8 @@
 package io.github.linkedfactory.service.rdf4j.kvin;
 
-import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.KvinTuple;
-import io.github.linkedfactory.kvin.Record;
-import io.github.linkedfactory.service.rdf4j.common.BNodeWithValue;
+import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.common.HasValue;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.common.query.InnerJoinIterator;

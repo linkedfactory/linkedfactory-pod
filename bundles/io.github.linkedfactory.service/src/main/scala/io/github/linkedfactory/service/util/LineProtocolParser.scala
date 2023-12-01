@@ -15,8 +15,8 @@
  */
 package io.github.linkedfactory.service.util
 
-import io.github.linkedfactory.kvin.Kvin
-import io.github.linkedfactory.kvin.KvinTuple
+import io.github.linkedfactory.core.kvin.Kvin
+import io.github.linkedfactory.core.kvin.KvinTuple
 
 import java.io.BufferedReader
 import java.io.InputStream

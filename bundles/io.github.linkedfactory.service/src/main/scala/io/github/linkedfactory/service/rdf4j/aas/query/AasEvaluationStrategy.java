@@ -1,6 +1,6 @@
 package io.github.linkedfactory.service.rdf4j.aas.query;
 
-import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.aas.AAS;
 import io.github.linkedfactory.service.rdf4j.aas.AasClient;
 import io.github.linkedfactory.service.rdf4j.common.HasValue;

@@ -2,7 +2,7 @@ package io.github.linkedfactory.service.rdf4j.aas;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.core.kvin.Record;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.commons.iterator.WrappedIterator;

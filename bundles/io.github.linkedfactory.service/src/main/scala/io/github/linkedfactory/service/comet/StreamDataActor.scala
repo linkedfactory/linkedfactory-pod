@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service.comet
 
-import io.github.linkedfactory.kvin.{Kvin, KvinListener, KvinTuple}
+import io.github.linkedfactory.core.kvin.{Kvin, KvinListener, KvinTuple}
 import io.github.linkedfactory.service.Data
 import net.enilink.komma.core.{URI, URIs}
 import net.liftweb.common.Full

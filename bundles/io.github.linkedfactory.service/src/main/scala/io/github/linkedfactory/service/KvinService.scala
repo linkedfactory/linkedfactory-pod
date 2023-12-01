@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple, Record}
+import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.service.util.{JsonFormatParser, LineProtocolParser}
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}
@@ -238,7 +238,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
     try {
-      new io.github.linkedfactory.kvin.util.JsonFormatParser(in).parse().iterator().asScala
+      new io.github.linkedfactory.core.kvin.util.JsonFormatParser(in).parse().iterator().asScala
         .foreach { tuple =>
           publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
           store.put(tuple)

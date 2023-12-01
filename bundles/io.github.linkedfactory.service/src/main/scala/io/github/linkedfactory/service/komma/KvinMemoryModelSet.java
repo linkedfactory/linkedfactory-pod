@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service.komma;
 
-import io.github.linkedfactory.kvin.DelegatingKvin;
-import io.github.linkedfactory.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.DelegatingKvin;
+import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.service.rdf4j.kvin.KvinSail;
 import net.enilink.composition.annotations.Iri;
 import net.enilink.komma.model.MODELS;

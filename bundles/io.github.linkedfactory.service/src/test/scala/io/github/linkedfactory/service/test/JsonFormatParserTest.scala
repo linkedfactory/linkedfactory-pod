@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service.test
 
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple, Record}
+import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.service.util.JsonFormatParser
 import net.enilink.komma.core.URIs
 import net.liftweb.common.Full

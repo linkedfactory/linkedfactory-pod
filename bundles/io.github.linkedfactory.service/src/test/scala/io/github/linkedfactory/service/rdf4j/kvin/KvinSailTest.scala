@@ -15,8 +15,8 @@
  */
 package io.github.linkedfactory.service.rdf4j.kvin
 
-import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
+import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
+import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple}
 import net.enilink.komma.core.URIs
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver
 import org.eclipse.rdf4j.repository.Repository

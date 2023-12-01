@@ -1,6 +1,6 @@
 package io.github.linkedfactory.service.rdf4j.aas;
 
-import io.github.linkedfactory.kvin.Record;
+import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.service.rdf4j.common.Conversions;
 import io.github.linkedfactory.service.rdf4j.common.IRIWithValue;
 import net.enilink.komma.core.URIs;

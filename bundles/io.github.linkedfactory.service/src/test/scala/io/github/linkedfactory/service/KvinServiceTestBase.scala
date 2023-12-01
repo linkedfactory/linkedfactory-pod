@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.kvin.KvinTuple
-import io.github.linkedfactory.kvin.util.JsonFormatWriter
+import io.github.linkedfactory.core.kvin.KvinTuple
+import io.github.linkedfactory.core.kvin.util.JsonFormatWriter
 import net.enilink.commons.iterator.WrappedIterator
 import net.enilink.komma.core.URIs
 

@@ -1,6 +1,6 @@
 package io.github.linkedfactory.service.rdf4j.kvin;
 
-import io.github.linkedfactory.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.Kvin;
 import net.enilink.komma.core.KommaModule;
 import net.enilink.komma.em.ManagerCompositionModule;
 import net.enilink.komma.literals.LiteralConverter;

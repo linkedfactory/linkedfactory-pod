@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.kvin.Kvin
+import io.github.linkedfactory.core.kvin.Kvin
 import net.enilink.komma.core.{IReference, URI, URIs}
 import net.enilink.komma.em.concepts.IResource
 import net.enilink.platform.lift.LiftService

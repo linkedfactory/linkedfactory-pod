@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service.rdf4j;
 
-import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.http.KvinHttp;
+import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.http.KvinHttp;
 import io.github.linkedfactory.service.rdf4j.aas.AasFederatedService;
 import io.github.linkedfactory.service.rdf4j.kvin.KvinFederatedService;
 import io.github.linkedfactory.service.rdf4j.kvin.functions.DateTimeFunction;

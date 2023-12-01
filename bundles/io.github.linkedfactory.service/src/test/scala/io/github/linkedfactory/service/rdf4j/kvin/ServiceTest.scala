@@ -15,8 +15,8 @@
  */
 package io.github.linkedfactory.service.rdf4j.kvin
 
-import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple, Record}
+import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
+import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import net.enilink.komma.core.URIs
 import net.enilink.vocab.rdf.RDF
 import org.eclipse.rdf4j.model.Literal

@@ -1,6 +1,6 @@
 package io.github.linkedfactory.service.rdf4j.kvin;
 
-import io.github.linkedfactory.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.service.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.service.rdf4j.kvin.query.KvinFetchOptimizer;
 import io.github.linkedfactory.service.rdf4j.kvin.query.ParameterScanner;

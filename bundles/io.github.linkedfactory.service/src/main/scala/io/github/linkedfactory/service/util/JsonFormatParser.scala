@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service.util
 
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple, Record}
+import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import net.enilink.komma.core.{URI, URIs}
 import net.liftweb.common.Box.box2Iterable
 import net.liftweb.common._

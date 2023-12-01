@@ -289,7 +289,7 @@
 	</distributionManagement>
 
 	<modules>
-		<module>bundles/io.github.linkedfactory.kvin</module>
+		<module>bundles/io.github.linkedfactory.core</module>
 		<module>bundles/io.github.linkedfactory.service</module>
 		<module>bundles/io.github.linkedfactory.opcua</module>
 	</modules>

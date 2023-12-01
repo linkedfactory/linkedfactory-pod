@@ -15,10 +15,10 @@
  */
 package io.github.linkedfactory.service.rdf4j.kvin
 
-import io.github.linkedfactory.kvin.http.KvinHttp
-import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
-import io.github.linkedfactory.kvin.util.JsonFormatParser
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
+import io.github.linkedfactory.core.kvin.http.KvinHttp
+import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
+import io.github.linkedfactory.core.kvin.util.JsonFormatParser
+import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple}
 import io.github.linkedfactory.service.rdf4j.kvin.KvinFederatedService
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}

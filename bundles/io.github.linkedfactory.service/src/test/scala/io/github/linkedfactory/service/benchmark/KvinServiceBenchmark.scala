@@ -1,9 +1,9 @@
 package io.github.linkedfactory.service.benchmark
 
 import com.google.inject.Guice
-import io.github.linkedfactory.kvin.leveldb.KvinLevelDb
-import io.github.linkedfactory.kvin.util.JsonFormatWriter
-import io.github.linkedfactory.kvin.{Kvin, KvinTuple}
+import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
+import io.github.linkedfactory.core.kvin.util.JsonFormatWriter
+import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple}
 import io.github.linkedfactory.service.{KvinService, MockHttpServletRequest}
 import net.enilink.commons.iterator.WrappedIterator
 import net.enilink.komma.core.{KommaModule, URI, URIs}

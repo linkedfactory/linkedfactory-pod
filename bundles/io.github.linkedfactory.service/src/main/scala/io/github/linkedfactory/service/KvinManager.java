@@ -1,20 +1,17 @@
 package io.github.linkedfactory.service;
 
-import io.github.linkedfactory.kvin.Kvin;
-import io.github.linkedfactory.kvin.leveldb.KvinLevelDb;
+import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import net.enilink.komma.em.concepts.IResource;
 import net.enilink.platform.core.PluginConfigModel;
 
 import java.io.File;
-import java.io.IOException;
 import java.net.URISyntaxException;
-import java.nio.file.Files;
 import java.util.Hashtable;
 
 import org.eclipse.core.runtime.Platform;
-import org.osgi.framework.FrameworkUtil;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
