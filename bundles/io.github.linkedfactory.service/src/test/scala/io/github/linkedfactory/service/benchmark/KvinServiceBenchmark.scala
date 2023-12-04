@@ -157,7 +157,7 @@ class KvinServiceBenchmark {
 
       if (i % 10000 == 0) {
         println("  at: " + i)
-        val json: String = new JsonFormatWriter().toJsonString(WrappedIterator.create(tuples.iterator()))
+        val json = JsonFormatWriter.toJsonString(WrappedIterator.create(tuples.iterator()))
         queue.put(Some(json))
         tuples = new util.ArrayList[KvinTuple]()
       }

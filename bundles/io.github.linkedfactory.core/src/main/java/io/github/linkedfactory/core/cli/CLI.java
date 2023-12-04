@@ -33,7 +33,7 @@ public class CLI {
 
 	private static Kvin createStore(String storeLocation) {
 		URI locationUri = URIs.createURI(storeLocation);
-		Path path = null;
+		Path path;
 		if (locationUri.scheme() != null && locationUri.scheme().startsWith("http")) {
 			return new KvinHttp(storeLocation);
 		} else if (locationUri.isFile()) {
