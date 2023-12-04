@@ -200,6 +200,4 @@ public class JsonFormatParser {
             return node;
         }
     }
-
-
 }

@@ -11,7 +11,7 @@ class KvinServiceTestBase {
 
   def generateJsonFromSingleTuple(): String = {
     val tuple: KvinTuple = new KvinTuple(URIs.createURI("http://example.org/item1"), URIs.createURI("http://example.org/properties/p1"), null, 1619424246120L, 57.934878949512196)
-    val json: String = new JsonFormatWriter().toJsonString(WrappedIterator.create(new util.ArrayList[KvinTuple](util.Arrays.asList(tuple)).iterator))
+    val json: String = JsonFormatWriter.toJsonString(WrappedIterator.create(new util.ArrayList[KvinTuple](util.Arrays.asList(tuple)).iterator))
     json
   }
 
@@ -23,7 +23,7 @@ class KvinServiceTestBase {
     for (count <- 1 to 6) {
       tuples.add(new KvinTuple(URIs.createURI("http://example.org/item2"), URIs.createURI("http://example.org/properties/p2"), null, timeList(count - 1), valueList(count - 1)))
     }
-    val json: String = new JsonFormatWriter().toJsonString(WrappedIterator.create(tuples.iterator()))
+    val json: String = JsonFormatWriter.toJsonString(WrappedIterator.create(tuples.iterator()))
     json
   }
 }

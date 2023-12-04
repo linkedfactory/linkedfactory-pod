@@ -1,76 +1,121 @@
 package io.github.linkedfactory.core.kvin.util;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.core.JsonEncoding;
+import com.fasterxml.jackson.core.JsonGenerator;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 
-public class JsonFormatWriter {
-    ObjectMapper mapper;
-    public JsonFormatWriter() {
-        mapper = new ObjectMapper();
-    }
-    public String toJsonString(IExtendedIterator<KvinTuple> tuples) {
-        try {
-            // grouping
-            Map<URI, Map<URI, List<KvinTuple>>> groupedData = new HashMap<>();
-            for (KvinTuple tuple : tuples) {
-                Map<URI, List<KvinTuple>> propertyData = groupedData.computeIfAbsent(tuple.item, (item) -> new HashMap<>());
-                List<KvinTuple> values = propertyData.computeIfAbsent(tuple.property, (property) -> new ArrayList<>());
-                values.add(tuple);
-            }
+public class JsonFormatWriter implements AutoCloseable {
+	final JsonGenerator generator;
 
-            // converting tuples to json
-            ObjectNode rootNode = mapper.createObjectNode();
+	URI lastItem;
+	URI lastProperty;
+	boolean endObject = false;
 
-            for (Map.Entry<URI, Map<URI, List<KvinTuple>>> data : groupedData.entrySet()) {
-                ObjectNode predicateNode = mapper.createObjectNode();
-                for (Map.Entry<URI, List<KvinTuple>> property : data.getValue().entrySet()) {
-                    ArrayList<ObjectNode> objectList = new ArrayList<>();
-                    for (KvinTuple tuple : property.getValue()) {
-                        ObjectNode objectNode = mapper.createObjectNode();
-                        objectNode.put("value", objectToJson(tuple.value));
-                        objectNode.put("time", tuple.time);
-                        objectNode.put("seqNr", tuple.seqNr);
-                        objectList.add(objectNode);
-                    }
-                    predicateNode.set(property.getKey().toString(), mapper.createArrayNode().addAll(objectList));
-                }
-                rootNode.set(data.getKey().toString(), predicateNode);
-            }
+	public JsonFormatWriter(OutputStream outputStream, boolean prettyPrint) throws IOException {
+		generator = JsonFormatParser.jsonFactory.createGenerator(outputStream, JsonEncoding.UTF8);
+		if (prettyPrint) {
+			generator.useDefaultPrettyPrinter();
+		}
+		generator.writeStartObject();
+	}
 
-            String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(rootNode);
-            return json;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
+	public JsonFormatWriter(OutputStream outputStream) throws IOException {
+		this(outputStream, false);
+	}
 
-    private JsonNode objectToJson(Object object) {
-        JsonNode rootNode;
+	public static String toJsonString(IExtendedIterator<KvinTuple> it) throws IOException {
+		ByteArrayOutputStream baos = new ByteArrayOutputStream();
+		JsonFormatWriter writer = new JsonFormatWriter(baos);
+		try {
+			while (it.hasNext()) {
+				writer.writeTuple(it.next());
+			}
+		} finally {
+			it.close();
+		}
+		try {
+			writer.close();
+		} catch (Exception e) {
+			throw (e instanceof IOException ? (IOException) e : new IOException(e));
+		}
+		return new String(baos.toByteArray(), "UTF-8");
+	}
 
-        if (object instanceof Record) {
-            ObjectNode node = mapper.createObjectNode();
-            node.set(((Record) object).getProperty().toString(), mapper.valueToTree(objectToJson(((Record) object).getValue())));
-            rootNode = node;
-        } else {
-            rootNode = mapper.valueToTree(object);
-        }
+	public void writeTuple(KvinTuple tuple) throws IOException {
+		URI item = tuple.item;
+		URI property = tuple.property;
+		if (lastItem == null) {
+			generator.writeObjectFieldStart(item.toString());
+		} else if (!lastItem.equals(item)) {
+			if (lastProperty != null) {
+				// close last property
+				generator.writeEndArray();
+				// close last item
+				generator.writeEndObject();
+				lastProperty = null;
+			}
+			generator.writeObjectFieldStart(item.toString());
+		}
+		if (lastProperty == null) {
+			generator.writeArrayFieldStart(property.toString());
+		} else if (!lastProperty.equals(property)) {
+			// close last property
+			generator.writeEndArray();
+			generator.writeArrayFieldStart(property.toString());
+		}
+		lastItem = item;
+		lastProperty = property;
 
-        //handling id -> @id conversion
-        if (!rootNode.path("id").isMissingNode() && !rootNode.isTextual()) {
-            ObjectNode node = (ObjectNode) rootNode;
-            node.set("@id", rootNode.get("id"));
-            node.remove("id");
-        }
-        return rootNode;
-    }
+		generator.writeStartObject();
+		generator.writeNumberField("time", tuple.time);
+		if (tuple.seqNr > 0) {
+			generator.writeNumberField("seqNr", tuple.seqNr);
+		}
+		generator.writeFieldName("value");
+		writeValue(tuple.value);
+		generator.writeEndObject();
+	}
+
+	protected void writeValue(Object value) throws IOException {
+		if (value instanceof Record) {
+			generator.writeStartObject();
+			for (Record r : (Record) value) {
+				generator.writeFieldName(r.getProperty().toString());
+				writeValue(r.getValue());
+			}
+			generator.writeEndObject();
+		} else if (value instanceof URI) {
+			generator.writeStartObject();
+			generator.writeStringField("@id", value.toString());
+			generator.writeEndObject();
+		} else {
+			generator.writeObject(value);
+		}
+	}
+
+	public void end() throws IOException {
+		if (!endObject) {
+			if (lastProperty != null) {
+				generator.writeEndArray();
+			}
+			if (lastItem != null) {
+				generator.writeEndObject();
+			}
+			generator.writeEndObject();
+			endObject = true;
+		}
+	}
+
+	@Override
+	public void close() throws Exception {
+		end();
+		generator.close();
+	}
 }
