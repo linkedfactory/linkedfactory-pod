@@ -245,8 +245,8 @@
 							<outputDirectory>${project.build.outputDirectory}</outputDirectory>
 							<excludeTransitive>false</excludeTransitive>
 							<includeGroupIds>
-								io.github.pcmind,org.iq80.snappy,org.apache.parquet,org.apache.avro,org.apache.hadoop,
-								com.fasterxml.woodstox,com.codehaus.woodstox
+								io.github.pcmind,org.iq80.snappy,org.apache.parquet,org.apache.avro,
+								org.apache.hadoop,com.fasterxml.woodstox,org.codehaus.woodstox
 							</includeGroupIds>
 							<excludes>META-INF/versions/**</excludes>
 						</configuration>
@@ -255,4 +255,53 @@
 			</plugin>
 		</plugins>
 	</build>
+
+	<profiles>
+		<profile>
+			<id>cli</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-shade-plugin</artifactId>
+						<version>3.2.1</version>
+						<executions>
+							<execution>
+								<phase>package</phase>
+								<goals>
+									<goal>shade</goal>
+								</goals>
+								<configuration>
+									<transformers>
+										<transformer
+												implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+											<manifestEntries>
+												<Main-Class>io.github.linkedfactory.core.cli.CLI</Main-Class>
+												<Bundle-SymbolicName>io.github.linkedfactory.ore</Bundle-SymbolicName>
+											</manifestEntries>
+										</transformer>
+										<transformer
+												implementation="org.apache.maven.plugins.shade.resource.XmlAppendingTransformer">
+											<resource>plugin.xml</resource>
+										</transformer>
+									</transformers>
+
+									<filters>
+										<filter>
+											<artifact>*:*</artifact>
+											<excludes>
+												<exclude>META-INF/*.SF</exclude>
+												<exclude>META-INF/*.DSA</exclude>
+												<exclude>META-INF/*.RSA</exclude>
+											</excludes>
+										</filter>
+									</filters>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>

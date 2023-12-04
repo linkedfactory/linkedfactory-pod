@@ -12,8 +12,10 @@ import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import picocli.CommandLine;
-import picocli.CommandLine.*;
-import picocli.CommandLine.Model.CommandSpec;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
+import picocli.CommandLine.ParentCommand;
 
 import java.io.IOException;
 import java.nio.file.Files;
