@@ -245,7 +245,8 @@
 							<outputDirectory>${project.build.outputDirectory}</outputDirectory>
 							<excludeTransitive>false</excludeTransitive>
 							<includeGroupIds>
-								io.github.pcmind,org.iq80.snappy,org.apache.parquet,org.apache.avro,org.apache.hadoop
+								io.github.pcmind,org.iq80.snappy,org.apache.parquet,org.apache.avro,org.apache.hadoop,
+								com.fasterxml.woodstox,com.codehaus.woodstox
 							</includeGroupIds>
 							<excludes>META-INF/versions/**</excludes>
 						</configuration>
