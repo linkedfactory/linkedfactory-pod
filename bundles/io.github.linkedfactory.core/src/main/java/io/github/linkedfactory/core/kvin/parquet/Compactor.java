@@ -68,7 +68,7 @@ public class Compactor {
 
 	private void performMappingFileCompaction() throws IOException {
 		Map<String, List<Pair<String, Integer>>> mappingFiles = getMappingFiles(Paths.get(archiveLocation, "metadata"));
-		if (mappingFiles.get("itemMapping").size() >= mappingFileCompactionTrigger) {
+		if (mappingFiles.get("items").size() >= mappingFileCompactionTrigger) {
 			kvinParquet.readLock.lock();
 			generateCompactedMappingFiles(mappingFiles, new File(compactionFolder, "metadata"));
 			kvinParquet.readLock.unlock();

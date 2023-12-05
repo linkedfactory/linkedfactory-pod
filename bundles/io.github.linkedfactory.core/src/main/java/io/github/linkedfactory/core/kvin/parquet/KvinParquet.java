@@ -133,9 +133,9 @@ public class KvinParquet implements Kvin {
 
 			java.nio.file.Path tempPath = Paths.get(archiveLocation, ".tmp");
 			Files.createDirectories(tempPath);
-			Path itemMappingFile = new Path(tempPath.toString(), "metadata/itemMapping__1.parquet");
-			Path propertyMappingFile = new Path(tempPath.toString(), "metadata/propertyMapping__1.parquet");
-			Path contextMappingFile = new Path(tempPath.toString(), "metadata/contextMapping__1.parquet");
+			Path itemMappingFile = new Path(tempPath.toString(), "metadata/items__1.parquet");
+			Path propertyMappingFile = new Path(tempPath.toString(), "metadata/properties__1.parquet");
+			Path contextMappingFile = new Path(tempPath.toString(), "metadata/contexts__1.parquet");
 
 			ParquetWriter<Object> itemMappingWriter = getParquetMappingWriter(itemMappingFile);
 			ParquetWriter<Object> propertyMappingWriter = getParquetMappingWriter(propertyMappingFile);
@@ -394,18 +394,18 @@ public class KvinParquet implements Kvin {
 				String name;
 				switch (idType) {
 					case ITEM_ID:
-						name = "item";
+						name = "items";
 						break;
 					case PROPERTY_ID:
-						name = "property";
+						name = "properties";
 						break;
 					default:
 						//case CONTEXT_ID:
-						name = "context";
+						name = "contexts";
 						break;
 				}
 				FilterPredicate filter = eq(FilterApi.binaryColumn("value"), Binary.fromString(entity.toString()));
-				File[] mappingFiles = new File(this.archiveLocation + "metadata/").listFiles((file, s) -> s.startsWith(name + "Mapping"));
+				File[] mappingFiles = new File(this.archiveLocation + "metadata/").listFiles((file, s) -> s.startsWith(name));
 				if (mappingFiles == null) {
 					return 0L;
 				}
@@ -491,7 +491,7 @@ public class KvinParquet implements Kvin {
 			try {
 				FilterPredicate filter = eq(FilterApi.longColumn("id"), propertyId);
 				Path metadataFolder = new Path(this.archiveLocation + "metadata/");
-				File[] mappingFiles = new File(metadataFolder.toString()).listFiles((file, s) -> s.startsWith("propertyMapping"));
+				File[] mappingFiles = new File(metadataFolder.toString()).listFiles((file, s) -> s.startsWith("properties"));
 				IdMapping propertyMapping = null;
 
 				for (File mappingFile : mappingFiles) {
