@@ -1,0 +1,10 @@
+# contains a complete list of supported file systems
+# this is defined here as unpack-dependencies overrides this file
+org.apache.hadoop.fs.LocalFileSystem
+org.apache.hadoop.fs.viewfs.ViewFileSystem
+org.apache.hadoop.fs.HarFileSystem
+org.apache.hadoop.fs.http.HttpFileSystem
+org.apache.hadoop.fs.http.HttpsFileSystem
+org.apache.hadoop.hdfs.DistributedFileSystem
+org.apache.hadoop.hdfs.web.WebHdfsFileSystem
+org.apache.hadoop.hdfs.web.SWebHdfsFileSystem

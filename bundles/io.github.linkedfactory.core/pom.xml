@@ -234,21 +234,47 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-dependency-plugin</artifactId>
+				<configuration>
+					<outputDirectory>${project.build.outputDirectory}</outputDirectory>
+					<excludeTransitive>false</excludeTransitive>
+					<excludes>
+						META-INF/versions/**,
+						META-INF/MANIFEST.MF,
+						META-INF/services/org.apache.hadoop.fs.FileSystem,
+						module-info.class
+					</excludes>
+				</configuration>
 				<executions>
 					<execution>
-						<id>unpack-libraries</id>
+						<id>unpack-by-groupid</id>
 						<phase>validate</phase>
 						<goals>
 							<goal>unpack-dependencies</goal>
 						</goals>
 						<configuration>
-							<outputDirectory>${project.build.outputDirectory}</outputDirectory>
-							<excludeTransitive>false</excludeTransitive>
 							<includeGroupIds>
-								io.github.pcmind,org.iq80.snappy,org.apache.parquet,org.apache.avro,
-								org.apache.hadoop,com.fasterxml.woodstox,org.codehaus.woodstox
+								io.github.pcmind,
+								org.iq80.snappy,
+								org.apache.parquet,
+								org.apache.avro,
+								org.apache.hadoop,
+								com.fasterxml.woodstox,
+								org.codehaus.woodstox
 							</includeGroupIds>
-							<excludes>META-INF/versions/**</excludes>
+						</configuration>
+					</execution>
+					<execution>
+						<id>unpack-by-artifactid</id>
+						<phase>validate</phase>
+						<goals>
+							<goal>unpack-dependencies</goal>
+						</goals>
+						<configuration>
+							<includeArtifactIds>
+								commons-configuration2,
+								commons-compress,
+								zstd-jni
+							</includeArtifactIds>
 						</configuration>
 					</execution>
 				</executions>
@@ -284,6 +310,8 @@
 												implementation="org.apache.maven.plugins.shade.resource.XmlAppendingTransformer">
 											<resource>plugin.xml</resource>
 										</transformer>
+										<transformer
+												implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
 									</transformers>
 
 									<filters>
