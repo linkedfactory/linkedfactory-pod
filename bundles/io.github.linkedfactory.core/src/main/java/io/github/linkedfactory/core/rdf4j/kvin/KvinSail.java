@@ -6,6 +6,7 @@ import net.enilink.komma.em.ManagerCompositionModule;
 import net.enilink.komma.literals.LiteralConverter;
 import net.enilink.komma.rdf4j.RDF4JValueConverter;
 
+import java.io.File;
 import java.util.Locale;
 
 import org.eclipse.rdf4j.model.ValueFactory;

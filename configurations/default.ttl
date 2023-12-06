@@ -24,7 +24,7 @@ group:Administrators foaf:member user:admin .
 <urn:enilink:data> a models:KvinMemoryModelSet ;
 	models:inference false .
 
-# <urn:enilink:data> a models:PersistentModelSet ;
+#<urn:enilink:data> a models:KvinPersistentModelSet ;
 #	models:inference false ;
 #	models:repository <workspace:/data/> .
 

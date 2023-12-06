@@ -4,6 +4,7 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.rdf4j.common.HasValue;
+import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.ILiteral;
 import net.enilink.komma.core.IReference;
@@ -76,7 +77,7 @@ public class KvinConnection extends SailConnectionWrapper {
 
 	private void createKvinTuples() {
 		long currentTime = System.currentTimeMillis();
-		kvinSail.getKvin().put(WrappedIterator.create(
+		try (IExtendedIterator<KvinTuple> tuples = WrappedIterator.create(
 				stmtsBySubject.entrySet().stream().filter(e -> e.getKey().isIRI())
 						.flatMap(e -> {
 							IRI item = (IRI) e.getKey();
@@ -85,7 +86,11 @@ public class KvinConnection extends SailConnectionWrapper {
 								return toKvinTuple(item, predicate, stmt.getObject(), currentTime);
 							});
 							//System.out.println(tuple);
-						}).iterator()));
+						}).iterator())) {
+			if (tuples.hasNext()) {
+				kvinSail.getKvin().put();
+			}
+		}
 	}
 
 	private KvinTuple toKvinTuple(IRI item, IRI predicate, Value rdfValue, long currentTime) {
