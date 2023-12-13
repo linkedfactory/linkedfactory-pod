@@ -34,12 +34,14 @@ class KvinLevelDbArchiverTest {
   }
 
   def addTestData(): Unit = {
-    val data: NiceIterator[KvinTuple] = new KvinTupleGenerator().generate(1697407200000L, 10, 10, 10,
-      "http://localhost:8080/linkedfactory/demofactory/new-week/{}",
-      "http://example.org/{}");
-    while (data.hasNext) {
-      databaseStore.put(data.next)
-    }
+    databaseStore.put(new KvinTupleGenerator()
+      .setStartTime(1697407200000L)
+      .setItems(10)
+      .setPropertiesPerItem(10)
+      .setValuesPerProperty(10)
+      .setItemPattern("http://localhost:8080/linkedfactory/demofactory/new-week/{}")
+      .setPropertyPattern("http://example.org/{}")
+      .generate())
   }
 
   @Test

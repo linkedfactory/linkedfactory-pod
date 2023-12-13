@@ -47,14 +47,12 @@ public class ParquetHelpers {
 	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
 
 	static ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
-		Configuration writerConf = new Configuration();
-		writerConf.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
-		return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
+		return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, configuration))
 				.withSchema(kvinTupleSchema)
-				.withConf(writerConf)
+				.withConf(configuration)
 				.withDictionaryEncoding(true)
-				.withCompressionCodec(CompressionCodecName.ZSTD)
-				//.withCompressionCodec(CompressionCodecName.SNAPPY)
+				//.withCompressionCodec(CompressionCodecName.ZSTD)
+				.withCompressionCodec(CompressionCodecName.SNAPPY)
 				.withRowGroupSize(ROW_GROUP_SIZE)
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
@@ -62,15 +60,18 @@ public class ParquetHelpers {
 				.build();
 	}
 
+	static Configuration configuration = new Configuration();
+	static {
+		configuration.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
+	}
+
 	static ParquetWriter<Object> getParquetMappingWriter(Path dataFile) throws IOException {
-		Configuration writerConf = new Configuration();
-		writerConf.setInt("parquet.zstd.compressionLevel", 12);
-		return AvroParquetWriter.builder(HadoopOutputFile.fromPath(dataFile, new Configuration()))
+		return AvroParquetWriter.builder(HadoopOutputFile.fromPath(dataFile, configuration))
 				.withSchema(idMappingSchema)
-				.withConf(writerConf)
+				.withConf(configuration)
 				.withDictionaryEncoding(true)
-				.withCompressionCodec(CompressionCodecName.ZSTD)
-				//.withCompressionCodec(CompressionCodecName.SNAPPY)
+				//.withCompressionCodec(CompressionCodecName.ZSTD)
+				.withCompressionCodec(CompressionCodecName.SNAPPY)
 				.withRowGroupSize(ROW_GROUP_SIZE)
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)

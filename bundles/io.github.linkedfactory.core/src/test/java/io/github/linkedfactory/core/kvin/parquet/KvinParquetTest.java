@@ -26,9 +26,13 @@ public class KvinParquetTest {
 		tupleGenerator = new KvinTupleGenerator();
 		kvinParquet = new KvinParquet(tempDir.toString());
 		// 02.10.2023 0:00
-		kvinParquet.put(tupleGenerator.generate(1696197600000L, 500, 10, 10,
-				"http://localhost:8080/linkedfactory/demofactory/{}",
-				"http://example.org/{}"));
+		kvinParquet.put(tupleGenerator.setStartTime(1696197600000L)
+				.setItems(500)
+				.setPropertiesPerItem(10)
+				.setValuesPerProperty(10)
+				.setItemPattern("http://localhost:8080/linkedfactory/demofactory/{}")
+				.setPropertyPattern("http://example.org/{}")
+				.generate());
 		assertTrue(tempDir.listFiles().length > 0);
 		nonSequentialPut();
 	}
@@ -41,15 +45,23 @@ public class KvinParquetTest {
 	public void nonSequentialPut() {
 		// inserting as a new week
 		// 16.10.2023 0:00
-		kvinParquet.put(tupleGenerator.generate(1697407200000L, 10, 10, 10,
-				"http://localhost:8080/linkedfactory/demofactory/new-week/{}",
-				"http://example.org/{}"));
+		kvinParquet.put(tupleGenerator.setStartTime(1697407200000L)
+				.setItems(10)
+				.setPropertiesPerItem(10)
+				.setValuesPerProperty(10)
+				.setItemPattern("http://localhost:8080/linkedfactory/demofactory/new-week/{}")
+				.setPropertyPattern("http://example.org/{}")
+				.generate());
 
 		// inserting as existing week
 		// 02.10.2023 0:00
-		kvinParquet.put(tupleGenerator.generate(1696197600000L, 10, 10, 10,
-				"http://localhost:8080/linkedfactory/demofactory/existing-week/{}",
-				"http://example.org/{}"));
+		kvinParquet.put(tupleGenerator.setStartTime(1696197600000L)
+				.setItems(10)
+				.setPropertiesPerItem(10)
+				.setValuesPerProperty(10)
+				.setItemPattern("http://localhost:8080/linkedfactory/demofactory/existing-week/{}")
+				.setPropertyPattern("http://example.org/{}")
+				.generate());
 	}
 
 	private File getNonSeqInsertFolder() {

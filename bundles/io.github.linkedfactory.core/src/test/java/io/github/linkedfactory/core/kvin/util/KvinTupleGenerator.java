@@ -11,12 +11,59 @@ import java.util.Random;
 
 public class KvinTupleGenerator {
 	final static long seed = 200L;
-	static String[] dataTypes = {"int", "long", "float", "double", "string", "boolean", "record", "uri"};
+	static String[] ALL_DATA_TYPES = {"int", "long", "float", "double", "string", "boolean", "record", "uri"};
+	String[] dataTypes = ALL_DATA_TYPES;
+	long startTime;
+	int timeDistancePerValue = 10;
+	int items;
+	int propertiesPerItem;
+	int valuesPerProperty;
+	String itemPattern;
+	String propertyPattern;
+
 	private Random random = new Random(seed);
 
-	public NiceIterator<KvinTuple> generate(long startTime,
-	                                        int items, int propertiesPerItem, int valuesPerProperty,
-	                                        String itemPattern, String propertyPattern) {
+	public KvinTupleGenerator setStartTime(long startTime) {
+		this.startTime = startTime;
+		return this;
+	}
+
+	public KvinTupleGenerator setItems(int items) {
+		this.items = items;
+		return this;
+	}
+
+	public KvinTupleGenerator setPropertiesPerItem(int propertiesPerItem) {
+		this.propertiesPerItem = propertiesPerItem;
+		return this;
+	}
+
+	public KvinTupleGenerator setValuesPerProperty(int valuesPerProperty) {
+		this.valuesPerProperty = valuesPerProperty;
+		return this;
+	}
+
+	public KvinTupleGenerator setItemPattern(String itemPattern) {
+		this.itemPattern = itemPattern;
+		return this;
+	}
+
+	public KvinTupleGenerator setPropertyPattern(String propertyPattern) {
+		this.propertyPattern = propertyPattern;
+		return this;
+	}
+
+	public KvinTupleGenerator setRandom(Random random) {
+		this.random = random;
+		return this;
+	}
+
+	public KvinTupleGenerator setTimeDistancePerValue(int timeDistancePerValue) {
+		this.timeDistancePerValue = timeDistancePerValue;
+		return this;
+	}
+
+	public NiceIterator<KvinTuple> generate() {
 		int[] propertyTypes = new int[propertiesPerItem];
 		for (int i = 0; i < propertyTypes.length; i++) {
 			propertyTypes[i] = random.nextInt(dataTypes.length);
@@ -60,7 +107,7 @@ public class KvinTupleGenerator {
 					}
 					Object value = generateRandomValue(propertyTypes[propertyNr - 1]);
 					next = new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, time, 0, value);
-					time += 10;
+					time += timeDistancePerValue;
 				}
 				return next != null;
 			}
