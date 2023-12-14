@@ -297,7 +297,7 @@
 												implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
 											<manifestEntries>
 												<Main-Class>io.github.linkedfactory.core.cli.CLI</Main-Class>
-												<Bundle-SymbolicName>io.github.linkedfactory.ore</Bundle-SymbolicName>
+												<Bundle-SymbolicName>io.github.linkedfactory.core</Bundle-SymbolicName>
 											</manifestEntries>
 										</transformer>
 										<transformer
