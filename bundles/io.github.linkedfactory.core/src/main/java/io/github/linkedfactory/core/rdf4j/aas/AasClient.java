@@ -56,7 +56,9 @@ public class AasClient implements Closeable {
 	protected IExtendedIterator<Record> query(String endpoint, String path, Map<String, String> params, String cursor)
 			throws URISyntaxException, IOException {
 		URIBuilder uriBuilder = new URIBuilder(endpoint);
-		uriBuilder.setPath(path);
+		uriBuilder.setPath(Optional.ofNullable(uriBuilder.getPath())
+				.map(p -> p.replaceFirst("/?$", "/"))
+				.orElse("") + path);
 		if (params != null) {
 			params.forEach((k, v) -> uriBuilder.setParameter(k, v));
 		}
