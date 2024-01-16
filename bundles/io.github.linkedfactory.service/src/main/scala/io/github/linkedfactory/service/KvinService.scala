@@ -118,7 +118,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             def recordToJson(r : Record) : JObject = JObject(r.iterator().asScala.map { e =>
               JField(e.getProperty.toString, e.getValue match {
                 case r : Record => recordToJson(r)
-                case other => value2Str(other)
+                case uri : URI => JObject(JField("@id", uri.toString))
+                case other => decompose(other)
               })
             }.toList)
 
