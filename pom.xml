@@ -263,7 +263,13 @@
 				<module>server</module>
 			</modules>
 		</profile>
-
+		<profile>
+			<id>versions</id>
+			<modules>
+				<module>features</module>
+				<module>launch/equinox</module>
+			</modules>
+		</profile>
 	</profiles>
 
 	<repositories>
