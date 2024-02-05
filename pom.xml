@@ -16,12 +16,13 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<komma.version>1.7.4</komma.version>
-		<enilink.version>1.5.4</enilink.version>
+		<komma.version>1.8.0-SNAPSHOT</komma.version>
+		<enilink.version>1.6.0-SNAPSHOT</enilink.version>
 		<scala.major.version>2.13</scala.major.version>
-		<scala.version>2.13.2</scala.version>
-		<karaf.tooling.version>4.4.0</karaf.tooling.version>
-		<karaf.version>4.4.0</karaf.version>
+		<scala.version>2.13.12</scala.version>
+		<scala.plugin.version>4.8.1</scala.plugin.version>
+		<karaf.tooling.version>4.4.4</karaf.tooling.version>
+		<karaf.version>4.4.4</karaf.version>
 
 		<bnd.version>6.3.1</bnd.version>
 		<linkedfactory.scm.connection>scm:git:git://github.com:linkedfactory/linkedfactory-pod.git</linkedfactory.scm.connection>
@@ -40,7 +41,7 @@
 			<plugin>
 				<groupId>net.alchim31.maven</groupId>
 				<artifactId>scala-maven-plugin</artifactId>
-				<version>4.5.4</version>
+				<version>${scala.plugin.version}</version>
 				<configuration>
 					<scalaVersion>${scala.version}</scalaVersion>
 				</configuration>
@@ -75,9 +76,9 @@
 				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-compiler-plugin</artifactId>
-					<version>3.8.1</version>
+					<version>3.12.1</version>
 					<configuration>
-						<release>11</release>
+						<release>17</release>
 					</configuration>
 				</plugin>
 
@@ -234,7 +235,7 @@
 							<header>releng/license-header.txt</header>
 							<properties>
 								<license.owners>LinkedFactory contributors</license.owners>
-								<license.years>2022</license.years>
+								<license.years>2024</license.years>
 							</properties>
 							<includes>
 								<include>src/*/java/**/*.java</include>

@@ -13,6 +13,7 @@ import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.filter2.compat.FilterCompat;

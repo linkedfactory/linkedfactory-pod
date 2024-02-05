@@ -1,4 +1,4 @@
-FROM adoptopenjdk:11-jre-hotspot
+FROM eclipse-temurin:17-alpine
 EXPOSE 8080
 
 # Add linkedfactory-pod server

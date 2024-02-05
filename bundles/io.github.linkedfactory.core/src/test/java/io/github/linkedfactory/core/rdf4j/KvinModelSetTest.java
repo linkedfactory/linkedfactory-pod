@@ -8,7 +8,7 @@ import net.enilink.vocab.owl.Restriction;
 import org.junit.Assert;
 import org.junit.Test;
 
-public class Rdf4jModelSetTest {
+public class KvinModelSetTest {
 	@Test
 	public void testBasicConfig() {
 		// create configuration and a model set factory
@@ -16,7 +16,7 @@ public class Rdf4jModelSetTest {
 		IModelSetFactory factory = Guice.createInjector(new ModelSetModule(module)).getInstance(IModelSetFactory.class);
 
 		IGraph config = new LinkedHashGraph();
-		ModelUtil.readData(getClass().getResourceAsStream("/rdf4j-modelset-config.ttl"), null,
+		ModelUtil.readData(getClass().getResourceAsStream("/kvin-modelset-config.ttl"), null,
 				"text/turtle", new IDataVisitor<Object>() {
 			@Override
 			public Object visitBegin() {
