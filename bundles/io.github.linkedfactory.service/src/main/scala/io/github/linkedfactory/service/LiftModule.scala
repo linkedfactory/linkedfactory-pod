@@ -64,6 +64,14 @@ class LiftModule {
   var shutdownHooks: List[() => Any] = Nil
 
   def boot {
+    // create version info from commit ID and bundle version
+    Option(FrameworkUtil.getBundle(getClass)).foreach { bundle =>
+      val commitId = Option(bundle.getHeaders.get("Git-Commit-Id"))
+        .filter(_ != null).getOrElse("")
+      val version = bundle.getVersion.toString
+      LiftModule.versionInfo = version + " (build: " + commitId + ")"
+    }
+
     // initialize data object and value store service
     // FIXME: initialize value store differently (not as side-effect of Data ctor)
     Data.kvin map { kvin =>
@@ -151,4 +159,5 @@ class ItemLoc(override val name: String,
 
 object LiftModule {
   val VIEW_MENU = new ItemLoc("name", S ? "view", "view")
+  var versionInfo: String = ""
 }

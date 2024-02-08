@@ -36,4 +36,8 @@ class Util {
     }
     xform(in)
   }
+
+  def versionInfo = {
+    "^" #> LiftModule.versionInfo
+  }
 }
