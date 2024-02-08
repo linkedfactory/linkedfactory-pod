@@ -13,7 +13,6 @@ import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -35,7 +34,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -133,6 +132,11 @@ public class KvinParquet implements Kvin {
 			Map<String, WriterState> writers = new HashMap<>();
 
 			java.nio.file.Path tempPath = Paths.get(archiveLocation, ".tmp");
+			if (Files.exists(tempPath)) {
+				// delete temporary files if a previous put was not finished completely
+				Files.walk(tempPath).sorted(Comparator.reverseOrder()).map(java.nio.file.Path::toFile)
+						.forEach(File::delete);
+			}
 			Files.createDirectories(tempPath);
 			Path itemMappingFile = new Path(tempPath.toString(), "metadata/items__1.parquet");
 			Path propertyMappingFile = new Path(tempPath.toString(), "metadata/properties__1.parquet");

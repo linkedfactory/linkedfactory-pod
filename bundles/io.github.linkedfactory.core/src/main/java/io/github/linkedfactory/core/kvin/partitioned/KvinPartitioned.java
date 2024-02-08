@@ -37,14 +37,19 @@ public class KvinPartitioned implements Kvin {
 		this.archiveStorePath = new File(path, "archive");
 		Files.createDirectories(this.currentStorePath.toPath());
 		hotStore = new KvinLevelDb(this.currentStorePath);
-		hotStoreArchive = hotStore;
+		if (Files.exists(this.currentStoreArchivePath.toPath())) {
+			hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
+		}
 		archiveStore = new KvinParquet(archiveStorePath.toString());
 	}
 
 	public CompletableFuture<Void> runArchival() {
 		try {
 			storeLock.writeLock().lock();
-			createNewHotDataStore();
+			if (this.hotStoreArchive == null) {
+				// the hot store archive might exist if a previous archival was interrupted
+				createNewHotDataStore();
+			}
 			return CompletableFuture.supplyAsync(() -> {
 				new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
 				try {
