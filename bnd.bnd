@@ -2,6 +2,7 @@ Bundle-Version: ${project.version}
 -exportcontents: !*.internal*, io.github.linkedfactory.*
 Import-Package: !org.osgi.service.component.annotations, *
 Bundle-ActivationPolicy: lazy
+Git-Commit-Id: ${git.commit.id.abbrev}
 -removeheaders: Bundle-Developers
 -dsannotations-options: norequirements
 -noee=true
