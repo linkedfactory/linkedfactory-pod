@@ -17,6 +17,7 @@ import org.junit.Test;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.*;
@@ -38,7 +39,7 @@ public class KvinPartitionedTest {
 				.setValuesPerProperty(10)
 				.setItemPattern(itemTemplate)
 				.setPropertyPattern(propertyTemplate);
-		kvinPartitioned = new KvinPartitioned(tempDir, 2, TimeUnit.SECONDS); // archive at every 2 seconds
+		kvinPartitioned = new KvinPartitioned(tempDir);
 	}
 
 	@After
@@ -48,7 +49,7 @@ public class KvinPartitionedTest {
 	}
 
 	@Test
-	public void shouldDoPut() {
+	public void shouldDoPut() throws ExecutionException, InterruptedException {
 		// continuing incremental put on kvinPartitioned
 		kvinPartitioned.put(tupleGenerator.setStartTime(1672614000000L).generate());
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
@@ -61,7 +62,7 @@ public class KvinPartitionedTest {
 		}
 		assertEquals(2000, recordCount);
 
-		kvinPartitioned.runArchival();
+		kvinPartitioned.runArchival().get();
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673823600000L).generate());
 
 		assertTrue(kvinPartitioned.archiveStorePath.listFiles().length > 0); // main folder
@@ -78,9 +79,9 @@ public class KvinPartitionedTest {
 	}
 
 	@Test
-	public void shouldDoFetch() {
+	public void shouldDoFetch() throws ExecutionException, InterruptedException {
 		kvinPartitioned.put(tupleGenerator.setStartTime(1672614000000L).generate());
-		kvinPartitioned.runArchival();
+		kvinPartitioned.runArchival().get();;
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
 
 		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1);
@@ -94,9 +95,9 @@ public class KvinPartitionedTest {
 	}
 
 	@Test
-	public void shouldFetchProperties() {
+	public void shouldFetchProperties() throws ExecutionException, InterruptedException {
 		kvinPartitioned.put(tupleGenerator.setStartTime(1672614000000L).generate());
-		kvinPartitioned.runArchival();
+		kvinPartitioned.runArchival().get();
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
 
 		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 5);

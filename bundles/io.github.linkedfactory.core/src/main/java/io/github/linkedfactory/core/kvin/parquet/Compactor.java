@@ -97,15 +97,28 @@ public class Compactor {
 			Path compactedFile = new Path(compactionFolder.toString(), mapping.getKey() + "__1.parquet");
 			ParquetWriter<Object> compactedFileWriter = getParquetMappingWriter(compactedFile);
 
+			PriorityQueue<Pair<IdMapping, ParquetReader<IdMapping>>> nextMappings =
+					new PriorityQueue<>(Comparator.comparing(p -> p.getFirst().getValue()));
 			for (Pair<String, Integer> file : mapping.getValue()) {
 				ParquetReader<IdMapping> mappingFileReader = getParquetMappingReader(
 						HadoopInputFile.fromPath(new Path(archiveLocation + "metadata/" + file.getFirst()), new Configuration()));
 				IdMapping idMapping = mappingFileReader.read();
-				while (idMapping != null) {
-					compactedFileWriter.write(idMapping);
-					idMapping = mappingFileReader.read();
+				if (idMapping != null) {
+					nextMappings.add(new Pair<>(idMapping, mappingFileReader));
+				} else {
+					mappingFileReader.close();
 				}
-				mappingFileReader.close();
+			}
+
+			while (!nextMappings.isEmpty()) {
+				var pair = nextMappings.poll();
+				IdMapping idMapping = pair.getSecond().read();
+				if (idMapping != null) {
+					compactedFileWriter.write(idMapping);
+					nextMappings.add(new Pair<>(idMapping, pair.getSecond()));
+				} else {
+					pair.getSecond().close();
+				}
 			}
 			compactedFileWriter.close();
 		}

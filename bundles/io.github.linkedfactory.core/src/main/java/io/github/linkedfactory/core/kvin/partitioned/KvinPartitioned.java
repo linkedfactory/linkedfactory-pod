@@ -25,14 +25,12 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class KvinPartitioned implements Kvin {
 	final ReadWriteLock storeLock = new ReentrantReadWriteLock();
 	protected List<KvinListener> listeners = new ArrayList<>();
-	protected ScheduledExecutorService scheduledExecutorService = Executors.newScheduledThreadPool(0);
-	protected Future<?> archivalTaskfuture;
 	protected File path;
 	protected File currentStorePath, currentStoreArchivePath, archiveStorePath;
 	protected volatile KvinLevelDb hotStore, hotStoreArchive;
 	protected KvinParquet archiveStore;
 
-	public KvinPartitioned(File path, long archivalSize, TimeUnit timeUnit) throws IOException {
+	public KvinPartitioned(File path) throws IOException {
 		this.path = path;
 		this.currentStorePath = new File(path, "current");
 		this.currentStoreArchivePath = new File(path, "current-archive");
@@ -41,17 +39,26 @@ public class KvinPartitioned implements Kvin {
 		hotStore = new KvinLevelDb(this.currentStorePath);
 		hotStoreArchive = hotStore;
 		archiveStore = new KvinParquet(archiveStorePath.toString());
-		// archivalTaskfuture = scheduledExecutorService.scheduleAtFixedRate(this::runArchival, archivalSize, archivalSize, timeUnit);
 	}
 
-	void runArchival() {
+	public CompletableFuture<Void> runArchival() {
 		try {
 			storeLock.writeLock().lock();
 			createNewHotDataStore();
-			new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
-			this.hotStoreArchive.close();
-			this.hotStoreArchive = null;
-			FileUtils.deleteDirectory(this.currentStoreArchivePath);
+			return CompletableFuture.supplyAsync(() -> {
+				new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
+				try {
+					storeLock.writeLock().lock();
+					this.hotStoreArchive.close();
+					this.hotStoreArchive = null;
+					FileUtils.deleteDirectory(this.currentStoreArchivePath);
+				} catch (IOException e) {
+					throw new RuntimeException(e);
+				} finally {
+					storeLock.writeLock().unlock();
+				}
+				return null;
+			});
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		} finally {
