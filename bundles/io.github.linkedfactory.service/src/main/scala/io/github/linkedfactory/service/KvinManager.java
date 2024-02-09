@@ -1,28 +1,30 @@
 package io.github.linkedfactory.service;
 
 import io.github.linkedfactory.core.kvin.Kvin;
-import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
+import io.github.linkedfactory.service.config.IKvinFactory;
+import io.github.linkedfactory.service.config.KvinLevelDbFactory;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import net.enilink.komma.em.concepts.IClass;
 import net.enilink.komma.em.concepts.IResource;
 import net.enilink.platform.core.PluginConfigModel;
-
-import java.io.File;
-import java.net.URISyntaxException;
-import java.util.Hashtable;
-
-import org.eclipse.core.runtime.Platform;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Deactivate;
 import org.osgi.service.component.annotations.Reference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Hashtable;
 
 @Component
 public class KvinManager {
 
-    static final URI cfgUri = URIs.createURI("plugin://de.fraunhofer.iwu.linkedfactory.service/data/");
+    static final Logger log = LoggerFactory.getLogger(KvinManager.class);
+
+    static final URI cfgUri = URIs.createURI("plugin://io.github.linkedfactory.service/data/");
     PluginConfigModel configModel;
     ServiceRegistration<Kvin> kvinServiceRegistration;
     Kvin kvin;
@@ -36,30 +38,36 @@ public class KvinManager {
     void activate(ComponentContext ctx) {
         try {
             configModel.begin();
-            IResource cfg = configModel.getManager().find(cfgUri.appendLocalPart("store"), IResource.class);
-            Object type = cfg.getSingle(cfgUri.appendLocalPart("type"));
-            if (type == null || "KvinLevelDb".equals(type)) {
-                String dirName = (String) cfg.getSingle(cfgUri.appendLocalPart("dirName"));
-                if (dirName == null) {
-                    dirName = "linkedfactory-valuestore";
-                }
-                File valueStorePath;
-                if (new File(dirName).isAbsolute()) {
-                    valueStorePath = new File(dirName);
+            Object cfg = configModel.getManager().find(cfgUri, IResource.class)
+                    .getSingle(cfgUri.appendLocalPart("store"));
+
+            if (! (cfg instanceof IResource)) {
+                log.error("Kvin store is not properly configured in: {}", cfgUri);
+                return;
+            }
+
+            IResource cfgResource = (IResource) cfg;
+            IKvinFactory factory;
+            if (!(cfg instanceof IKvinFactory)) {
+                if (cfgResource.getRdfTypes().isEmpty()) {
+                    // fallback to KvinLevelDb
+                    log.info("Using default KvinLevelDb as type is not specified in config: {}", cfgUri);
+                    cfgResource.getRdfTypes().add(configModel.getManager()
+                            .find(URIs.createURI(KvinLevelDbFactory.TYPE), IClass.class));
+                    factory = cfgResource.as(IKvinFactory.class);
                 } else {
-                    try {
-                        valueStorePath = new File(new File(Platform.getInstanceLocation().getURL().toURI()), dirName);
-                    } catch (URISyntaxException e) {
-                        throw new RuntimeException(e);
-                    }
+                    log.error("Invalid Kvin configurations with types: {}", cfgResource.getRdfTypes());
+                    return;
                 }
-                try {
-                    kvin = new KvinLevelDb(valueStorePath);
-                    kvinServiceRegistration = ctx.getBundleContext().registerService(Kvin.class, kvin, new Hashtable<>());
-                    System.out.println("Value store: using LF w/ path=" + valueStorePath);
-                } catch (Throwable throwable) {
-                    System.err.println("Value store: FAILURE for LF w/ path=" + valueStorePath + ": " + throwable.getMessage());
-                }
+            } else {
+                factory = (IKvinFactory) cfg;
+            }
+
+            try {
+                kvin = factory.create();
+                kvinServiceRegistration = ctx.getBundleContext().registerService(Kvin.class, kvin, new Hashtable<>());
+            } catch (Throwable throwable) {
+                log.error("Failure while creating Kvin store", throwable);
             }
         } finally {
             configModel.end();

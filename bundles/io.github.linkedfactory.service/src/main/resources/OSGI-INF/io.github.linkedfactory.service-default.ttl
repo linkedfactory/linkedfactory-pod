@@ -5,5 +5,5 @@
 # <> <mockdata> [ <machines> 10 ] ; <mocktracker> true .
 
 @base <plugin://io.github.linkedfactory.service/data/> .
-<store> <model>   <http://linkedfactory.github.io/data/> ;
-        <dirName> "linkedfactory-valuestore" .
+<> <defaultModel> <http://linkedfactory.github.io/data/> .
+<> <store> [ a <KvinLevelDb> ; <dirName> "linkedfactory-valuestore" ] .

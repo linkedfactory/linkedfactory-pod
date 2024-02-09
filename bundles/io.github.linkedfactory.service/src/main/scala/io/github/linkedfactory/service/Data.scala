@@ -17,6 +17,7 @@ package io.github.linkedfactory.service
 
 import com.google.common.cache.CacheBuilder
 import io.github.linkedfactory.core.kvin.{Kvin, KvinListener}
+import io.github.linkedfactory.service.config.{IKvinFactory, KvinLevelDbFactory}
 import io.github.linkedfactory.service.model.ssn._
 import io.github.linkedfactory.service.util.ResourceHelpers.withTransaction
 import net.enilink.komma.core._
@@ -30,6 +31,7 @@ import net.liftweb.common.Box
 import net.liftweb.http.{RequestVar, S}
 import org.eclipse.core.runtime.Platform
 import org.osgi.framework.FrameworkUtil
+import org.slf4j.LoggerFactory
 
 import java.security.PrivilegedExceptionAction
 import java.text.SimpleDateFormat
@@ -39,10 +41,12 @@ import scala.jdk.CollectionConverters._
 import scala.reflect.{ClassTag, classTag}
 
 object Data {
+  val log = LoggerFactory.getLogger(getClass)
+
   val NAMESPACE = "http://linkedfactory.github.io/vocab#"
   val PROPERTY_CONTAINS = URIs.createURI(NAMESPACE + "contains")
 
-  val cfgURI = URIs.createURI("plugin://de.fraunhofer.iwu.linkedfactory.service/data/")
+  val cfgUri = URIs.createURI("plugin://io.github.linkedfactory.service/data/")
   val dateFormat = new SimpleDateFormat("dd/MM/yyyy hh:mm:ss")
 
   val bundleContext = Option(FrameworkUtil.getBundle(getClass)).map(_.getBundleContext).getOrElse(null)
@@ -54,14 +58,16 @@ object Data {
   private var _modelURI: URI = _
 
   if (bundleContext != null) {
-    // get configuration settings from plugin config model
+    // configure default model
     Globals.withPluginConfig { pcModel => {
-      val cfg = pcModel.getManager.find(cfgURI.appendLocalPart("store")).asInstanceOf[IResource]
-      _modelURI = cfg.getSingle(cfgURI.appendLocalPart("model")) match {
+      val defaultModel = pcModel.getManager.find(cfgUri, classOf[IResource])
+        .getSingle(cfgUri.appendLocalPart("defaultModel"));
+      _modelURI = defaultModel match {
         case r: IReference if r.getURI != null => r.getURI
         case s: String => URIs.createURI(s)
         case _ => URIs.createURI("http://linkedfactory.github.io/data/")
       }
+      log.info("Using default data model: {}", _modelURI)
     }
     }
   }
@@ -75,10 +81,11 @@ object Data {
     .build[URI, Any]()
 
   val modelURI = _modelURI
+
   // caches currentModel for each request
   object modelForRequest extends RequestVar[Box[IModel]](currentModel)
 
-  def getKvin() : Option[Kvin] = {
+  def getKvin(): Option[Kvin] = {
     Option(bundleContext).flatMap(ctx =>
       Option(ctx.getServiceReference(classOf[Kvin])).map(ref => ctx.getService(ref)))
   }
