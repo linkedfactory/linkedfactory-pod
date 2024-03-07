@@ -15,6 +15,7 @@
  */
 package io.github.linkedfactory.service
 
+import io.github.linkedfactory.core.kvin.util.CsvFormatParser
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.service.util.{JsonFormatParser, LineProtocolParser}
 import net.enilink.commons.iterator.IExtendedIterator
@@ -74,6 +75,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       val result = req.contentType match {
         case Full("application/influxdb-line") =>
           req.rawInputStream.flatMap(saveLineValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
+        case Full("text/csv") =>
+          req.rawInputStream.flatMap(saveCsvValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
         case _ =>
           req.json.flatMap(saveValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
           // req.rawInputStream.flatMap(saveValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
@@ -238,6 +241,24 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     try {
       val tuples : IExtendedIterator[KvinTuple] = new io.github.linkedfactory.core.kvin.util.JsonFormatParser(in).parse(currentTime)
       store.put(tuples)
+      Empty
+    } catch {
+      case e : Exception => new Failure(e.getMessage(), Full(e), Empty)
+    }
+  }
+
+  // handle CSV post content
+  def saveCsvValues(in: InputStream, path: List[String], currentTime: Long): Box[_] = {
+    var parentUri = Data.pathToURI(path)
+    if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
+
+    try {
+      val separator = S.param("separator").map(_.trim).filter(_.nonEmpty).map(_.charAt(0)).getOrElse(',')
+      new CsvFormatParser(parentUri, separator, in).parse().iterator().asScala
+        .foreach { tuple =>
+          publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
+          store.put(tuple)
+        }
       Empty
     } catch {
       case e : Exception => new Failure(e.getMessage(), Full(e), Empty)
