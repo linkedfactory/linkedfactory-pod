@@ -92,6 +92,9 @@ public class CsvFormatParser {
 
 	List<Pair<URI, URI>> parseHeader(String[] header, int startIndex) {
 		List<Pair<URI, URI>> itemProperties = new ArrayList<>(header.length);
+		for (int i = 0; i < startIndex; i++) {
+			itemProperties.add(null);
+		}
 		for (int i = startIndex; i < header.length; i++) {
 			Matcher m = itemProperty.matcher(header[i].trim());
 			if (m.matches()) {
