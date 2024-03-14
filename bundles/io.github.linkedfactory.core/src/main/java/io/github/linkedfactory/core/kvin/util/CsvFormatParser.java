@@ -46,9 +46,11 @@ public class CsvFormatParser {
 	final URI base;
 	final List<Pair<URI, URI>> itemProperties;
 	CSVReader csvReader;
+	char separator;
 
 	public CsvFormatParser(URI base, char separator, InputStream content) throws IOException {
 		this.base = base;
+		this.separator = separator;
 		CSVParser parser = new CSVParserBuilder()
 				.withSeparator(separator)
 				.withIgnoreQuotations(true)
@@ -146,15 +148,7 @@ public class CsvFormatParser {
 							Pair<URI, URI> itemProperty = itemProperties.get(column);
 							if (itemProperty != null && column < line.length) {
 								String valueStr = line[column].trim();
-								Object value = valueStr;
-								Double doubleValue = Doubles.tryParse(valueStr);
-								if (doubleValue != null) {
-									if (DoubleMath.isMathematicalInteger(doubleValue)) {
-										value = doubleValue.longValue();
-									} else {
-										value = doubleValue;
-									}
-								}
+								Object value = parseValue(valueStr);
 								tuple = new KvinTuple(itemProperty.getFirst(), itemProperty.getSecond(),
 										Kvin.DEFAULT_CONTEXT, time, value);
 							}
@@ -201,5 +195,43 @@ public class CsvFormatParser {
 				}
 			}
 		};
+	}
+
+	Object parseValue(String valueStr) {
+		if (valueStr.startsWith("\"") && valueStr.endsWith("\"") ||
+				valueStr.startsWith("'") && valueStr.endsWith("'")) {
+			// this is definitely a string
+			return valueStr.substring(1, valueStr.length() - 1);
+		}
+		// handle boolean values
+		String valueStrLowerCase = valueStr.toLowerCase();
+		if ("true".equals(valueStrLowerCase)) {
+			return true;
+		} else if ("false".equals(valueStrLowerCase)) {
+			return false;
+		}
+		Object value = valueStr;
+		Double doubleValue = Doubles.tryParse(valueStr);
+		if (doubleValue == null && valueStr.contains(",")) {
+			String cleanedValueStr;
+			if (valueStr.lastIndexOf(',') < valueStr.lastIndexOf('.')) {
+				// convert numbers like 123,456.78 to 123456.78
+				cleanedValueStr = valueStr.replaceAll(",", "");
+			} else {
+				// convert numbers like 123.456,78 to 123456.78
+				cleanedValueStr = valueStr.replaceAll("[.]", "")
+						.replaceAll(",", ".");
+			}
+			doubleValue = Doubles.tryParse(cleanedValueStr);
+		}
+		if (doubleValue != null) {
+			if (DoubleMath.isMathematicalInteger(doubleValue)) {
+				value = doubleValue.longValue();
+			} else {
+				value = doubleValue;
+			}
+		}
+		// TODO - support json values
+		return value;
 	}
 }

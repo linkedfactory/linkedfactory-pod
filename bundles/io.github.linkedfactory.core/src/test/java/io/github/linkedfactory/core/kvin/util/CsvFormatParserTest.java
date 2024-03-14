@@ -21,23 +21,42 @@ import net.enilink.komma.core.URIs;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 public class CsvFormatParserTest {
 
-    @Test
-    public void shouldParseCsv() throws IOException {
-        CsvFormatParser csvParser = new CsvFormatParser(URIs.createURI("urn:base:"), ';',
-            getClass().getResourceAsStream("/CsvFormatParserTestContent.csv"));
-        IExtendedIterator<KvinTuple> tuples = csvParser.parse();
-        assertNotNull(tuples);
-        int count = 0;
-        while (tuples.hasNext()) {
-            KvinTuple t = tuples.next();
-            count++;
-        }
-        assertEquals(174, count);
-    }
+	@Test
+	public void shouldParseCsv1() throws IOException {
+		CsvFormatParser csvParser = new CsvFormatParser(URIs.createURI("urn:base:"), ';',
+				getClass().getResourceAsStream("/CsvFormatParserTestContent-1.csv"));
+		IExtendedIterator<KvinTuple> tuples = csvParser.parse();
+		assertNotNull(tuples);
+		int count = 0;
+		while (tuples.hasNext()) {
+			KvinTuple t = tuples.next();
+			count++;
+		}
+		assertEquals(174, count);
+	}
+
+	@Test
+	public void shouldParseCsv2() throws IOException {
+		for (String[] sepAndFile : List.of(
+				new String[]{",", "/CsvFormatParserTestContent-2a.csv"},
+				new String[]{";", "/CsvFormatParserTestContent-2b.csv"})) {
+			CsvFormatParser csvParser = new CsvFormatParser(URIs.createURI("urn:base:"), sepAndFile[0].charAt(0),
+					getClass().getResourceAsStream(sepAndFile[1]));
+			IExtendedIterator<KvinTuple> tuples = csvParser.parse();
+			assertNotNull(tuples);
+			int count = 0;
+			while (tuples.hasNext()) {
+				KvinTuple t = tuples.next();
+				count++;
+			}
+			assertEquals(34, count);
+		}
+	}
 }
