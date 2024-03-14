@@ -39,7 +39,7 @@ public class CsvFormatParserTest {
 			KvinTuple t = tuples.next();
 			count++;
 		}
-		assertEquals(174, count);
+		assertEquals(176, count);
 	}
 
 	@Test
@@ -56,7 +56,7 @@ public class CsvFormatParserTest {
 				KvinTuple t = tuples.next();
 				count++;
 			}
-			assertEquals(34, count);
+			assertEquals(36, count);
 		}
 	}
 }
