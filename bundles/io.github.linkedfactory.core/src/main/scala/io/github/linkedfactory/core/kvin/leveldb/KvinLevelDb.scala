@@ -590,7 +590,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
       case 'R' =>
         val refId = new Array[Byte](varIntLength(b))
         b.get(refId)
-        toUri(refId, EntryType.ResourceToId).get
+        toUri(refId, EntryType.ResourceToId)
+          .getOrElse(URIs.createURI("urn:invalid:" + Varint.readUnsigned(ByteBuffer.wrap(refId))))
       // a scalar value
       case _ =>
         b.position(oldPos)
