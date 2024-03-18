@@ -170,20 +170,6 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     idBytes
   }
 
-  protected def createNewIdMapping(key: Array[Byte], entryType: EntryType): Array[Byte] = {
-    val id = nextId
-    val idBytes = new Array[Byte](Varint.calcLengthUnsigned(id))
-    Varint.writeUnsigned(idBytes, 0, id)
-    val keyWithPrefix = idKey(entryType.id.toByte, key)
-    // add forward mapping
-    ids.put(keyWithPrefix, idBytes)
-
-    // add reverse mapping
-    val idKeyBytes = idKey(entryType.reverse.toByte, idBytes)
-    ids.put(idKeyBytes, key)
-    idBytes
-  }
-
   def deleteId(uri: URI, entryType: EntryType): Unit = {
     val lock = lockFor(uri)
     writeLock(lock) {
@@ -340,10 +326,12 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
   override def descendants(uri: URI): IExtendedIterator[URI] = descendants(uri, Long.MaxValue)
 
-  override def descendants(uri: URI, limit: Long): IExtendedIterator[URI] = {
-    val uriBytes = uri.toString.getBytes("UTF-8")
+  override def descendants(uri: URI, limit: Long): IExtendedIterator[URI] = entries(EntryType.SubjectToId, uri, limit)
+
+  def entries(entryType: EntryType, uriPrefix: URI, limit: Long): IExtendedIterator[URI] = {
+    val uriBytes = uriPrefix.toString.getBytes("UTF-8")
     val prefix = new Array[Byte](uriBytes.length + 1)
-    prefix(0) = EntryType.SubjectToId.id.toByte
+    prefix(0) = entryType.id.toByte
     System.arraycopy(uriBytes, 0, prefix, 1, uriBytes.length)
 
     val it = ids.iterator
