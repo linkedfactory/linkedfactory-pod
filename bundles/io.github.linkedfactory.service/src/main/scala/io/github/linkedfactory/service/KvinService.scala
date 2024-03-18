@@ -254,10 +254,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
     try {
       val separator = S.param("separator").map(_.trim).filter(_.nonEmpty).map(_.charAt(0)).getOrElse(',')
-      val tuples : IExtendedIterator[KvinTuple] = new CsvFormatParser(parentUri, separator, in).parse().mapWith(tuple => {
-        publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
-        tuple
-      })
+      val tuples : IExtendedIterator[KvinTuple] = new CsvFormatParser(parentUri, separator, in).parse()
       store.put(tuples)
       Empty
     } catch {
