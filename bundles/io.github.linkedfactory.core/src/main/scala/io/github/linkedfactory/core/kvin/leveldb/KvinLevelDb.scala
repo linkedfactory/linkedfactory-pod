@@ -24,9 +24,9 @@ import net.enilink.komma.core.{URI, URIs}
 import org.iq80.leveldb.impl.Iq80DBFactory.{bytes, factory}
 import org.iq80.leveldb.{CompressionType, DB, Options, Range, WriteBatch, WriteOptions}
 
-import java.io.{ByteArrayOutputStream, File}
+import java.io.{ByteArrayOutputStream, File, IOException, UncheckedIOException}
 import java.nio.{ByteBuffer, ByteOrder}
-import java.util
+import java.{io, util}
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.locks.{ReadWriteLock, ReentrantReadWriteLock}
 import scala.collection.mutable
@@ -695,7 +695,17 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   }
 
   override def close(): Unit = {
-    ids.close()
-    values.close()
+    var errors: List[IOException] = Nil
+    try {
+      ids.close()
+    } catch {
+      case e: IOException => errors ::= e
+    }
+    try {
+      values.close()
+    } catch {
+      case e: IOException => errors ::= e
+    }
+    errors.headOption.foreach(e => throw new UncheckedIOException(e))
   }
 }
