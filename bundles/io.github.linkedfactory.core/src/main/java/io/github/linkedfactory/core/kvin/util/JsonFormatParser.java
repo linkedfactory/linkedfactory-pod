@@ -35,6 +35,10 @@ public class JsonFormatParser {
     }
 
     public NiceIterator<KvinTuple> parse() {
+        return parse(System.currentTimeMillis());
+    }
+
+    public NiceIterator<KvinTuple> parse(long currentTime) {
         return new NiceIterator<>() {
             KvinTuple kvinTuple;
             URI currentItem;
@@ -129,9 +133,15 @@ public class JsonFormatParser {
                         JsonNode node = mapper.readTree(jsonParser);
                         Object value = nodeToValue(node.get("value"));
                         Object seqNr = nodeToValue(node.get("seqNr"));
-                        kvinTuple = new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT,
-                            ((Number) nodeToValue(node.get("time"))).longValue(), seqNr != null ?  ((Number) seqNr).intValue() : 0, value);
-                        break;
+                        Number time = (Number) nodeToValue(node.get("time"));
+                        if (value != null) {
+                            kvinTuple = new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT,
+                                    time != null ? time.longValue() : currentTime,
+                                    seqNr != null ? ((Number) seqNr).intValue() : 0, value);
+                            break;
+                        } else {
+                            throw new IOException(String.format("Invalid null value for item %s and property %s", item, property));
+                        }
                     }
                 }
                 if (kvinTuple == null && jsonParser.getCurrentToken() == JsonToken.END_ARRAY) {
@@ -164,18 +174,18 @@ public class JsonFormatParser {
             return null;
         }
 
-        Record value = null;
-        if (node.isObject() && node.get("@id") != null) {
-            return URIs.createURI(node.get("@id").textValue());
-        } else if (node.isObject()) {
+        Record value;
+        if (node.isObject()) {
+            JsonNode idNode = node.get("@id");
+            if (idNode != null) {
+                return URIs.createURI(node.get("@id").textValue());
+            }
+
             Iterator<Map.Entry<String, JsonNode>> records = node.fields();
+            value = Record.NULL;
             while (records.hasNext()) {
                 Map.Entry<String, JsonNode> recordNode = records.next();
-                if (value != null) {
-                    value = value.append(new Record(URIs.createURI(recordNode.getKey()), nodeToValue(recordNode.getValue())));
-                } else {
-                    value = new Record(URIs.createURI(recordNode.getKey()), nodeToValue(recordNode.getValue()));
-                }
+                value = value.append(new Record(URIs.createURI(recordNode.getKey()), nodeToValue(recordNode.getValue())));
             }
             return value;
         } else if (node.isDouble()) {
