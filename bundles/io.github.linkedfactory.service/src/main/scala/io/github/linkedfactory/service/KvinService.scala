@@ -28,11 +28,9 @@ import net.liftweb.json.JsonAST._
 import net.liftweb.json.JsonDSL._
 import net.liftweb.util.Helpers._
 import org.apache.commons.csv.{CSVFormat, CSVPrinter}
-import org.osgi.service.event.{Event, EventAdmin}
 
 import java.io.{InputStream, OutputStream, OutputStreamWriter}
 import java.text.SimpleDateFormat
-import java.util
 import java.util.Date
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
@@ -228,7 +226,6 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
     JsonFormatParser.parseItem(parentUri, json, currentTime) map ( _.foreach { tuple =>
-        publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
         store.put(tuple)
     })
   }
@@ -239,11 +236,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
     try {
-      new io.github.linkedfactory.core.kvin.util.JsonFormatParser(in).parse().iterator().asScala
-        .foreach { tuple =>
-          publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
-          store.put(tuple)
-        }
+      val tuples : IExtendedIterator[KvinTuple] = new io.github.linkedfactory.core.kvin.util.JsonFormatParser(in).parse(currentTime)
+      store.put(tuples)
       Empty
     } catch {
       case e : Exception => new Failure(e.getMessage(), Full(e), Empty)
@@ -256,24 +250,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
     LineProtocolParser.parseLines(parentUri, is, currentTime) map ( _.foreach { tuple =>
-        publishEvent(tuple.item, tuple.property, tuple.time, tuple.value)
         store.put(tuple)
     })
-  }
-
-  /**
-   * Publish an item event with the OSGi event service.
-   */
-  def publishEvent(item: URI, property: URI, time: Long, value: Any) {
-    Data.withService[EventAdmin] { eventAdmin =>
-      val topic = "linkedfactory/itemEvent/internal"
-      val properties = new util.HashMap[String, Any]
-      properties.put(ItemDataEvents.ITEM, item.toString)
-      properties.put(ItemDataEvents.PROPERTY, property.toString)
-      properties.put(ItemDataEvents.TIME, time)
-      properties.put(ItemDataEvents.VALUE, value)
-      eventAdmin.postEvent(new Event(topic, properties))
-    }
   }
 
   def getSingleItem(path: List[String]): URI = S.param("item") flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(path)

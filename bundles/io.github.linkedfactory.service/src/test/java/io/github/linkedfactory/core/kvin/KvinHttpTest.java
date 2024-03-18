@@ -98,10 +98,6 @@ public class KvinHttpTest extends Mockito {
                     }
                 });
             }
-
-            @Override
-            public void publishEvent(URI item, URI property, long time, Object value) {
-            }
         };
     }
 

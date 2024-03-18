@@ -100,10 +100,6 @@ class KvinServiceTest {
         Globals.contextModelSet.vend.map(_.getUnitOfWork.end)
       }
     }
-
-    // do not try to publish events via OSGi event broker
-    override def publishEvent(item: URI, property: URI, time: Long, value: Any): Unit = {
-    }
   }
 
   def kvinRest(req: Req): () => Box[LiftResponse] = {
