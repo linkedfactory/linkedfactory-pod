@@ -152,12 +152,17 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
             val id = nextId
             idBytes = new Array[Byte](Varint.calcLengthUnsigned(id))
             Varint.writeUnsigned(idBytes, 0, id)
+            val batch = ids.createWriteBatch()
             // add forward mapping
-            ids.put(key, idBytes)
-
+            batch.put(key, idBytes)
             // add reverse mapping
             val idKeyBytes = idKey(entryType.reverse.toByte, idBytes)
-            ids.put(idKeyBytes, uri.toString.getBytes("UTF-8"))
+            batch.put(idKeyBytes, uri.toString.getBytes("UTF-8"))
+
+            // Ensure that writes to the id database are always synced to disk.
+            // As ids are subject to fewer changes the pages may only
+            // be flushed with large delays to disk which may cause data loss.
+            ids.write(batch, new WriteOptions().sync(true))
 
             if (entryType == EntryType.SubjectToId) for (l <- listeners.asScala) l.entityCreated(uri)
           }
