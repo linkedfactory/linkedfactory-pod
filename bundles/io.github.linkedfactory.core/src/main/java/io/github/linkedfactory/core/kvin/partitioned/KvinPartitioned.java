@@ -5,6 +5,7 @@ import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDbArchiver;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
+import io.github.linkedfactory.core.kvin.parquet.Compactor;
 import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -13,6 +14,8 @@ import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import org.apache.commons.io.FileUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,6 +26,8 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class KvinPartitioned implements Kvin {
+	static final Logger log = LoggerFactory.getLogger(KvinPartitioned.class);
+
 	final ReadWriteLock storeLock = new ReentrantReadWriteLock();
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
@@ -51,14 +56,23 @@ public class KvinPartitioned implements Kvin {
 				createNewHotDataStore();
 			}
 			return CompletableFuture.supplyAsync(() -> {
-				new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
+				try {
+					new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
+					try {
+						new Compactor(archiveStore).execute();
+					} catch (IOException e) {
+						log.error("Compacting archive store failed", e);
+					}
+				} catch (Exception e) {
+					log.error("Archiving data to archive store failed", e);
+				}
 				try {
 					storeLock.writeLock().lock();
 					this.hotStoreArchive.close();
 					this.hotStoreArchive = null;
 					FileUtils.deleteDirectory(this.currentStoreArchivePath);
 				} catch (IOException e) {
-					throw new RuntimeException(e);
+					log.error("Deleting hot store archive failed", e);
 				} finally {
 					storeLock.writeLock().unlock();
 				}

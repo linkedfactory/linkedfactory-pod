@@ -124,7 +124,7 @@ public class KvinParquetTest {
 
 	@Test
 	public void mappingFileCompactionTest() throws IOException {
-		new Compactor(kvinParquet.archiveLocation, kvinParquet).execute();
+		new Compactor(kvinParquet).execute();
 
 		File[] metadataFiles = new File(kvinParquet.archiveLocation, "metadata")
 				.listFiles((file, s) -> s.endsWith(".parquet"));

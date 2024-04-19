@@ -18,7 +18,7 @@ class KvinLevelDbArchiver(var databaseStore: KvinLevelDb, var archiveStore: Kvin
 
   idsSnapshotOption.snapshot(idsSnapshot)
 
-  def getDatabaseIterator: NiceIterator[KvinTuple] = {
+  def getDatabaseIterator: IExtendedIterator[KvinTuple] = {
     new NiceIterator[KvinTuple] {
       // initial store iterators
       val idIterator: DBIterator = ids.iterator(idsSnapshotOption)
@@ -89,7 +89,7 @@ class KvinLevelDbArchiver(var databaseStore: KvinLevelDb, var archiveStore: Kvin
   }
 
   def archive(): Unit = {
-    val dbIterator: NiceIterator[KvinTuple] = getDatabaseIterator
+    val dbIterator: IExtendedIterator[KvinTuple] = getDatabaseIterator
     try {
       archiveStore.put(dbIterator)
     } finally {

@@ -53,7 +53,7 @@ public class KvinPartitionedTest {
 		// continuing incremental put on kvinPartitioned
 		kvinPartitioned.put(tupleGenerator.setStartTime(1672614000000L).generate());
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
-		NiceIterator<KvinTuple> storeIterator = new KvinLevelDbArchiver(kvinPartitioned.hotStore, null)
+		IExtendedIterator<KvinTuple> storeIterator = new KvinLevelDbArchiver(kvinPartitioned.hotStore, null)
 				.getDatabaseIterator();
 		int recordCount = 0;
 		while (storeIterator.hasNext()) {

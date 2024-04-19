@@ -14,12 +14,19 @@ import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.parquet.HadoopReadOptions;
+import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.predicate.FilterApi;
 import org.apache.parquet.filter2.predicate.FilterPredicate;
+import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.io.api.Binary;
 import org.slf4j.Logger;
@@ -27,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -63,9 +71,6 @@ public class KvinParquet implements Kvin {
 	Cache<java.nio.file.Path, Properties> metaCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	String archiveLocation;
 
-	long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0; // global id counter
-	WriteContext writeContext = new WriteContext();
-
 	public KvinParquet(String archiveLocation) {
 		this.archiveLocation = archiveLocation;
 		if (!this.archiveLocation.endsWith("/")) {
@@ -84,6 +89,41 @@ public class KvinParquet implements Kvin {
 			id = reader.read();
 		}
 		return id;
+	}
+
+	private void readMaxIds(WriteContext writeContext, java.nio.file.Path metadataPath) throws IOException {
+		Map<String, List<Pair<String, Integer>>> mappingFiles = getMappingFiles(metadataPath);
+		ColumnPath idPath = ColumnPath.get("id");
+		for (Map.Entry<String, List<Pair<String, Integer>>> entry : mappingFiles.entrySet()) {
+			long maxId = 0L;
+			for (Pair<String, Integer> mappingFile : entry.getValue()) {
+				HadoopInputFile inputFile = getFile(new Path(metadataPath.resolve(mappingFile.getFirst()).toString()));
+				ParquetReadOptions readOptions = HadoopReadOptions
+						.builder(inputFile.getConfiguration(), inputFile.getPath())
+						.build();
+
+				ParquetMetadata meta = ParquetFileReader.readFooter(inputFile, readOptions, inputFile.newStream());
+				for (BlockMetaData blockMeta : meta.getBlocks()) {
+					for (ColumnChunkMetaData columnMeta : blockMeta.getColumns()) {
+						if (columnMeta.getPath().equals(idPath)) {
+							// get max id from statistics
+							maxId = Math.max(maxId, ((Number) columnMeta.getStatistics().genericGetMax()).longValue());
+						}
+					}
+				}
+			}
+			switch(entry.getKey()) {
+				case "items":
+					writeContext.itemIdCounter = maxId;
+					break;
+				case "properties":
+					writeContext.propertyIdCounter = maxId;
+					break;
+				case "contexts":
+					writeContext.contextIdCounter = maxId;
+					break;
+			}
+		}
 	}
 
 	private HadoopInputFile getFile(Path path) {
@@ -129,6 +169,13 @@ public class KvinParquet implements Kvin {
 	private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
 		try {
 			writeLock.lock();
+			java.nio.file.Path metadataPath = Paths.get(archiveLocation, "metadata");
+			WriteContext writeContext = new WriteContext();
+			writeContext.hasExistingData = Files.exists(metadataPath);
+			if (writeContext.hasExistingData) {
+				readMaxIds(writeContext, metadataPath);
+			}
+
 			Map<String, WriterState> writers = new HashMap<>();
 
 			java.nio.file.Path tempPath = Paths.get(archiveLocation, ".tmp");
@@ -186,8 +233,8 @@ public class KvinParquet implements Kvin {
 					internalTuple.setValueObject(null);
 				}
 				writerState.writer.write(internalTuple);
-				writerState.minMax[0] = Math.min(writerState.minMax[0], itemIdCounter);
-				writerState.minMax[1] = Math.max(writerState.minMax[1], itemIdCounter);
+				writerState.minMax[0] = Math.min(writerState.minMax[0], writeContext.itemIdCounter);
+				writerState.minMax[1] = Math.max(writerState.minMax[1], writeContext.itemIdCounter);
 			}
 
 			for (WriterState state : writers.values()) {
@@ -295,7 +342,6 @@ public class KvinParquet implements Kvin {
 			}
 
 			java.nio.file.Path tempMetadataPath = tempPath.resolve("metadata");
-			java.nio.file.Path metadataPath = Paths.get(archiveLocation, "metadata");
 			Files.createDirectories(metadataPath);
 			Map<String, List<Pair<String, Integer>>> newMappingFiles = getMappingFiles(tempMetadataPath);
 			Map<String, List<Pair<String, Integer>>> existingMappingFiles = getMappingFiles(metadataPath);
@@ -315,6 +361,11 @@ public class KvinParquet implements Kvin {
 
 			// clear cache with meta data
 			metaCache.invalidateAll();
+
+			// invalidate id caches - TODO could be improved by directly updating the caches
+			itemIdCache.invalidateAll();
+			propertyIdCache.invalidateAll();
+			contextIdCache.invalidateAll();
 		} finally {
 			writeLock.unlock();
 		}
@@ -328,13 +379,19 @@ public class KvinParquet implements Kvin {
 		return calendar;
 	}
 
-	private byte[] generateId(KvinTuple currentTuple,
+	private byte[] generateId(KvinTuple tuple,
 	                          WriteContext writeContext,
 	                          ParquetWriter itemMappingWriter,
 	                          ParquetWriter propertyMappingWriter,
 	                          ParquetWriter contextMappingWriter) {
-		long itemId = writeContext.itemMap.computeIfAbsent(currentTuple.item.toString(), key -> {
-			long newId = ++itemIdCounter;
+		long itemId = writeContext.itemMap.computeIfAbsent(tuple.item.toString(), key -> {
+			if (writeContext.hasExistingData) {
+				long id = getId(tuple.item, IdType.ITEM_ID);
+				if (id != 0L) {
+					return id;
+				}
+			}
+			long newId = ++writeContext.itemIdCounter;
 			IdMapping mapping = new SimpleMapping();
 			mapping.setId(newId);
 			mapping.setValue(key);
@@ -345,8 +402,14 @@ public class KvinParquet implements Kvin {
 			}
 			return newId;
 		});
-		long propertyId = writeContext.propertyMap.computeIfAbsent(currentTuple.property.toString(), key -> {
-			long newId = ++propertyIdCounter;
+		long propertyId = writeContext.propertyMap.computeIfAbsent(tuple.property.toString(), key -> {
+			if (writeContext.hasExistingData) {
+				long id = getId(tuple.property, IdType.PROPERTY_ID);
+				if (id != 0L) {
+					return id;
+				}
+			}
+			long newId = ++writeContext.propertyIdCounter;
 			IdMapping mapping = new SimpleMapping();
 			mapping.setId(newId);
 			mapping.setValue(key);
@@ -358,8 +421,14 @@ public class KvinParquet implements Kvin {
 			return newId;
 		});
 
-		long contextId = writeContext.contextMap.computeIfAbsent(currentTuple.context.toString(), key -> {
-			long newId = ++contextIdCounter;
+		long contextId = writeContext.contextMap.computeIfAbsent(tuple.context.toString(), key -> {
+			if (writeContext.hasExistingData) {
+				long id = getId(tuple.context, IdType.CONTEXT_ID);
+				if (id != 0L) {
+					return id;
+				}
+			}
+			long newId = ++writeContext.contextIdCounter;
 			IdMapping mapping = new SimpleMapping();
 			mapping.setId(newId);
 			mapping.setValue(key);
@@ -507,7 +576,7 @@ public class KvinParquet implements Kvin {
 				cachedProperty = propertyMapping.getValue();
 				propertyIdReverseLookUpCache.put(propertyId, propertyMapping.getValue());
 			} catch (IOException e) {
-				throw new RuntimeException(e);
+				throw new UncheckedIOException(e);
 			}
 		}
 		return cachedProperty;
@@ -554,7 +623,7 @@ public class KvinParquet implements Kvin {
 							}
 						}
 					} catch (IOException e) {
-						throw new RuntimeException(e);
+						throw new UncheckedIOException(e);
 					}
 				}
 
@@ -599,7 +668,7 @@ public class KvinParquet implements Kvin {
 						}
 						nextTuple = selectNextTuple();
 					} catch (IOException e) {
-						throw new RuntimeException(e);
+						throw new UncheckedIOException(e);
 					}
 					return nextTuple != null;
 				}
@@ -680,8 +749,9 @@ public class KvinParquet implements Kvin {
 					}
 				}
 			};
-		} catch (Exception e) {
-			throw new RuntimeException(e);
+		} catch (IOException e) {
+			readLock.unlock();
+			throw new UncheckedIOException(e);
 		}
 	}
 
@@ -710,16 +780,21 @@ public class KvinParquet implements Kvin {
 				.collect(Collectors.toList());
 	}
 
-	private List<java.nio.file.Path> getDataFolders(IdMappings idMappings) throws IOException, ExecutionException {
+	private List<java.nio.file.Path> getDataFolders(IdMappings idMappings) throws IOException {
 		long itemId = idMappings.itemId;
 		java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
-		Properties meta = metaCache.get(metaPath, () -> {
-			Properties p = new Properties();
-			if (Files.exists(metaPath)) {
-				p.load(Files.newInputStream(metaPath));
-			}
-			return p;
-		});
+		Properties meta = null;
+		try {
+			meta = metaCache.get(metaPath, () -> {
+				Properties p = new Properties();
+				if (Files.exists(metaPath)) {
+					p.load(Files.newInputStream(metaPath));
+				}
+				return p;
+			});
+		} catch (ExecutionException e) {
+			throw new IOException(e);
+		}
 		return meta.entrySet().stream().flatMap(entry -> {
 			String idRange = (String) entry.getValue();
 			long[] minMax = splitRange(idRange);
@@ -872,11 +947,11 @@ public class KvinParquet implements Kvin {
 		int week;
 		long[] minMax = {Long.MAX_VALUE, Long.MIN_VALUE};
 
-		WriterState(java.nio.file.Path file, ParquetWriter<KvinTupleInternal> writer, int year, int weak) {
+		WriterState(java.nio.file.Path file, ParquetWriter<KvinTupleInternal> writer, int year, int week) {
 			this.file = file;
 			this.writer = writer;
 			this.year = year;
-			this.week = weak;
+			this.week = week;
 		}
 	}
 
@@ -885,7 +960,8 @@ public class KvinParquet implements Kvin {
 	}
 
 	class WriteContext {
-		// used by writer
+		boolean hasExistingData;
+		long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0;
 		Map<String, Long> itemMap = new HashMap<>();
 		Map<String, Long> propertyMap = new HashMap<>();
 		Map<String, Long> contextMap = new HashMap<>();
