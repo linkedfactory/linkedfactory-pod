@@ -151,6 +151,8 @@ public class KvinFederatedService implements FederatedService {
 
     @Override
     public void shutdown() throws QueryEvaluationException {
-        this.kvin.close();
+        if (this.closeKvinOnShutdown) {
+            this.kvin.close();
+        }
     }
 }

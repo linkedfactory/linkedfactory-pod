@@ -163,7 +163,8 @@ public class KvinHttp implements Kvin {
     }
 
     private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit, Long interval, String op) {
-	    InputStream content = null;
+        CloseableHttpResponse response = null;
+        InputStream content = null;
         try {
             // building url
             URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/values");
@@ -179,7 +180,7 @@ public class KvinHttp implements Kvin {
 
             // sending get request to the endpoint
             HttpGet httpGet = createHttpGet(getRequestUri.toString());
-            HttpResponse response = this.httpClient.execute(httpGet);
+            response = this.httpClient.execute(httpGet);
             HttpEntity entity = response.getEntity();
             if (response.getStatusLine().getStatusCode() != 200) {
                 return NiceIterator.emptyIterator();
@@ -191,6 +192,8 @@ public class KvinHttp implements Kvin {
             JsonFormatParser jsonParser = new JsonFormatParser(new ByteArrayInputStream(ByteStreams.toByteArray(content)));
             return jsonParser.parse();
         } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
             if (content != null) {
                 try {
                     content.close();
@@ -198,7 +201,13 @@ public class KvinHttp implements Kvin {
                     logger.error("Error while closing input stream", ioe);
                 }
             }
-            throw new RuntimeException(e);
+            if (response != null) {
+                try {
+                    response.close();
+                } catch (IOException ioe) {
+                    logger.error("Error while closing response", ioe);
+                }
+            }
         }
     }
 
