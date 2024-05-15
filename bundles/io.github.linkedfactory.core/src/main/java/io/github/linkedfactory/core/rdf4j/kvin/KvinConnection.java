@@ -88,7 +88,7 @@ public class KvinConnection extends SailConnectionWrapper {
 							//System.out.println(tuple);
 						}).iterator())) {
 			if (tuples.hasNext()) {
-				kvinSail.getKvin().put();
+				kvinSail.getKvin().put(tuples);
 			}
 		}
 	}
