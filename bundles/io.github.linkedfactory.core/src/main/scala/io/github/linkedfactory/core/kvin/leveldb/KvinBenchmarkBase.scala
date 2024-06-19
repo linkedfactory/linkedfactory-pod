@@ -31,18 +31,18 @@ abstract class KvinBenchmarkBase extends App {
   val store = createStore
   val valueProperty = URIs.createURI("property:value")
   val seed = 200
-  val writeValues = 5000000
+  val writeValues = 20000000
   val readValues = 2000
 
   var benchmarkStart = System.currentTimeMillis
 
   val startTimeValues = 1478252048736L
   try {
-    val nrs = Array.fill(100)(Random.nextInt(Integer.MAX_VALUE))
+    val nrs = Array.fill(1000)(Random.nextInt(Integer.MAX_VALUE))
     var rand = new Random(seed)
 
     var currentTime = startTimeValues
-    val batch  = new mutable.ArrayBuffer[KvinTuple]
+    val batch = new mutable.ArrayBuffer[KvinTuple]
     (0 to writeValues).foreach { i =>
       val randomNr = nrs(rand.nextInt(nrs.length))
       val uri = URIs.createURI("http://linkedfactory.github.io/" + randomNr + "/e3fabrik/rollex/" + randomNr + "/measured-point-1")
