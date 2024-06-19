@@ -31,7 +31,7 @@ abstract class KvinBenchmarkBase extends App {
   val store = createStore
   val valueProperty = URIs.createURI("property:value")
   val seed = 200
-  val writeValues = 5000000
+  val writeValues = 20000000
   val readValues = 2000
 
   var benchmarkStart = System.currentTimeMillis
