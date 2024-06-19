@@ -18,6 +18,7 @@ package io.github.linkedfactory.core.kvin.leveldb
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple}
 import net.enilink.komma.core.URIs
 
+import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 import scala.util.Random
 
@@ -41,16 +42,22 @@ abstract class KvinBenchmarkBase extends App {
     var rand = new Random(seed)
 
     var currentTime = startTimeValues
+    val batch  = new mutable.ArrayBuffer[KvinTuple]
     (0 to writeValues).foreach { i =>
-      if (i % 100000 == 0) println("  at: " + i)
-      
       val randomNr = nrs(rand.nextInt(nrs.length))
       val uri = URIs.createURI("http://linkedfactory.github.io/" + randomNr + "/e3fabrik/rollex/" + randomNr + "/measured-point-1")
       val ctx = URIs.createURI("ctx:" + randomNr)
 
       val value = if (randomNr % 2 == 0) rand.nextGaussian else rand.nextLong(100000)
+      batch.addOne(new KvinTuple(uri, valueProperty, ctx, currentTime, value))
 
-      store.put(new KvinTuple(uri, valueProperty, ctx, currentTime, value))
+      // insert data via batch
+      if (i % 100000 == 0 || i == writeValues) {
+        println("  at: " + i)
+        store.put(batch.asJava)
+        batch.clear()
+      }
+
       currentTime += rand.nextInt(1000)
     }
 
@@ -70,8 +77,6 @@ abstract class KvinBenchmarkBase extends App {
     }
 
     println(s"Reading $readValues values took: " + String.format("%1$,.2f seconds", ((System.currentTimeMillis - benchmarkStart) / 1000.0).asInstanceOf[AnyRef]))
-
-    store.descendants(URIs.createURI("")).toList.asScala.foreach { x => println("D: " + x) }
   } finally {
     Thread.sleep(5000)
     store.close()
