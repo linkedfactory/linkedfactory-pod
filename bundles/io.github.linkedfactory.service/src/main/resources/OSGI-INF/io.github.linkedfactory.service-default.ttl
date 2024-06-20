@@ -7,3 +7,5 @@
 @base <plugin://io.github.linkedfactory.service/data/> .
 <> <defaultModel> <http://linkedfactory.github.io/data/> .
 <> <store> [ a <KvinLevelDb> ; <dirName> "linkedfactory-valuestore" ] .
+
+#<> <store> [ a <KvinPartitioned> ; <dirName> "linkedfactory-partition" ; <archiveInterval> 10 ] .
