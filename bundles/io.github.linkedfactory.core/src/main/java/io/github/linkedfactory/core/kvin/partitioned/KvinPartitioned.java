@@ -29,14 +29,21 @@ public class KvinPartitioned implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinPartitioned.class);
 
 	final ReadWriteLock storeLock = new ReentrantReadWriteLock();
+	private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
+	protected int archiveInterval;
 	protected File currentStorePath, currentStoreArchivePath, archiveStorePath;
 	protected volatile KvinLevelDb hotStore, hotStoreArchive;
 	protected KvinParquet archiveStore;
 
 	public KvinPartitioned(File path) throws IOException {
+		this(path, 0);
+	}
+
+	public KvinPartitioned(File path, int archiveInterval) throws IOException {
 		this.path = path;
+		this.archiveInterval = archiveInterval;
 		this.currentStorePath = new File(path, "current");
 		this.currentStoreArchivePath = new File(path, "current-archive");
 		this.archiveStorePath = new File(path, "archive");
@@ -82,6 +89,14 @@ public class KvinPartitioned implements Kvin {
 			throw new RuntimeException(e);
 		} finally {
 			storeLock.writeLock().unlock();
+		}
+	}
+
+	public void cyclicRunArchival() {
+		if (this.archiveInterval != 0) {
+			scheduler.scheduleAtFixedRate(this::runArchival, 0, archiveInterval, TimeUnit.HOURS);
+		} else {
+			this.runArchival();
 		}
 	}
 

@@ -18,9 +18,15 @@ public abstract class KvinLevelDbFactory implements IKvinFactory {
 
 	@Override
 	public Kvin create() {
+		File valueStorePath = getStorePAthOr("linkedfactory-valuestore");
+		log.info("Using store path: {}", valueStorePath);
+		return new KvinLevelDb(valueStorePath);
+	}
+
+	protected File getStorePAthOr(String name) {
 		String dirName = getDirName();
 		if (dirName == null) {
-			dirName = "linkedfactory-valuestore";
+			dirName = name;
 		}
 		File valueStorePath;
 		if (new File(dirName).isAbsolute()) {
@@ -32,8 +38,7 @@ public abstract class KvinLevelDbFactory implements IKvinFactory {
 				throw new RuntimeException(e);
 			}
 		}
-		log.info("Using store path: {}", valueStorePath);
-		return new KvinLevelDb(valueStorePath);
+		return valueStorePath;
 	}
 
 	@Iri("plugin://io.github.linkedfactory.service/data/dirName")
