@@ -19,7 +19,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.CopyOption;
 import java.nio.file.Files;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -32,16 +34,16 @@ public class KvinPartitioned implements Kvin {
 	private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
-	protected int archiveInterval;
+	protected Duration archiveInterval;
 	protected File currentStorePath, currentStoreArchivePath, archiveStorePath;
 	protected volatile KvinLevelDb hotStore, hotStoreArchive;
 	protected KvinParquet archiveStore;
 
 	public KvinPartitioned(File path) throws IOException {
-		this(path, 0);
+		this(path, null);
 	}
 
-	public KvinPartitioned(File path, int archiveInterval) throws IOException {
+	public KvinPartitioned(File path, Duration archiveInterval) throws IOException {
 		this.path = path;
 		this.archiveInterval = archiveInterval;
 		this.currentStorePath = new File(path, "current");
@@ -53,50 +55,49 @@ public class KvinPartitioned implements Kvin {
 			hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
 		}
 		archiveStore = new KvinParquet(archiveStorePath.toString());
+		scheduleCyclicArchival();
 	}
 
-	public CompletableFuture<Void> runArchival() {
+	public void runArchival() {
+		log.info("Run archival");
 		try {
 			storeLock.writeLock().lock();
 			if (this.hotStoreArchive == null) {
 				// the hot store archive might exist if a previous archival was interrupted
 				createNewHotDataStore();
 			}
-			return CompletableFuture.supplyAsync(() -> {
-				try {
-					new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
-					try {
-						new Compactor(archiveStore).execute();
-					} catch (IOException e) {
-						log.error("Compacting archive store failed", e);
-					}
-				} catch (Exception e) {
-					log.error("Archiving data to archive store failed", e);
-				}
-				try {
-					storeLock.writeLock().lock();
-					this.hotStoreArchive.close();
-					this.hotStoreArchive = null;
-					FileUtils.deleteDirectory(this.currentStoreArchivePath);
-				} catch (IOException e) {
-					log.error("Deleting hot store archive failed", e);
-				} finally {
-					storeLock.writeLock().unlock();
-				}
-				return null;
-			});
 		} catch (IOException e) {
-			throw new RuntimeException(e);
+			log.error("Creating archive failed", e);
+		} finally {
+			storeLock.writeLock().unlock();
+		}
+
+		try {
+			new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
+			try {
+				new Compactor(archiveStore).execute();
+			} catch (IOException e) {
+				log.error("Compacting archive store failed", e);
+			}
+		} catch (Exception e) {
+			log.error("Archiving data to archive store failed", e);
+		}
+
+		try {
+			storeLock.writeLock().lock();
+			this.hotStoreArchive.close();
+			this.hotStoreArchive = null;
+			FileUtils.deleteDirectory(this.currentStoreArchivePath);
+		} catch (IOException e) {
+			log.error("Deleting hot store archive failed", e);
 		} finally {
 			storeLock.writeLock().unlock();
 		}
 	}
 
-	public void cyclicRunArchival() {
-		if (this.archiveInterval != 0) {
-			scheduler.scheduleAtFixedRate(this::runArchival, 0, archiveInterval, TimeUnit.HOURS);
-		} else {
-			this.runArchival();
+	private void scheduleCyclicArchival() {
+		if (this.archiveInterval != null) {
+			scheduler.scheduleWithFixedDelay(this::runArchival, 0, archiveInterval.toMillis(), TimeUnit.MILLISECONDS);
 		}
 	}
 
@@ -133,7 +134,7 @@ public class KvinPartitioned implements Kvin {
 	public void createNewHotDataStore() throws IOException {
 		hotStore.close();
 		FileUtils.deleteDirectory(this.currentStoreArchivePath);
-		Files.move(this.currentStorePath.toPath(), this.currentStoreArchivePath.toPath());
+		FileUtils.moveDirectory(this.currentStorePath, this.currentStoreArchivePath);
 		hotStore = new KvinLevelDb(currentStorePath);
 		hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
 	}
@@ -158,6 +159,7 @@ public class KvinPartitioned implements Kvin {
 	}
 
 	protected IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, long end, long begin, long limit) {
+		storeLock.readLock().lock();
 		return new NiceIterator<>() {
 			final PriorityQueue<Pair<KvinTuple, IExtendedIterator<KvinTuple>>> nextTuples = new PriorityQueue<>(
 					Comparator.comparing(Pair::getFirst, (a, b) -> {
@@ -188,7 +190,6 @@ public class KvinPartitioned implements Kvin {
 				}
 				if (currentProperty == null) {
 					// this is the case if the iterator is not yet initialized
-					storeLock.readLock().lock();
 					List<Kvin> stores = new ArrayList<>();
 					stores.add(hotStore);
 					if (hotStoreArchive != null) {

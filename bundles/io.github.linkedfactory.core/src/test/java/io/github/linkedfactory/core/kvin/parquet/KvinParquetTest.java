@@ -12,6 +12,7 @@ import org.junit.*;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.List;
 
 import static org.junit.Assert.*;
 
@@ -93,8 +94,9 @@ public class KvinParquetTest {
 
 		IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, null, Kvin.DEFAULT_CONTEXT, limit);
 		assertNotNull(tuples);
-		//tuples.toList().forEach(System.out::println);
-		assertEquals(100, tuples.toList().size());
+		List<KvinTuple> list = tuples.toList();
+		list.forEach(System.out::println);
+		assertEquals(100, list.size());
 		tuples.close();
 	}
 

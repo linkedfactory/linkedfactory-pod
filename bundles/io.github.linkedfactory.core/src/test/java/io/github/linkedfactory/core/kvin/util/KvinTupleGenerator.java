@@ -11,7 +11,7 @@ import java.util.Random;
 
 public class KvinTupleGenerator {
 	final static long seed = 200L;
-	static String[] ALL_DATA_TYPES = {"int", "long", "float", "double", "string", "boolean", "record", "uri"};
+	static String[] ALL_DATA_TYPES = {"int", "long", "float", "double", "string", "boolean", "record", "uri", "array"};
 	String[] dataTypes = ALL_DATA_TYPES;
 	long startTime;
 	int timeDistancePerValue = 10;
@@ -144,10 +144,14 @@ public class KvinTupleGenerator {
 				value = random.nextBoolean();
 				break;
 			case "record":
-				value = new Record(URIs.createURI("http://localhost:8080/linkedfactory/demofactory/record"), 55.2565);
+				value = new Record(URIs.createURI("property:p1"), 55.2565)
+						.append(new Record(URIs.createURI("property:p2"), 25.2565));
 				break;
 			case "uri":
 				value = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/uri");
+				break;
+			case "array":
+				value = new Object[] {2.0, true, "test", new Record(URIs.createURI("property:p1"), 55.2565)};
 				break;
 		}
 		return value;

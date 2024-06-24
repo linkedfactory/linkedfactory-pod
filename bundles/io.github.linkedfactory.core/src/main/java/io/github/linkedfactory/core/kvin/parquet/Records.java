@@ -1,66 +1,98 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
 import io.github.linkedfactory.core.kvin.Record;
+import io.github.linkedfactory.core.kvin.leveldb.EntryType;
 import io.github.linkedfactory.core.kvin.util.Values;
+import io.github.linkedfactory.core.kvin.util.Varint;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import scala.Array;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 public class Records {
-	public static Object decodeRecord(byte[] data) {
-		Record r = null;
-		try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(data)) {
-			char type = (char) byteArrayInputStream.read();
-			if (type == 'O') {
-				int propertyLength = byteArrayInputStream.read();
-				String property = new String(byteArrayInputStream.readNBytes(propertyLength), StandardCharsets.UTF_8);
-				var value = decodeRecord(byteArrayInputStream.readAllBytes());
-				if (r != null) {
-					r.append(new Record(URIs.createURI(property), value));
-				} else {
-					r = new Record(URIs.createURI(property), value);
-				}
-			} else if (type == 'R') {
-				int uriLength = byteArrayInputStream.read();
-				String uri = new String(byteArrayInputStream.readNBytes(uriLength), StandardCharsets.UTF_8);
-				return URIs.createURI(uri);
-			} else {
-				return Values.decode(data);
+	public static Object decodeRecord(ByteBuffer bb) throws IOException {
+		byte type = bb.get();
+		if (type == 'O') {
+			int length = (int) Varint.readUnsigned(bb);
+			Record dataObj = Record.NULL;
+			while (length-- > 0) {
+				int contentLength = (int) Varint.readUnsigned(bb);
+				byte[] content = new byte[contentLength];
+				bb.get(content);
+				URI property = URIs.createURI(new String(content, StandardCharsets.UTF_8));
+				Object value = decodeRecord(bb);
+				dataObj = dataObj.append(new Record(property, value));
 			}
-		} catch (IOException e) {
-			throw new RuntimeException(e);
+			return dataObj;
+		} else if (type == '[') {
+			int length = (int) Varint.readUnsigned(bb);
+			Object[] values = new Object[length];
+			for (int i = 0; i < length; i++) {
+				values[i] = decodeRecord(bb);
+			}
+			return values;
+		} else if (type == 'R') {
+			int uriLength = (int) Varint.readUnsigned(bb);
+			byte[] content = new byte[uriLength];
+			bb.get(content);
+			return URIs.createURI(new String(content, StandardCharsets.UTF_8));
+		} else {
+			bb.position(bb.position() - 1);
+			return Values.decode(bb);
 		}
-		return r;
 	}
 
 	public static byte[] encodeRecord(Object record) throws IOException {
-		ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
 		if (record instanceof Record) {
 			Record r = (Record) record;
-			byteArrayOutputStream.write("O".getBytes(StandardCharsets.UTF_8));
-			byte[] propertyBytes = r.getProperty().toString().getBytes();
-			byteArrayOutputStream.write((byte) propertyBytes.length);
-			byteArrayOutputStream.write(propertyBytes);
-			byteArrayOutputStream.write(encodeRecord(r.getValue()));
+			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+			// marker for an object
+			baos.write('O');
+			int size = r.size();
+			byte[] sizeBytes = new byte[Varint.calcLengthUnsigned(size)];
+			Varint.writeUnsigned(sizeBytes, 0, size);
+			baos.write(sizeBytes);
+			for (Record element : r) {
+				// write the property
+				URI p = element.getProperty();
+				byte[] content = p.toString().getBytes(StandardCharsets.UTF_8);
+				int lengthBytes = Varint.calcLengthUnsigned(content.length);
+				byte[] uriBytes = new byte[lengthBytes + content.length];
+				Varint.writeUnsigned(uriBytes, 0, content.length);
+				System.arraycopy(content, 0, uriBytes, 1, content.length);
+				baos.write(uriBytes);
+
+				// write the value
+				baos.write(encodeRecord(element.getValue()));
+			}
+			return baos.toByteArray();
+		} else if (record instanceof Object[]) {
+			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+			baos.write('[');
+			byte[] length = new byte[Varint.calcLengthUnsigned(((Object[]) record).length)];
+			Varint.writeUnsigned(length, 0, ((Object[]) record).length);
+			baos.write(length);
+			for (Object v : (Object[]) record) {
+				baos.write(encodeRecord(v));
+			}
+			return baos.toByteArray();
 		} else if (record instanceof URI) {
 			URI uri = (URI) record;
-			byte[] uriIndicatorBytes = "R".getBytes(StandardCharsets.UTF_8);
-			byte[] uriBytes = new byte[uri.toString().getBytes().length + 1];
-			uriBytes[0] = (byte) uri.toString().getBytes().length;
-			System.arraycopy(uri.toString().getBytes(), 0, uriBytes, 1, uriBytes.length - 1);
-
-			byte[] combinedBytes = new byte[uriIndicatorBytes.length + uriBytes.length];
-			System.arraycopy(uriIndicatorBytes, 0, combinedBytes, 0, uriIndicatorBytes.length);
-			System.arraycopy(uriBytes, 0, combinedBytes, uriIndicatorBytes.length, uriBytes.length);
-			return combinedBytes;
+			byte[] content = uri.toString().getBytes(StandardCharsets.UTF_8);
+			int lengthBytes = Varint.calcLengthUnsigned(content.length);
+			byte[] uriBytes = new byte[1 + lengthBytes + content.length];
+			uriBytes[0] = 'R';
+			Varint.writeUnsigned(uriBytes, 1, content.length);
+			System.arraycopy(content, 0, uriBytes, 1 + lengthBytes, content.length);
+			return uriBytes;
 		} else {
 			return Values.encode(record);
 		}
-		return byteArrayOutputStream.toByteArray();
 	}
 
 }

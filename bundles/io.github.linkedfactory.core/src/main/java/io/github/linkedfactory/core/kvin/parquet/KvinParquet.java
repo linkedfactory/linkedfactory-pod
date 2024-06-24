@@ -167,7 +167,10 @@ public class KvinParquet implements Kvin {
 	}
 
 	private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
+		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
 		try {
+			Thread.currentThread().setContextClassLoader(KvinParquet.class.getClassLoader());
+
 			writeLock.lock();
 			java.nio.file.Path metadataPath = Paths.get(archiveLocation, "metadata");
 			WriteContext writeContext = new WriteContext();
@@ -227,7 +230,7 @@ public class KvinParquet implements Kvin {
 				internalTuple.setValueString(tuple.value instanceof String ? (String) tuple.value : null);
 				internalTuple.setValueBool(tuple.value instanceof Boolean ? (Boolean) tuple.value ? 1 : 0 : null);
 				if (tuple.value instanceof Record || tuple.value instanceof URI || tuple.value instanceof BigInteger ||
-						tuple.value instanceof BigDecimal || tuple.value instanceof Short) {
+						tuple.value instanceof BigDecimal || tuple.value instanceof Short || tuple.value instanceof Object[]) {
 					internalTuple.setValueObject(encodeRecord(tuple.value));
 				} else {
 					internalTuple.setValueObject(null);
@@ -366,8 +369,11 @@ public class KvinParquet implements Kvin {
 			itemIdCache.invalidateAll();
 			propertyIdCache.invalidateAll();
 			contextIdCache.invalidateAll();
+		} catch (Throwable e) {
+			log.error("Error while adding data", e);
 		} finally {
 			writeLock.unlock();
+			Thread.currentThread().setContextClassLoader(contextCl);
 		}
 	}
 
@@ -680,11 +686,16 @@ public class KvinParquet implements Kvin {
 					} else {
 						KvinTupleInternal tuple = nextTuple;
 						nextTuple = null;
-						return internalTupleToKvinTuple(tuple);
+						try {
+							return internalTupleToKvinTuple(tuple);
+						} catch (IOException e) {
+							close();
+							throw new UncheckedIOException(e);
+						}
 					}
 				}
 
-				private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) {
+				private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) throws IOException {
 					Object value = null;
 					if (internalTuple.valueInt != null) {
 						value = internalTuple.valueInt;
@@ -699,7 +710,7 @@ public class KvinParquet implements Kvin {
 					} else if (internalTuple.valueBool != null) {
 						value = internalTuple.valueBool == 1;
 					} else if (internalTuple.valueObject != null) {
-						value = decodeRecord(internalTuple.valueObject);
+						value = decodeRecord(ByteBuffer.wrap(internalTuple.valueObject));
 					}
 
 					// checking for property change

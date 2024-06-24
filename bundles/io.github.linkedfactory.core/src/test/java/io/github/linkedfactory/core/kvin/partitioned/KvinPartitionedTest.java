@@ -62,7 +62,7 @@ public class KvinPartitionedTest {
 		}
 		assertEquals(2000, recordCount);
 
-		kvinPartitioned.runArchival().get();
+		kvinPartitioned.runArchival();
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673823600000L).generate());
 
 		assertTrue(kvinPartitioned.archiveStorePath.listFiles().length > 0); // main folder
@@ -81,7 +81,7 @@ public class KvinPartitionedTest {
 	@Test
 	public void shouldDoFetch() throws ExecutionException, InterruptedException {
 		kvinPartitioned.put(tupleGenerator.setStartTime(1672614000000L).generate());
-		kvinPartitioned.runArchival().get();;
+		kvinPartitioned.runArchival();
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
 
 		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1);
@@ -97,7 +97,7 @@ public class KvinPartitionedTest {
 	@Test
 	public void shouldFetchProperties() throws ExecutionException, InterruptedException {
 		kvinPartitioned.put(tupleGenerator.setStartTime(1672614000000L).generate());
-		kvinPartitioned.runArchival().get();
+		kvinPartitioned.runArchival();
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
 
 		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 5);

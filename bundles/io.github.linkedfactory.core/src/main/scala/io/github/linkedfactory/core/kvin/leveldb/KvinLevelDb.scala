@@ -344,7 +344,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     new StoreIterator[URI](it) {
       lazy val seen = mutable.Set.empty[URI]
 
-      override def init: Unit = {
+      override def init(): Unit = {
         it.seek(prefix)
       }
 
@@ -381,7 +381,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
       var propertyId: Long = 0
       UniqueExtendedIterator.create(
         new StoreIterator[URI](it) {
-          override def init: Unit = {
+          override def init(): Unit = {
             it.seek(prefix)
           }
 
@@ -507,7 +507,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         val baos = new ByteArrayOutputStream
         try {
           // marker for an object
-          baos.write(Array('O'.toByte))
+          baos.write('O'.toByte)
           val size = d.size()
           val length: Array[Byte] = Array.ofDim(Varint.calcLengthUnsigned(size))
           Varint.writeUnsigned(length, 0, size)
@@ -531,7 +531,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         val baos = new ByteArrayOutputStream
         try {
           // marker for an array
-          baos.write(Array('['.toByte))
+          baos.write('['.toByte)
           val length: Array[Byte] = Array.ofDim(Varint.calcLengthUnsigned(a.length))
           Varint.writeUnsigned(length, 0, a.length)
           baos.write(length)
@@ -637,7 +637,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           }
         }
 
-        override def init: Unit = {
+        override def init(): Unit = {
           nextProperty()
         }
 

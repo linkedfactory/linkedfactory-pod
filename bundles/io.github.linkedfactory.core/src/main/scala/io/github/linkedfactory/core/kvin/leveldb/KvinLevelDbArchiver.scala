@@ -31,7 +31,7 @@ class KvinLevelDbArchiver(var databaseStore: KvinLevelDb, var archiveStore: Kvin
       var currentItem: URI = null
       var nextItem: Entry[Array[Byte], Array[Byte]] = null
       var isLastItem = false
-      var isEndOfAllRecords = false
+      var isEndOfAllRecords = !idIterator.hasNext()
 
       override def hasNext: Boolean = {
         !isEndOfAllRecords
@@ -80,9 +80,10 @@ class KvinLevelDbArchiver(var databaseStore: KvinLevelDb, var archiveStore: Kvin
       }
 
       override def close(): Unit = {
-        propertyIterator.close();
+        if (propertyIterator != null) {
+          propertyIterator.close();
+        }
         idIterator.close()
-        idsSnapshotOption.snapshot().close()
         idsSnapshot.close()
       }
     }
