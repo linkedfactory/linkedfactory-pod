@@ -249,6 +249,7 @@
 							<includeGroupIds>
 								io.github.pcmind,
 								org.iq80.snappy,
+								org.xerial.snappy,
 								org.apache.parquet,
 								org.apache.avro,
 								org.apache.hadoop,
