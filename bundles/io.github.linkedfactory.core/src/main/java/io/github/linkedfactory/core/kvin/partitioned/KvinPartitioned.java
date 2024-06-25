@@ -30,7 +30,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class KvinPartitioned implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinPartitioned.class);
 
-	final ReadWriteLock storeLock = new ReentrantReadWriteLock();
+	final ReentrantReadWriteLock storeLock = new ReentrantReadWriteLock();
 	private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
@@ -182,6 +182,7 @@ public class KvinPartitioned implements Kvin {
 			long propertyValueCount;
 			URI currentProperty;
 			KvinTuple nextTuple;
+			boolean closed;
 
 			@Override
 			public boolean hasNext() {
@@ -237,7 +238,12 @@ public class KvinPartitioned implements Kvin {
 					}
 					propertyValueCount++;
 				}
-				return nextTuple != null;
+				if (nextTuple != null) {
+					return true;
+				} else {
+					close();
+					return false;
+				}
 			}
 
 			@Override
@@ -252,16 +258,19 @@ public class KvinPartitioned implements Kvin {
 
 			@Override
 			public void close() {
-				try {
-					while (!nextTuples.isEmpty()) {
-						try {
-							nextTuples.poll().getSecond().close();
-						} catch (Exception e) {
-							// TODO log exception
+				if (! closed) {
+					try {
+						while (!nextTuples.isEmpty()) {
+							try {
+								nextTuples.poll().getSecond().close();
+							} catch (Exception e) {
+								// TODO log exception
+							}
 						}
+					} finally {
+						storeLock.readLock().unlock();
+						closed = true;
 					}
-				} finally {
-					storeLock.readLock().unlock();
 				}
 			}
 		};

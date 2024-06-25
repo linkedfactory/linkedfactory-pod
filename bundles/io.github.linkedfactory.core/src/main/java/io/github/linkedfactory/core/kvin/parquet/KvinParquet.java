@@ -44,7 +44,6 @@ import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
@@ -63,7 +62,7 @@ public class KvinParquet implements Kvin {
 	final Cache<URI, Long> propertyIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final Cache<URI, Long> contextIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	// Lock
-	final ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+	final ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock();
 	final Lock writeLock = readWriteLock.writeLock();
 	final Lock readLock = readWriteLock.readLock();
 	Map<Path, HadoopInputFile> inputFileCache = new HashMap<>(); // hadoop input file cache
@@ -166,12 +165,13 @@ public class KvinParquet implements Kvin {
 		}
 	}
 
-	private void putInternal(Iterable<KvinTuple> tuples) throws IOException {
+	private synchronized void putInternal(Iterable<KvinTuple> tuples) throws IOException {
 		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
 		try {
 			Thread.currentThread().setContextClassLoader(KvinParquet.class.getClassLoader());
 
 			writeLock.lock();
+
 			java.nio.file.Path metadataPath = Paths.get(archiveLocation, "metadata");
 			WriteContext writeContext = new WriteContext();
 			writeContext.hasExistingData = Files.exists(metadataPath);
@@ -187,6 +187,8 @@ public class KvinParquet implements Kvin {
 				Files.walk(tempPath).sorted(Comparator.reverseOrder()).map(java.nio.file.Path::toFile)
 						.forEach(File::delete);
 			}
+			writeLock.unlock();
+
 			Files.createDirectories(tempPath);
 			Path itemMappingFile = new Path(tempPath.toString(), "metadata/items__1.parquet");
 			Path propertyMappingFile = new Path(tempPath.toString(), "metadata/properties__1.parquet");
@@ -300,6 +302,8 @@ public class KvinParquet implements Kvin {
 					}
 				}
 			});
+
+			writeLock.lock();
 
 			Map<Integer, List<WriterState>> writersPerYear = writers.values().stream()
 					.collect(Collectors.groupingBy(s -> s.year));
@@ -593,7 +597,11 @@ public class KvinParquet implements Kvin {
 			readLock.lock();
 			// filters
 			IdMappings idMappings = getIdMappings(item, property, context);
-			if (idMappings.itemId == 0L) {
+			if (idMappings.itemId == 0L
+					|| property != null && idMappings.propertyId == 0L
+					|| context != null && idMappings.contextId == 0L) {
+				// ensure read lock is freed
+				readLock.unlock();
 				return NiceIterator.emptyIterator();
 			}
 
@@ -608,6 +616,8 @@ public class KvinParquet implements Kvin {
 			final FilterPredicate filterFinal = filter;
 			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
 			if (dataFolders.isEmpty()) {
+				// ensure read lock is freed
+				readLock.unlock();
 				return NiceIterator.emptyIterator();
 			}
 			return new NiceIterator<KvinTuple>() {
@@ -617,6 +627,7 @@ public class KvinParquet implements Kvin {
 				long propertyValueCount;
 				int folderIndex = -1;
 				String currentProperty;
+				boolean closed;
 
 				{
 					try {
@@ -676,7 +687,12 @@ public class KvinParquet implements Kvin {
 					} catch (IOException e) {
 						throw new UncheckedIOException(e);
 					}
-					return nextTuple != null;
+					if (nextTuple != null) {
+						return true;
+					} else {
+						close();
+						return false;
+					}
 				}
 
 				@Override
@@ -729,13 +745,19 @@ public class KvinParquet implements Kvin {
 
 				@Override
 				public void close() {
-					while (!nextTuples.isEmpty()) {
+					if (! closed) {
 						try {
-							nextTuples.poll().getSecond().close();
-						} catch (IOException e) {
+							while (!nextTuples.isEmpty()) {
+								try {
+									nextTuples.poll().getSecond().close();
+								} catch (IOException e) {
+								}
+							}
+						} finally {
+							readLock.unlock();
+							closed = true;
 						}
 					}
-					readLock.unlock();
 				}
 
 				void nextReaders() throws IOException {

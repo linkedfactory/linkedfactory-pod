@@ -32,7 +32,7 @@ public class Compactor {
 	}
 
 	public void execute() throws IOException {
-		performMappingFileCompaction();
+		boolean mappingFilesCompacted = performMappingFileCompaction();
 		List<File> weekFolders = getCompactionEligibleWeekFolders();
 		for (File weekFolder : weekFolders) {
 			try {
@@ -51,7 +51,9 @@ public class Compactor {
 			kvinParquet.writeLock.lock();
 			clearCache();
 			// replace existing files with compacted files
-			FileUtils.cleanDirectory(new File(archiveLocation, "metadata"));
+			if (mappingFilesCompacted) {
+				FileUtils.cleanDirectory(new File(archiveLocation, "metadata"));
+			}
 			for (File weekFolder : weekFolders) {
 				FileUtils.cleanDirectory(weekFolder);
 			}
@@ -74,17 +76,19 @@ public class Compactor {
 		}
 	}
 
-	private void performMappingFileCompaction() throws IOException {
+	private boolean performMappingFileCompaction() throws IOException {
 		Map<String, List<Pair<String, Integer>>> mappingFiles = getMappingFiles(Paths.get(archiveLocation, "metadata"));
 		List<Pair<String, Integer>> itemsFiles = mappingFiles.get("items");
 		if (itemsFiles != null && itemsFiles.size() >= mappingFileCompactionTrigger) {
 			try {
 				kvinParquet.readLock.lock();
 				generateCompactedMappingFiles(mappingFiles, new File(compactionFolder, "metadata"));
+				return true;
 			} finally {
 				kvinParquet.readLock.unlock();
 			}
 		}
+		return false;
 	}
 
 	private List<File> getCompactionEligibleWeekFolders() {

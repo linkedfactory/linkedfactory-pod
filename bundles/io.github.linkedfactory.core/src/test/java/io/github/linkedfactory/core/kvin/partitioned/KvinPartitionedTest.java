@@ -85,11 +85,13 @@ public class KvinPartitionedTest {
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
 
 		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1);
-		URI property = URIs.createURI("http://example.org/" + 1 + "/measured-point-1");
-		long limit = 0;
+		IExtendedIterator<KvinTuple> tuples = kvinPartitioned.fetch(item,
+				URIs.createURI("http://example.org/unknown-property"), Kvin.DEFAULT_CONTEXT, 0);
+		assertNotNull(tuples);
+		assertTrue(tuples.toList().size() == 0);
 
-		IExtendedIterator<KvinTuple> tuples = kvinPartitioned.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
-
+		tuples = kvinPartitioned.fetch(item,
+				URIs.createURI("http://example.org/1"), Kvin.DEFAULT_CONTEXT, 0);
 		assertNotNull(tuples);
 		assertTrue(tuples.toList().size() > 0);
 	}
@@ -105,5 +107,41 @@ public class KvinPartitionedTest {
 
 		assertNotNull(properties);
 		assertTrue(properties.toList().size() > 0);
+	}
+
+	@Test
+	public void testMultiThreading() throws InterruptedException {
+		kvinPartitioned.put(tupleGenerator.setStartTime(1672614000000L).generate());
+
+		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1);
+		URI item2 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 2);
+		URI item3 = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 3);
+		URI property = URIs.createURI("http://example.org/" + 1);
+		IExtendedIterator<KvinTuple> it1 = kvinPartitioned.fetch(item, property, Kvin.DEFAULT_CONTEXT, 2);
+		it1.hasNext();
+
+		Thread archiver = new Thread(() -> {
+			System.out.println("start archival");
+			System.out.println(kvinPartitioned.storeLock.getWriteHoldCount());
+			kvinPartitioned.runArchival();
+			System.out.println("finished archival");
+		});
+		archiver.start();
+
+		for (KvinTuple t1 : it1) {
+			System.out.println("t1: " + t1);
+			IExtendedIterator<KvinTuple> it2 = kvinPartitioned.fetch(item2, property, Kvin.DEFAULT_CONTEXT, 1);
+			while (it2.hasNext()) {
+				System.out.println("t2: " + it2.next());
+			}
+		}
+
+		Thread.sleep(10);
+
+		for (KvinTuple t3 : kvinPartitioned.fetch(item3, property, Kvin.DEFAULT_CONTEXT, 2)) {
+			System.out.println("t3: " + t3);
+		}
+
+		archiver.join();
 	}
 }
