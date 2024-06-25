@@ -20,10 +20,10 @@ import java.util.stream.Collectors;
 import static io.github.linkedfactory.core.kvin.parquet.ParquetHelpers.*;
 
 public class Compactor {
+	final KvinParquet kvinParquet;
+	final File compactionFolder;
 	String archiveLocation;
-	KvinParquet kvinParquet;
 	int dataFileCompactionTrigger = 2, mappingFileCompactionTrigger = 3;
-	File compactionFolder;
 
 	public Compactor(KvinParquet kvinParquet) {
 		this.archiveLocation = kvinParquet.archiveLocation;
@@ -32,14 +32,21 @@ public class Compactor {
 	}
 
 	public void execute() throws IOException {
-		boolean mappingFilesCompacted = performMappingFileCompaction();
-		List<File> weekFolders = getCompactionEligibleWeekFolders();
-		for (File weekFolder : weekFolders) {
-			try {
-				compactDataFiles(weekFolder);
-			} catch (IOException e) {
-				throw new RuntimeException(e);
+		Set<String> compactedMappings;
+		List<File> weekFolders;
+		kvinParquet.readLock.lock();
+		try {
+			compactedMappings = compactMappingFiles();
+			weekFolders = getCompactionEligibleWeekFolders();
+			for (File weekFolder : weekFolders) {
+				try {
+					compactDataFiles(weekFolder);
+				} catch (IOException e) {
+					throw new RuntimeException(e);
+				}
 			}
+		} finally {
+			kvinParquet.readLock.unlock();
 		}
 
 		if (!compactionFolder.exists()) {
@@ -51,8 +58,9 @@ public class Compactor {
 			kvinParquet.writeLock.lock();
 			clearCache();
 			// replace existing files with compacted files
-			if (mappingFilesCompacted) {
-				FileUtils.cleanDirectory(new File(archiveLocation, "metadata"));
+			if (!compactedMappings.isEmpty()) {
+				// delete compacted mapping files
+				deleteMappingFiles(Paths.get(archiveLocation, "metadata"), compactedMappings);
 			}
 			for (File weekFolder : weekFolders) {
 				FileUtils.cleanDirectory(weekFolder);
@@ -71,24 +79,11 @@ public class Compactor {
 							throw new UncheckedIOException(e);
 						}
 					});
+			// completely delete compaction folder
+			FileUtils.deleteDirectory(compactionFolder);
 		} finally {
 			kvinParquet.writeLock.unlock();
 		}
-	}
-
-	private boolean performMappingFileCompaction() throws IOException {
-		Map<String, List<Pair<String, Integer>>> mappingFiles = getMappingFiles(Paths.get(archiveLocation, "metadata"));
-		List<Pair<String, Integer>> itemsFiles = mappingFiles.get("items");
-		if (itemsFiles != null && itemsFiles.size() >= mappingFileCompactionTrigger) {
-			try {
-				kvinParquet.readLock.lock();
-				generateCompactedMappingFiles(mappingFiles, new File(compactionFolder, "metadata"));
-				return true;
-			} finally {
-				kvinParquet.readLock.unlock();
-			}
-		}
-		return false;
 	}
 
 	private List<File> getCompactionEligibleWeekFolders() {
@@ -107,10 +102,17 @@ public class Compactor {
 		return weekFolderList;
 	}
 
-	private void generateCompactedMappingFiles(Map<String, List<Pair<String, Integer>>> mappingFiles,
-	                                           File compactionFolder) throws IOException {
+	private Set<String> compactMappingFiles() throws IOException {
+		Set<String> compacted = new HashSet<>();
+		Map<String, List<Pair<String, Integer>>> mappingFiles = getMappingFiles(Paths.get(archiveLocation, "metadata"));
 		for (Map.Entry<String, List<Pair<String, Integer>>> mapping : mappingFiles.entrySet()) {
-			Path compactedFile = new Path(compactionFolder.toString(), mapping.getKey() + "__1.parquet");
+			if (mapping.getValue().size() < mappingFileCompactionTrigger) {
+				// do nothing if number of files for compaction is not yet reached
+				continue;
+			}
+			compacted.add(mapping.getKey());
+
+			Path compactedFile = new Path(new File(compactionFolder, "metadata").toString(), mapping.getKey() + "__1.parquet");
 			ParquetWriter<Object> compactedFileWriter = getParquetMappingWriter(compactedFile);
 
 			PriorityQueue<Pair<IdMapping, ParquetReader<IdMapping>>> nextMappings =
@@ -128,9 +130,10 @@ public class Compactor {
 
 			while (!nextMappings.isEmpty()) {
 				var pair = nextMappings.poll();
+				compactedFileWriter.write(pair.getFirst());
+
 				IdMapping idMapping = pair.getSecond().read();
 				if (idMapping != null) {
-					compactedFileWriter.write(idMapping);
 					nextMappings.add(new Pair<>(idMapping, pair.getSecond()));
 				} else {
 					pair.getSecond().close();
@@ -138,6 +141,7 @@ public class Compactor {
 			}
 			compactedFileWriter.close();
 		}
+		return compacted;
 	}
 
 	private ParquetReader<IdMapping> getParquetMappingReader(HadoopInputFile file) throws IOException {
@@ -187,6 +191,7 @@ public class Compactor {
 			while (!nextTuples.isEmpty()) {
 				var pair = nextTuples.poll();
 				compactionFileWriter.write(pair.getFirst());
+
 				KvinTupleInternal tuple = pair.getSecond().read();
 				if (tuple != null) {
 					nextTuples.add(new Pair<>(tuple, pair.getSecond()));

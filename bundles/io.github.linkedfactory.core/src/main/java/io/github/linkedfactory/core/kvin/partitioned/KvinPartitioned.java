@@ -301,22 +301,35 @@ public class KvinPartitioned implements Kvin {
 		storeLock.readLock().lock();
 		IExtendedIterator<URI> results = hotStore.descendants(item);
 		return new NiceIterator<>() {
+			boolean closed;
+
 			@Override
 			public boolean hasNext() {
-				return results.hasNext();
+				if (results.hasNext()) {
+					return true;
+				} else {
+					close();
+					return false;
+				}
 			}
 
 			@Override
 			public URI next() {
-				return results.next();
+				if (hasNext()) {
+					return results.next();
+				}
+				throw new NoSuchElementException();
 			}
 
 			@Override
 			public void close() {
-				try {
-					results.close();
-				} finally {
-					storeLock.readLock().unlock();
+				if (!closed) {
+					try {
+						results.close();
+					} finally {
+						storeLock.readLock().unlock();
+						closed = true;
+					}
 				}
 			}
 		};
@@ -327,22 +340,35 @@ public class KvinPartitioned implements Kvin {
 		storeLock.readLock().lock();
 		IExtendedIterator<URI> results = hotStore.descendants(item, limit);
 		return new NiceIterator<>() {
+			boolean closed;
+
 			@Override
 			public boolean hasNext() {
-				return results.hasNext();
+				if (results.hasNext()) {
+					return true;
+				} else {
+					close();
+					return false;
+				}
 			}
 
 			@Override
 			public URI next() {
-				return results.next();
+				if (hasNext()) {
+					return results.next();
+				}
+				throw new NoSuchElementException();
 			}
 
 			@Override
 			public void close() {
-				try {
-					results.close();
-				} finally {
-					storeLock.readLock().unlock();
+				if (!closed) {
+					try {
+						results.close();
+					} finally {
+						storeLock.readLock().unlock();
+						closed = true;
+					}
 				}
 			}
 		};

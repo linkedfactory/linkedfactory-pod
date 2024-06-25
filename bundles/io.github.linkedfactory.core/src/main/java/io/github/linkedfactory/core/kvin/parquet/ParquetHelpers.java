@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
+import io.github.linkedfactory.core.kvin.partitioned.KvinPartitioned;
 import net.enilink.commons.util.Pair;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
@@ -10,6 +11,8 @@ import org.apache.parquet.avro.AvroParquetWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,7 +21,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ParquetHelpers {
-	final static ReflectData reflectData = new ReflectData(ParquetHelpers.class.getClassLoader());
+	static final Logger log = LoggerFactory.getLogger(ParquetHelpers.class);
+	static final ReflectData reflectData = new ReflectData(ParquetHelpers.class.getClassLoader());
 
 	// parquet file writer config
 	static final long ROW_GROUP_SIZE = 1048576;  // 1 MB
@@ -45,6 +49,7 @@ public class ParquetHelpers {
 			.name("valueObject").type().nullable().bytesType().noDefault().endRecord();
 
 	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
+	static Pattern fileOrDotFileWithSeqNr = Pattern.compile("^\\.?([^.].*)__([0-9]+)\\..*$");
 
 	static ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
 		return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, configuration))
@@ -99,5 +104,26 @@ public class ParquetHelpers {
 			});
 		}
 		return fileMap;
+	}
+
+	public static void deleteMappingFiles(java.nio.file.Path folder, Set<String> types)
+			throws IOException {
+		if (Files.isDirectory(folder)) {
+			Files.list(folder).forEach(p -> {
+				String name = p.getFileName().toString();
+				Matcher m = fileOrDotFileWithSeqNr.matcher(name);
+				if (m.matches()) {
+					String type = m.group(1);
+					if (types.contains(type)) {
+						// delete file
+						try {
+							Files.delete(p);
+						} catch (IOException e) {
+							log.error("Unable to delete file", e);
+						}
+					}
+				}
+			});
+		}
 	}
 }

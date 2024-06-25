@@ -245,9 +245,23 @@ public class KvinParquet implements Kvin {
 			for (WriterState state : writers.values()) {
 				state.writer.close();
 			}
+
+			boolean itemsWritten = itemMappingWriter.getDataSize() > 0;
 			itemMappingWriter.close();
+			boolean contextsWritten = contextMappingWriter.getDataSize() > 0;
 			contextMappingWriter.close();
+			boolean propertiesWritten = propertyMappingWriter.getDataSize() > 0;
 			propertyMappingWriter.close();
+
+			if (!itemsWritten) {
+				Files.delete(Paths.get(itemMappingFile.toString()));
+			}
+			if (!contextsWritten) {
+				Files.delete(Paths.get(contextMappingFile.toString()));
+			}
+			if (!propertiesWritten) {
+				Files.delete(Paths.get(propertyMappingFile.toString()));
+			}
 
 			Map<Integer, long[]> minMaxYears = new HashMap<>();
 			for (WriterState state : writers.values()) {
@@ -565,29 +579,29 @@ public class KvinParquet implements Kvin {
 		return internalResult;
 	}
 
-	public String getProperty(KvinTupleInternal tuple) {
+	public String getProperty(KvinTupleInternal tuple) throws IOException {
 		ByteBuffer idBuffer = ByteBuffer.wrap(tuple.getId());
 		idBuffer.getLong();
 		Long propertyId = idBuffer.getLong();
 		String cachedProperty = propertyIdReverseLookUpCache.getIfPresent(propertyId);
 
 		if (cachedProperty == null) {
-			try {
-				FilterPredicate filter = eq(FilterApi.longColumn("id"), propertyId);
-				Path metadataFolder = new Path(this.archiveLocation + "metadata/");
-				File[] mappingFiles = new File(metadataFolder.toString()).listFiles((file, s) -> s.startsWith("properties"));
-				IdMapping propertyMapping = null;
+			FilterPredicate filter = eq(FilterApi.longColumn("id"), propertyId);
+			Path metadataFolder = new Path(this.archiveLocation + "metadata/");
+			File[] mappingFiles = new File(metadataFolder.toString()).listFiles((file, s) -> s.startsWith("properties"));
+			IdMapping propertyMapping = null;
 
-				for (File mappingFile : mappingFiles) {
-					propertyMapping = fetchMappingIds(new Path(mappingFile.getPath()), filter);
-					if (propertyMapping != null) break;
-				}
-
-				cachedProperty = propertyMapping.getValue();
-				propertyIdReverseLookUpCache.put(propertyId, propertyMapping.getValue());
-			} catch (IOException e) {
-				throw new UncheckedIOException(e);
+			for (File mappingFile : mappingFiles) {
+				propertyMapping = fetchMappingIds(new Path(mappingFile.getPath()), filter);
+				if (propertyMapping != null) break;
 			}
+
+			if (propertyMapping == null) {
+				throw new IOException("Unknown property with id: " + propertyId);
+			} else {
+				cachedProperty = propertyMapping.getValue();
+			}
+			propertyIdReverseLookUpCache.put(propertyId, cachedProperty);
 		}
 		return cachedProperty;
 	}
