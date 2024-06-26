@@ -16,9 +16,11 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class ParquetHelpers {
 	static final Logger log = LoggerFactory.getLogger(ParquetHelpers.class);
@@ -37,7 +39,7 @@ public class ParquetHelpers {
 
 	// data file schema
 	static Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace(KvinTupleInternal.class.getPackageName()).fields()
-			.name("id").type().nullable().bytesType().noDefault()
+			.name("id").type().bytesType().noDefault()
 			.name("time").type().longType().noDefault()
 			.name("seqNr").type().intType().intDefault(0)
 			.name("valueInt").type().nullable().intType().noDefault()

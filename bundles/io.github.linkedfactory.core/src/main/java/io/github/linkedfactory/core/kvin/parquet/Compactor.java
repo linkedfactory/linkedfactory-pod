@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
+import io.github.linkedfactory.core.kvin.KvinTuple;
 import net.enilink.commons.util.Pair;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -164,6 +165,16 @@ public class Compactor {
 			List<java.nio.file.Path> dataFiles = Files.walk(weekFolder.toPath(), 1)
 					.skip(1)
 					.filter(path -> path.getFileName().toString().startsWith("data_"))
+					// sort descending by index
+					.sorted(Comparator.comparing(p -> {
+						try {
+							return -Integer.parseInt(p.getFileName().toString()
+									.replaceAll("^.*__", "")
+									.replaceAll("\\..*$", ""));
+						} catch (NumberFormatException nfe) {
+							return 0;
+						}
+					}))
 					.collect(Collectors.toList());
 
 			java.nio.file.Path targetFolder = compactionFolder.toPath().resolve(
@@ -188,9 +199,15 @@ public class Compactor {
 				}
 			}
 
+			KvinTupleInternal prevTuple = null;
 			while (!nextTuples.isEmpty()) {
 				var pair = nextTuples.poll();
-				compactionFileWriter.write(pair.getFirst());
+				if (prevTuple == null || prevTuple.compareTo(pair.getFirst()) != 0) {
+					compactionFileWriter.write(pair.getFirst());
+					prevTuple = pair.getFirst();
+				} else if (prevTuple != null) {
+					// omit tuple as it is duplicate in terms of id, time, and seqNr
+				}
 
 				KvinTupleInternal tuple = pair.getSecond().read();
 				if (tuple != null) {
@@ -200,6 +217,7 @@ public class Compactor {
 						pair.getSecond().close();
 					} catch (IOException e) {
 					}
+					break;
 				}
 			}
 

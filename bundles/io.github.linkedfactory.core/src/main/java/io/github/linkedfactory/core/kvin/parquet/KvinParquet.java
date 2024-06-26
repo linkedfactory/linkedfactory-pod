@@ -111,7 +111,7 @@ public class KvinParquet implements Kvin {
 					}
 				}
 			}
-			switch(entry.getKey()) {
+			switch (entry.getKey()) {
 				case "items":
 					writeContext.itemIdCounter = maxId;
 					break;
@@ -342,7 +342,13 @@ public class KvinParquet implements Kvin {
 				}
 				for (WriterState state : entry.getValue()) {
 					String weekFolderName = String.format("%02d", state.week);
-					yearMeta.put(weekFolderName, state.minMax[0] + "-" + state.minMax[1]);
+					String idRange = yearMeta.getProperty(weekFolderName);
+					if (idRange != null) {
+						long[] minMax = splitRange(idRange);
+						yearMeta.put(weekFolderName, Math.min(minMax[0], state.minMax[0]) + "-" + Math.max(minMax[1], state.minMax[1]));
+					} else {
+						yearMeta.put(weekFolderName, state.minMax[0] + "-" + state.minMax[1]);
+					}
 
 					java.nio.file.Path weekFolder = yearFolder.resolve(weekFolderName);
 					Files.createDirectories(weekFolder);
@@ -357,6 +363,8 @@ public class KvinParquet implements Kvin {
 						return 0;
 					}).max(Integer::compareTo).orElse(0);
 					String filename = "data__" + (maxSeqNr + 1) + ".parquet";
+
+					log.debug("moving: " + state.file + " -> " + weekFolder.resolve(filename));
 					Files.move(state.file, weekFolder.resolve(filename));
 				}
 				yearMeta.store(Files.newOutputStream(yearMetaPath), null);
@@ -545,7 +553,6 @@ public class KvinParquet implements Kvin {
 			ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * 2);
 			keyBuffer.putLong(idMappings.itemId);
 			keyBuffer.putLong(idMappings.propertyId);
-
 			return and(gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array())),
 					lt(FilterApi.binaryColumn("id"),
 							Binary.fromConstantByteArray(ByteBuffer.allocate(Long.BYTES * 2)
@@ -637,7 +644,7 @@ public class KvinParquet implements Kvin {
 			return new NiceIterator<KvinTuple>() {
 				PriorityQueue<Pair<KvinTupleInternal, ParquetReader<KvinTupleInternal>>> nextTuples =
 						new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
-				KvinTupleInternal nextTuple;
+				KvinTupleInternal prevTuple, nextTuple;
 				long propertyValueCount;
 				int folderIndex = -1;
 				String currentProperty;
@@ -659,13 +666,16 @@ public class KvinParquet implements Kvin {
 				}
 
 				KvinTupleInternal selectNextTuple() throws IOException {
-					if (nextTuples.isEmpty() && folderIndex < dataFolders.size() - 1) {
-						nextReaders();
-					}
-					var min = nextTuples.isEmpty() ? null : nextTuples.poll();
-					if (min != null) {
-						var tuple = min.getSecond().read();
-						if (tuple != null) {
+					while (true) {
+						while (nextTuples.isEmpty() && folderIndex < dataFolders.size() - 1) {
+							nextReaders();
+						}
+						var min = nextTuples.isEmpty() ? null : nextTuples.poll();
+						if (min != null) {
+							// omit duplicates in terms of id, time, and seqNr
+							boolean isDuplicate = prevTuple != null && prevTuple.compareTo(min.getFirst()) == 0;
+
+							var tuple = min.getSecond().read();
 							if (tuple != null) {
 								nextTuples.add(new Pair<>(tuple, min.getSecond()));
 							} else {
@@ -674,8 +684,12 @@ public class KvinParquet implements Kvin {
 								} catch (IOException e) {
 								}
 							}
+							if (!isDuplicate) {
+								return min.getFirst();
+							}
+						} else {
+							break;
 						}
-						return min.getFirst();
 					}
 					return null;
 				}
@@ -715,6 +729,7 @@ public class KvinParquet implements Kvin {
 						throw new NoSuchElementException();
 					} else {
 						KvinTupleInternal tuple = nextTuple;
+						prevTuple = tuple;
 						nextTuple = null;
 						try {
 							return internalTupleToKvinTuple(tuple);
@@ -759,7 +774,7 @@ public class KvinParquet implements Kvin {
 
 				@Override
 				public void close() {
-					if (! closed) {
+					if (!closed) {
 						try {
 							while (!nextTuples.isEmpty()) {
 								try {
@@ -830,7 +845,7 @@ public class KvinParquet implements Kvin {
 	private List<java.nio.file.Path> getDataFolders(IdMappings idMappings) throws IOException {
 		long itemId = idMappings.itemId;
 		java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
-		Properties meta = null;
+		Properties meta;
 		try {
 			meta = metaCache.get(metaPath, () -> {
 				Properties p = new Properties();
