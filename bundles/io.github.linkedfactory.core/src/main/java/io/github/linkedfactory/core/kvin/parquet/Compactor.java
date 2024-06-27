@@ -217,7 +217,6 @@ public class Compactor {
 						pair.getSecond().close();
 					} catch (IOException e) {
 					}
-					break;
 				}
 			}
 
