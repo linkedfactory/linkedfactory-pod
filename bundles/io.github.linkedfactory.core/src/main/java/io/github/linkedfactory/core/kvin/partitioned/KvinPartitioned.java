@@ -29,9 +29,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class KvinPartitioned implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinPartitioned.class);
-
-	final ReentrantReadWriteLock storeLock = new ReentrantReadWriteLock();
 	private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+	final ReentrantReadWriteLock storeLock = new ReentrantReadWriteLock();
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
 	protected Duration archiveInterval;
@@ -180,8 +179,7 @@ public class KvinPartitioned implements Kvin {
 						return 0;
 					}));
 			long propertyValueCount;
-			URI currentProperty;
-			KvinTuple nextTuple;
+			KvinTuple prevTuple, nextTuple;
 			boolean closed;
 
 			@Override
@@ -189,7 +187,7 @@ public class KvinPartitioned implements Kvin {
 				if (nextTuple != null) {
 					return true;
 				}
-				if (currentProperty == null) {
+				if (prevTuple == null) {
 					// this is the case if the iterator is not yet initialized
 					List<Kvin> stores = new ArrayList<>();
 					stores.add(hotStore);
@@ -207,37 +205,42 @@ public class KvinPartitioned implements Kvin {
 						}
 					}
 				}
-				// skip properties if limit is reached
-				if (limit != 0 && propertyValueCount >= limit) {
-					while (!nextTuples.isEmpty()) {
-						var next = nextTuples.poll();
-						nextTuple = next.getFirst();
-						if (next.getSecond().hasNext()) {
-							nextTuples.add(new Pair<>(next.getSecond().next(), next.getSecond()));
-						} else {
-							next.getSecond().close();
-						}
-						if (!nextTuple.property.equals(currentProperty)) {
-							propertyValueCount = 1;
-							currentProperty = nextTuple.property;
-							break;
-						}
-					}
-				}
-				if (nextTuple == null && !nextTuples.isEmpty()) {
-					var next = nextTuples.poll();
-					nextTuple = next.getFirst();
-					if (currentProperty == null || !nextTuple.property.equals(currentProperty)) {
+
+				while (nextTuple == null && !nextTuples.isEmpty()) {
+					var min = nextTuples.poll();
+					var candidate = min.getFirst();
+
+					boolean isDuplicate = false;
+					if (prevTuple == null ||
+							!candidate.property.equals(prevTuple.property) ||
+							!candidate.item.equals(prevTuple.item)) {
 						propertyValueCount = 1;
-						currentProperty = nextTuple.property;
-					}
-					if (next.getSecond().hasNext()) {
-						nextTuples.add(new Pair<>(next.getSecond().next(), next.getSecond()));
 					} else {
-						next.getSecond().close();
+						// omit duplicates in terms of id, time, and seqNr
+						isDuplicate = prevTuple != null
+								&& prevTuple.time == candidate.time
+								&& prevTuple.seqNr == candidate.seqNr;
 					}
+
+					if (min.getSecond().hasNext()) {
+						nextTuples.add(new Pair<>(min.getSecond().next(), min.getSecond()));
+					} else {
+						min.getSecond().close();
+					}
+
+					// omit duplicates
+					if (isDuplicate) {
+						continue;
+					}
+					// skip properties if limit is reached
+					if (limit != 0 && propertyValueCount >= limit) {
+						continue;
+					}
+
+					nextTuple = candidate;
 					propertyValueCount++;
 				}
+
 				if (nextTuple != null) {
 					return true;
 				} else {
@@ -250,6 +253,7 @@ public class KvinPartitioned implements Kvin {
 			public KvinTuple next() {
 				if (hasNext()) {
 					KvinTuple result = nextTuple;
+					prevTuple = result;
 					nextTuple = null;
 					return result;
 				}
@@ -258,7 +262,7 @@ public class KvinPartitioned implements Kvin {
 
 			@Override
 			public void close() {
-				if (! closed) {
+				if (!closed) {
 					try {
 						while (!nextTuples.isEmpty()) {
 							try {
