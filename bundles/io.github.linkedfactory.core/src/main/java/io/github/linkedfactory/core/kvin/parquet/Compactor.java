@@ -9,6 +9,7 @@ import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
+import org.eclipse.rdf4j.common.concurrent.locks.Lock;
 
 import java.io.File;
 import java.io.IOException;
@@ -35,7 +36,7 @@ public class Compactor {
 	public void execute() throws IOException {
 		Set<String> compactedMappings;
 		List<File> weekFolders;
-		kvinParquet.readLock.lock();
+		Lock readLock = kvinParquet.readLock();
 		try {
 			compactedMappings = compactMappingFiles();
 			weekFolders = getCompactionEligibleWeekFolders();
@@ -47,7 +48,7 @@ public class Compactor {
 				}
 			}
 		} finally {
-			kvinParquet.readLock.unlock();
+			readLock.release();
 		}
 
 		if (!compactionFolder.exists()) {
@@ -55,8 +56,8 @@ public class Compactor {
 			return;
 		}
 
+		Lock writeLock = kvinParquet.writeLock();
 		try {
-			kvinParquet.writeLock.lock();
 			clearCache();
 			// replace existing files with compacted files
 			if (!compactedMappings.isEmpty()) {
@@ -83,7 +84,7 @@ public class Compactor {
 			// completely delete compaction folder
 			FileUtils.deleteDirectory(compactionFolder);
 		} finally {
-			kvinParquet.writeLock.unlock();
+			writeLock.release();
 		}
 	}
 
@@ -160,8 +161,8 @@ public class Compactor {
 	}
 
 	private void compactDataFiles(File weekFolder) throws IOException {
+		Lock readLock = kvinParquet.readLock();
 		try {
-			kvinParquet.readLock.lock();
 			List<java.nio.file.Path> dataFiles = Files.walk(weekFolder.toPath(), 1)
 					.skip(1)
 					.filter(path -> path.getFileName().toString().startsWith("data_"))
@@ -222,7 +223,7 @@ public class Compactor {
 
 			compactionFileWriter.close();
 		} finally {
-			kvinParquet.readLock.unlock();
+			readLock.release();
 		}
 	}
 
