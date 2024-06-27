@@ -30,6 +30,9 @@ import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.api.Binary;
+import org.eclipse.rdf4j.common.concurrent.locks.Lock;
+import org.eclipse.rdf4j.common.concurrent.locks.ReadPrefReadWriteLockManager;
+import org.eclipse.rdf4j.common.concurrent.locks.ReadWriteLockManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,8 +47,6 @@ import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -63,13 +64,12 @@ public class KvinParquet implements Kvin {
 	final Cache<URI, Long> propertyIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final Cache<URI, Long> contextIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	// Lock
-	final ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock();
-	final Lock writeLock = readWriteLock.writeLock();
-	final Lock readLock = readWriteLock.readLock();
 	Map<Path, HadoopInputFile> inputFileCache = new HashMap<>(); // hadoop input file cache
 	Cache<Long, String> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	Cache<java.nio.file.Path, Properties> metaCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	String archiveLocation;
+
+	ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 
 	public KvinParquet(String archiveLocation) {
 		this.archiveLocation = archiveLocation;
@@ -138,6 +138,22 @@ public class KvinParquet implements Kvin {
 		return inputFile;
 	}
 
+	Lock writeLock() throws IOException {
+		try {
+			return lockManager.getWriteLock();
+		} catch (InterruptedException e) {
+			throw new IOException(e);
+		}
+	}
+
+	Lock readLock() throws IOException {
+		try {
+			return lockManager.getReadLock();
+		} catch (InterruptedException e) {
+			throw new IOException(e);
+		}
+	}
+
 	@Override
 	public boolean addListener(KvinListener listener) {
 		return false;
@@ -164,10 +180,11 @@ public class KvinParquet implements Kvin {
 
 	private synchronized void putInternal(Iterable<KvinTuple> tuples) throws IOException {
 		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
+		Lock writeLock = null;
 		try {
 			Thread.currentThread().setContextClassLoader(KvinParquet.class.getClassLoader());
 
-			writeLock.lock();
+			writeLock = writeLock();
 
 			java.nio.file.Path metadataPath = Paths.get(archiveLocation, "metadata");
 			WriteContext writeContext = new WriteContext();
@@ -184,7 +201,7 @@ public class KvinParquet implements Kvin {
 				Files.walk(tempPath).sorted(Comparator.reverseOrder()).map(java.nio.file.Path::toFile)
 						.forEach(File::delete);
 			}
-			writeLock.unlock();
+			writeLock.release();
 
 			Files.createDirectories(tempPath);
 			Path itemMappingFile = new Path(tempPath.toString(), "metadata/items__1.parquet");
@@ -314,7 +331,7 @@ public class KvinParquet implements Kvin {
 				}
 			});
 
-			writeLock.lock();
+			writeLock = writeLock();
 
 			Map<Integer, List<WriterState>> writersPerYear = writers.values().stream()
 					.collect(Collectors.groupingBy(s -> s.year));
@@ -395,7 +412,9 @@ public class KvinParquet implements Kvin {
 		} catch (Throwable e) {
 			log.error("Error while adding data", e);
 		} finally {
-			writeLock.unlock();
+			if (writeLock != null) {
+				writeLock.release();
+			}
 			Thread.currentThread().setContextClassLoader(contextCl);
 		}
 	}
@@ -566,21 +585,29 @@ public class KvinParquet implements Kvin {
 
 	@Override
 	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
-		return fetchInternal(item, property, context, null, null, limit);
+		try {
+			return fetchInternal(item, property, context, null, null, limit);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 
 	@Override
 	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
-		IExtendedIterator<KvinTuple> internalResult = fetchInternal(item, property, context, end, begin, limit);
-		if (op != null) {
-			internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
-				@Override
-				protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
-					return new KvinTuple(item, property, context, time, seqNr, value);
-				}
-			};
+		try {
+			IExtendedIterator<KvinTuple> internalResult = fetchInternal(item, property, context, end, begin, limit);
+			if (op != null) {
+				internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
+					@Override
+					protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
+						return new KvinTuple(item, property, context, time, seqNr, value);
+					}
+				};
+			}
+			return internalResult;
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
 		}
-		return internalResult;
 	}
 
 	public String getProperty(KvinTupleInternal tuple) throws IOException {
@@ -618,16 +645,16 @@ public class KvinParquet implements Kvin {
 				.build();
 	}
 
-	private synchronized IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) {
+	private synchronized IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) throws IOException {
+		Lock readLock = readLock();
 		try {
-			readLock.lock();
 			// filters
 			IdMappings idMappings = getIdMappings(item, property, context);
 			if (idMappings.itemId == 0L
 					|| property != null && idMappings.propertyId == 0L
 					|| context != null && idMappings.contextId == 0L) {
 				// ensure read lock is freed
-				readLock.unlock();
+				readLock.release();
 				return NiceIterator.emptyIterator();
 			}
 
@@ -643,7 +670,7 @@ public class KvinParquet implements Kvin {
 			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
 			if (dataFolders.isEmpty()) {
 				// ensure read lock is freed
-				readLock.unlock();
+				readLock.release();
 				return NiceIterator.emptyIterator();
 			}
 			return new NiceIterator<KvinTuple>() {
@@ -788,7 +815,7 @@ public class KvinParquet implements Kvin {
 								}
 							}
 						} finally {
-							readLock.unlock();
+							readLock.release();
 							closed = true;
 						}
 					}
@@ -813,7 +840,7 @@ public class KvinParquet implements Kvin {
 				}
 			};
 		} catch (IOException e) {
-			readLock.unlock();
+			readLock.release();
 			throw new UncheckedIOException(e);
 		}
 	}
@@ -952,37 +979,41 @@ public class KvinParquet implements Kvin {
 
 	@Override
 	public synchronized IExtendedIterator<URI> properties(URI item) {
-		readLock.lock();
-		return new NiceIterator<>() {
-			KvinTupleMetadata currentTuple = getFirstTuple(item, null, null, null);
-			KvinTupleMetadata previousTuple = null;
+		try {
+			Lock readLock = readLock();
+			return new NiceIterator<>() {
+				KvinTupleMetadata currentTuple = getFirstTuple(item, null, null, null);
+				KvinTupleMetadata previousTuple = null;
 
-			@Override
-			public boolean hasNext() {
-				if (currentTuple == null && previousTuple != null) {
-					currentTuple = getFirstTuple(URIs.createURI(previousTuple.getItem()), previousTuple.getItemId(),
-							previousTuple.getPropertyId() + 1, null);
+				@Override
+				public boolean hasNext() {
+					if (currentTuple == null && previousTuple != null) {
+						currentTuple = getFirstTuple(URIs.createURI(previousTuple.getItem()), previousTuple.getItemId(),
+								previousTuple.getPropertyId() + 1, null);
+					}
+					return currentTuple != null;
 				}
-				return currentTuple != null;
-			}
 
-			@Override
-			public URI next() {
-				if (currentTuple == null) {
-					throw new NoSuchElementException();
+				@Override
+				public URI next() {
+					if (currentTuple == null) {
+						throw new NoSuchElementException();
+					}
+					URI property = URIs.createURI(currentTuple.getProperty());
+					previousTuple = currentTuple;
+					currentTuple = null;
+					return property;
 				}
-				URI property = URIs.createURI(currentTuple.getProperty());
-				previousTuple = currentTuple;
-				currentTuple = null;
-				return property;
-			}
 
-			@Override
-			public void close() {
-				super.close();
-				readLock.unlock();
-			}
-		};
+				@Override
+				public void close() {
+					super.close();
+					readLock.release();
+				}
+			};
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 
 	@Override

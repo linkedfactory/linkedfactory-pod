@@ -14,6 +14,9 @@ import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import org.apache.commons.io.FileUtils;
+import org.eclipse.rdf4j.common.concurrent.locks.Lock;
+import org.eclipse.rdf4j.common.concurrent.locks.ReadPrefReadWriteLockManager;
+import org.eclipse.rdf4j.common.concurrent.locks.ReadWriteLockManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,18 +28,18 @@ import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class KvinPartitioned implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinPartitioned.class);
 	private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-	final ReentrantReadWriteLock storeLock = new ReentrantReadWriteLock();
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
 	protected Duration archiveInterval;
 	protected File currentStorePath, currentStoreArchivePath, archiveStorePath;
 	protected volatile KvinLevelDb hotStore, hotStoreArchive;
 	protected KvinParquet archiveStore;
+
+	ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 
 	public KvinPartitioned(File path) throws IOException {
 		this(path, null);
@@ -57,10 +60,27 @@ public class KvinPartitioned implements Kvin {
 		scheduleCyclicArchival();
 	}
 
+	Lock writeLock() {
+		try {
+			return lockManager.getWriteLock();
+		} catch (InterruptedException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	Lock readLock() {
+		try {
+			return lockManager.getReadLock();
+		} catch (InterruptedException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
 	public void runArchival() {
 		log.info("Run archival");
+		Lock writeLock = null;
 		try {
-			storeLock.writeLock().lock();
+			writeLock = writeLock();
 			if (this.hotStoreArchive == null) {
 				// the hot store archive might exist if a previous archival was interrupted
 				createNewHotDataStore();
@@ -68,7 +88,9 @@ public class KvinPartitioned implements Kvin {
 		} catch (IOException e) {
 			log.error("Creating archive failed", e);
 		} finally {
-			storeLock.writeLock().unlock();
+			if (writeLock != null) {
+				writeLock.release();
+			}
 		}
 
 		try {
@@ -83,14 +105,16 @@ public class KvinPartitioned implements Kvin {
 		}
 
 		try {
-			storeLock.writeLock().lock();
+			writeLock = writeLock();
 			this.hotStoreArchive.close();
 			this.hotStoreArchive = null;
 			FileUtils.deleteDirectory(this.currentStoreArchivePath);
 		} catch (IOException e) {
 			log.error("Deleting hot store archive failed", e);
 		} finally {
-			storeLock.writeLock().unlock();
+			if (writeLock != null) {
+				writeLock.release();
+			}
 		}
 	}
 
@@ -158,7 +182,7 @@ public class KvinPartitioned implements Kvin {
 	}
 
 	protected IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, long end, long begin, long limit) {
-		storeLock.readLock().lock();
+		Lock readLock = readLock();
 		return new NiceIterator<>() {
 			final PriorityQueue<Pair<KvinTuple, IExtendedIterator<KvinTuple>>> nextTuples = new PriorityQueue<>(
 					Comparator.comparing(Pair::getFirst, (a, b) -> {
@@ -274,7 +298,9 @@ public class KvinPartitioned implements Kvin {
 							}
 						}
 					} finally {
-						storeLock.readLock().unlock();
+						if (readLock != null) {
+							readLock.release();
+						}
 						closed = true;
 					}
 				}
@@ -284,27 +310,27 @@ public class KvinPartitioned implements Kvin {
 
 	@Override
 	public long delete(URI item, URI property, URI context, long end, long begin) {
+		Lock readLock = readLock();
 		try {
-			storeLock.readLock().lock();
 			return hotStore.delete(item, property, context, end, begin);
 		} finally {
-			storeLock.readLock().unlock();
+			readLock.release();
 		}
 	}
 
 	@Override
 	public boolean delete(URI item) {
+		Lock readLock = readLock();
 		try {
-			storeLock.readLock().lock();
 			return hotStore.delete(item);
 		} finally {
-			storeLock.readLock().unlock();
+			readLock.release();
 		}
 	}
 
 	@Override
 	public IExtendedIterator<URI> descendants(URI item) {
-		storeLock.readLock().lock();
+		Lock readLock = readLock();
 		IExtendedIterator<URI> results = hotStore.descendants(item);
 		return new NiceIterator<>() {
 			boolean closed;
@@ -333,7 +359,7 @@ public class KvinPartitioned implements Kvin {
 					try {
 						results.close();
 					} finally {
-						storeLock.readLock().unlock();
+						readLock.release();
 						closed = true;
 					}
 				}
@@ -343,7 +369,7 @@ public class KvinPartitioned implements Kvin {
 
 	@Override
 	public IExtendedIterator<URI> descendants(URI item, long limit) {
-		storeLock.readLock().lock();
+		Lock readLock = readLock();
 		IExtendedIterator<URI> results = hotStore.descendants(item, limit);
 		return new NiceIterator<>() {
 			boolean closed;
@@ -372,7 +398,7 @@ public class KvinPartitioned implements Kvin {
 					try {
 						results.close();
 					} finally {
-						storeLock.readLock().unlock();
+						readLock.release();
 						closed = true;
 					}
 				}
@@ -383,15 +409,15 @@ public class KvinPartitioned implements Kvin {
 	@Override
 	public IExtendedIterator<URI> properties(URI item) {
 		Set<URI> properties = new HashSet<>();
+		Lock readLock = readLock();
 		try {
-			storeLock.readLock().lock();
 			properties.addAll(hotStore.properties(item).toList());
 			if (hotStoreArchive != null) {
 				properties.addAll(hotStoreArchive.properties(item).toList());
 			}
 			properties.addAll(archiveStore.properties(item).toList());
 		} finally {
-			storeLock.readLock().unlock();
+			readLock.release();
 		}
 		return WrappedIterator.create(properties.iterator());
 	}
@@ -403,14 +429,14 @@ public class KvinPartitioned implements Kvin {
 
 	@Override
 	public void close() {
+		Lock readLock = readLock();
 		try {
-			storeLock.readLock().lock();
 			hotStore.close();
 			if (hotStoreArchive != null) {
 				hotStoreArchive.close();
 			}
 		} finally {
-			storeLock.readLock().unlock();
+			readLock.release();
 		}
 	}
 }

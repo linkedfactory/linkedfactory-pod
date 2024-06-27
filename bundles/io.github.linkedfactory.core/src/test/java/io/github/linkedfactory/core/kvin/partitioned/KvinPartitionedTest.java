@@ -120,7 +120,6 @@ public class KvinPartitionedTest {
 
 		Thread archiver = new Thread(() -> {
 			System.out.println("start archival");
-			System.out.println(kvinPartitioned.storeLock.getWriteHoldCount());
 			kvinPartitioned.runArchival();
 			System.out.println("finished archival");
 		});
