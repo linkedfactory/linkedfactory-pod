@@ -132,6 +132,7 @@ public class KvinEvaluationUtil {
             int index;
             BindingSet next;
             boolean skipProperty;
+            final Thread creator = Thread.currentThread();
 
             @Override
             public boolean hasNext() throws QueryEvaluationException {
@@ -145,6 +146,11 @@ public class KvinEvaluationUtil {
                     it = kvin.fetch(item, predFinal, context[0], endFinal, beginFinal, limitFinal, interval, aggregationFunc);
                 }
                 if (it != null) {
+                    if (isClosed()) {
+                        // close underlying iterator if iteration was closed asynchronously (due to query timeout)
+                        handleClose();
+                        return false;
+                    }
                     next = computeNext();
                 }
                 return next != null;
@@ -230,7 +236,8 @@ public class KvinEvaluationUtil {
 
             @Override
             protected void handleClose() throws QueryEvaluationException {
-                if (it != null) {
+                // do only directly close if current thread is creator
+                if (it != null && Thread.currentThread() == creator) {
                     it.close();
                     it = null;
                 }
