@@ -232,11 +232,13 @@ public class KvinPartitioned implements Kvin {
 					if (isDuplicate) {
 						continue;
 					}
+
 					// skip properties if limit is reached
-					if (limit != 0 && propertyValueCount >= limit) {
+					if (limit != 0 && propertyValueCount > limit) {
 						continue;
 					}
 
+					prevTuple = nextTuple;
 					nextTuple = candidate;
 					propertyValueCount++;
 				}
