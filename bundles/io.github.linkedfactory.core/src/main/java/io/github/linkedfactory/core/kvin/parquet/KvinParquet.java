@@ -28,6 +28,7 @@ import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
+import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.api.Binary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,11 +81,7 @@ public class KvinParquet implements Kvin {
 	private IdMapping fetchMappingIds(Path mappingFile, FilterPredicate filter) throws IOException {
 		IdMapping id;
 		HadoopInputFile inputFile = getFile(mappingFile);
-		try (ParquetReader<IdMapping> reader = AvroParquetReader.<IdMapping>builder(inputFile)
-				.withDataModel(reflectData)
-				.useStatsFilter()
-				.withFilter(FilterCompat.get(filter))
-				.build()) {
+		try (ParquetReader<IdMapping> reader = createReader(inputFile, FilterCompat.get(filter))) {
 			id = reader.read();
 		}
 		return id;
@@ -613,6 +610,14 @@ public class KvinParquet implements Kvin {
 		return cachedProperty;
 	}
 
+	private <T> ParquetReader<T> createReader(InputFile file, FilterCompat.Filter filter) throws IOException {
+		return AvroParquetReader.<T>builder(file)
+				.withDataModel(reflectData)
+				.useStatsFilter()
+				.withFilter(filter)
+				.build();
+	}
+
 	private synchronized IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) {
 		try {
 			readLock.lock();
@@ -794,11 +799,7 @@ public class KvinParquet implements Kvin {
 					List<Path> currentFiles = getDataFiles(dataFolders.get(folderIndex).toString());
 					for (Path file : currentFiles) {
 						HadoopInputFile inputFile = getFile(file);
-						ParquetReader<KvinTupleInternal> reader = AvroParquetReader.<KvinTupleInternal>builder(inputFile)
-								.withDataModel(reflectData)
-								.useStatsFilter()
-								.withFilter(FilterCompat.get(filterFinal))
-								.build();
+						ParquetReader<KvinTupleInternal> reader = createReader(inputFile, FilterCompat.get(filterFinal));
 						KvinTupleInternal tuple = reader.read();
 						if (tuple != null) {
 							nextTuples.add(new Pair<>(tuple, reader));
@@ -921,16 +922,11 @@ public class KvinParquet implements Kvin {
 
 			FilterPredicate filter = generateFetchFilter(idMappings);
 			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
-			ParquetReader<KvinTupleInternal> reader;
 
 			KvinTupleInternal firstTuple = null;
 			for (java.nio.file.Path dataFolder : dataFolders) {
 				for (Path dataFile : getDataFiles(dataFolder.toString())) {
-					reader = AvroParquetReader.<KvinTupleInternal>builder(getFile(dataFile))
-							.withDataModel(reflectData)
-							.useStatsFilter()
-							.withFilter(FilterCompat.get(filter))
-							.build();
+					ParquetReader<KvinTupleInternal> reader = createReader(getFile(dataFile), FilterCompat.get(filter));
 					KvinTupleInternal tuple = reader.read();
 					if (firstTuple == null || tuple != null && firstTuple != null && tuple.compareTo(firstTuple) < 0) {
 						firstTuple = tuple;
