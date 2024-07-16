@@ -53,8 +53,7 @@ public class KvinPartitionedTest {
 		// continuing incremental put on kvinPartitioned
 		kvinPartitioned.put(tupleGenerator.setStartTime(1672614000000L).generate());
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
-		IExtendedIterator<KvinTuple> storeIterator = new KvinLevelDbArchiver(kvinPartitioned.hotStore, null)
-				.getDatabaseIterator();
+		IExtendedIterator<KvinTuple> storeIterator = kvinPartitioned.hotStore.fetchAll();
 		int recordCount = 0;
 		while (storeIterator.hasNext()) {
 			storeIterator.next();
@@ -68,8 +67,7 @@ public class KvinPartitionedTest {
 		assertTrue(kvinPartitioned.archiveStorePath.listFiles().length > 0); // main folder
 		assertEquals(2, new File(kvinPartitioned.archiveStorePath, "2023").listFiles(f -> f.isDirectory()).length); // folder for year 2023
 
-		storeIterator = new KvinLevelDbArchiver(kvinPartitioned.hotStore, null)
-				.getDatabaseIterator();
+		storeIterator = kvinPartitioned.hotStore.fetchAll();
 		recordCount = 0;
 		while (storeIterator.hasNext()) {
 			storeIterator.next();

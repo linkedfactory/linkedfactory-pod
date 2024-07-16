@@ -112,7 +112,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   }
 
   var id: Long = readLong(ids, idKey)
-  if (id < 0) id = 0L
+  if (id <= 0) id = 1L
 
   private def nextId = {
     val result = id
@@ -400,6 +400,61 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
             } else None
           }
         })
+    }
+  }
+
+  /**
+   * Returns all tuples in this store
+   *
+   * @return iterator with all tuples
+   */
+  def fetchAll(): IExtendedIterator[KvinTuple] = {
+    val it = values.iterator
+    var item: URI = null
+    var property: URI = null
+    var context: URI = null
+    var itemId: Long = 0
+    var propertyId: Long = 0
+    var contextId: Long = 0
+    new StoreIterator[KvinTuple](it) {
+      def subArray(key: Array[Byte], index: Int, length: Int): Array[Byte] = {
+        val sub = new Array[Byte](length)
+        System.arraycopy(key, index, sub, 0, length)
+        sub
+      }
+
+      override def computeNext: Option[KvinTuple] = {
+        var next: KvinTuple = null
+        while (next == null && it.hasNext) {
+          val entry = it.next
+          val key = entry.getKey
+          val keyBb = ByteBuffer.wrap(key)
+          val itemIdLength = Varint.firstToLength(keyBb.get(keyBb.position()))
+          val newItemId = Varint.readUnsigned(keyBb)
+          if (newItemId != itemId) {
+            item = toUri(subArray(key, 0, itemIdLength), EntryType.SubjectToId).getOrElse(null)
+            itemId = newItemId
+          }
+          val propertyIdLength = Varint.firstToLength(keyBb.get(keyBb.position()))
+          val newPropertyId = Varint.readUnsigned(keyBb)
+          if (newPropertyId != propertyId) {
+            property = toUri(subArray(key, itemIdLength, propertyIdLength), EntryType.PropertyToId).getOrElse(null)
+            propertyId = newPropertyId
+          }
+          val contextIdLength = Varint.firstToLength(keyBb.get(keyBb.position()))
+          val newContextId = Varint.readUnsigned(keyBb)
+          if (newContextId != contextId) {
+            context = toUri(subArray(key, itemIdLength + propertyIdLength, contextIdLength), EntryType.ContextToId).getOrElse(null)
+            contextId = newContextId
+          }
+          if (item != null && property != null && context != null) {
+            val time = readVarint(keyBb)
+            val seq: Int = if (keyBb.hasRemaining) readVarint(keyBb).toInt else 0
+            next = new KvinTuple(item, property, context, time, seq, decode(entry.getValue))
+          }
+        }
+        Option(next)
+      }
     }
   }
 
