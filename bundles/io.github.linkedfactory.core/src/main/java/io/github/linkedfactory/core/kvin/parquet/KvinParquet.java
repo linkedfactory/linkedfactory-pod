@@ -881,7 +881,10 @@ public class KvinParquet implements Kvin {
 				}
 			}
 			return Stream.empty();
-		}).collect(Collectors.toList());
+		})
+		// sort by year and month descending (recent data first)
+		.sorted(Comparator.reverseOrder())
+		.collect(Collectors.toList());
 	}
 
 	@Override
