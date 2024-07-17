@@ -289,12 +289,12 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				if (leftDependsOnRight) {
 					// swap left and right argument
 					return bindingSet -> new InnerJoinIterator(AasEvaluationStrategy.this,
-							rightPrepared, leftPrepared, bindingSet, true
+							rightPrepared, leftPrepared, bindingSet, true, false
 					);
 				}
 			}
 			return bindingSet -> new InnerJoinIterator(AasEvaluationStrategy.this,
-					leftPrepared, rightPrepared, bindingSet, lateral
+					leftPrepared, rightPrepared, bindingSet, lateral, false
 			);
 		}
 	}

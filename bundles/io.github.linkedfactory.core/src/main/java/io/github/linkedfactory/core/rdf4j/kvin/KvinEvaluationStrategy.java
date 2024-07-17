@@ -33,8 +33,7 @@ import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 
 import java.util.*;
 
-import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.compareAndBind;
-import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.findFirstFetch;
+import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.*;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
@@ -213,12 +212,13 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                 if (leftDependsOnRight) {
                     // swap left and right argument
                     return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this,
-                        rightPrepared, leftPrepared, bindingSet, true
+                        rightPrepared, leftPrepared, bindingSet, true, true
                     );
                 }
             }
+            boolean async = findFirstFetch(join.getRightArg()) != null;
             return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this,
-                leftPrepared, rightPrepared, bindingSet, lateral
+                leftPrepared, rightPrepared, bindingSet, lateral, async
             );
         }
     }

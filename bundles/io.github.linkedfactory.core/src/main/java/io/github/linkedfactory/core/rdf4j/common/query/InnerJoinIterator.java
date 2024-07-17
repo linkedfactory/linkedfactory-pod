@@ -1,16 +1,20 @@
 package io.github.linkedfactory.core.rdf4j.common.query;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Queue;
+import java.util.concurrent.*;
 
+import io.github.linkedfactory.core.rdf4j.kvin.query.KvinFetchEvaluationStep;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.common.iteration.LookAheadIteration;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
-import org.eclipse.rdf4j.query.algebra.Join;
-import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
+import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
 
 public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvaluationException> {
 
@@ -18,10 +22,13 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	 * Variables *
 	 *-----------*/
 
+	private static final BindingSet NULL_BINDINGS = new EmptyBindingSet();
+	private static final ExecutorService executor = Executors.newCachedThreadPool();
+	private static final ThreadLocal<Boolean> isAsync = new ThreadLocal<>();
 	private final EvaluationStrategy strategy;
-
 	private final CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
 	private final QueryEvaluationStep preparedJoinArg;
+	private final List<BlockingQueue<BindingSet>> joined;
 	private volatile CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
 
 	/*--------------*
@@ -29,7 +36,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	 *--------------*/
 
 	public InnerJoinIterator(EvaluationStrategy strategy, QueryEvaluationStep leftPrepared,
-	                         QueryEvaluationStep rightPrepared, BindingSet bindings, boolean lateral) throws QueryEvaluationException {
+	                         QueryEvaluationStep rightPrepared, BindingSet bindings, boolean lateral, boolean async) throws QueryEvaluationException {
 		this.strategy = strategy;
 
 		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = leftPrepared.evaluate(bindings);
@@ -42,6 +49,11 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 		}
 		rightIter = new EmptyIteration<>();
 		leftIter = leftIt;
+
+		if (async && isAsync.get() == Boolean.TRUE) {
+			async = false;
+		}
+		joined = async ? new ArrayList<>() : null;
 	}
 
 	/*---------*
@@ -50,6 +62,14 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 
 	@Override
 	protected BindingSet getNextElement() throws QueryEvaluationException {
+		if (joined == null) {
+			return getNextElementSync();
+		} else {
+			return getNextElementAsync();
+		}
+	}
+
+	protected BindingSet getNextElementSync() throws QueryEvaluationException {
 		try {
 			while (rightIter.hasNext() || leftIter.hasNext()) {
 				if (rightIter.hasNext()) {
@@ -69,6 +89,57 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 		}
 
 		return null;
+	}
+
+	protected BindingSet getNextElementAsync() throws QueryEvaluationException {
+		try {
+			while (!joined.isEmpty() || leftIter.hasNext()) {
+				enqueueNext();
+				if (!joined.isEmpty()) {
+					BlockingQueue<BindingSet> nextQueue = joined.get(0);
+					BindingSet next = nextQueue.take();
+					if (next == NULL_BINDINGS) {
+						joined.remove(0);
+						continue;
+					}
+					enqueueNext();
+					if (next != NULL_BINDINGS) {
+						return next;
+					}
+				}
+			}
+		} catch (NoSuchElementException ignore) {
+			// probably, one of the iterations has been closed concurrently in
+			// handleClose()
+		} catch (InterruptedException e) {
+			handleClose();
+		}
+
+		return null;
+	}
+
+	private void enqueueNext() {
+		while (joined.size() < 5 && leftIter.hasNext()) {
+			BlockingQueue<BindingSet> queue = new ArrayBlockingQueue<>(50);
+			joined.add(queue);
+			BindingSet next = leftIter.next();
+			executor.submit(() -> {
+				isAsync.set(true);
+				var rightIt = preparedJoinArg.evaluate(next);
+				try {
+					while (rightIt.hasNext()) {
+						queue.put(rightIt.next());
+					}
+					rightIt.close();
+					queue.put(NULL_BINDINGS);
+				} catch (InterruptedException e) {
+					rightIt.close();
+					return;
+				} finally {
+					isAsync.remove();
+				}
+			});
+		}
 	}
 
 	@Override
