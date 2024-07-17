@@ -152,6 +152,11 @@ public class KvinEvaluationUtil {
                         return false;
                     }
                     next = computeNext();
+                    if (isClosed()) {
+                        // close underlying iterator if iteration was closed asynchronously (due to query timeout)
+                        handleClose();
+                        next = null;
+                    }
                 }
                 return next != null;
             }

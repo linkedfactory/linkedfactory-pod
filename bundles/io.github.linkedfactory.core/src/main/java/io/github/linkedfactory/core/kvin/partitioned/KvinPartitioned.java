@@ -298,9 +298,7 @@ public class KvinPartitioned implements Kvin {
 							}
 						}
 					} finally {
-						if (readLock != null) {
-							readLock.release();
-						}
+						readLock.release();
 						closed = true;
 					}
 				}
