@@ -68,7 +68,7 @@ public class KvinParquet implements Kvin {
 	final Cache<URI, Long> contextIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	// Lock
 	Map<Path, HadoopInputFile> inputFileCache = new HashMap<>(); // hadoop input file cache
-	Cache<Long, String> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	Cache<Long, URI> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	Cache<java.nio.file.Path, Properties> metaCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	String archiveLocation;
 
@@ -613,10 +613,10 @@ public class KvinParquet implements Kvin {
 		}
 	}
 
-	public String getProperty(ByteBuffer idBuffer) throws IOException {
+	public URI getProperty(ByteBuffer idBuffer) throws IOException {
 		idBuffer.getLong();
 		Long propertyId = idBuffer.getLong();
-		String cachedProperty = propertyIdReverseLookUpCache.getIfPresent(propertyId);
+		URI cachedProperty = propertyIdReverseLookUpCache.getIfPresent(propertyId);
 
 		if (cachedProperty == null) {
 			FilterPredicate filter = eq(FilterApi.longColumn("id"), propertyId);
@@ -632,7 +632,7 @@ public class KvinParquet implements Kvin {
 			if (propertyMapping == null) {
 				throw new IOException("Unknown property with id: " + propertyId);
 			} else {
-				cachedProperty = propertyMapping.getValue();
+				cachedProperty = URIs.createURI(propertyMapping.getValue());
 			}
 			propertyIdReverseLookUpCache.put(propertyId, cachedProperty);
 		}
@@ -814,8 +814,8 @@ public class KvinParquet implements Kvin {
 				}
 
 				KvinTuple convert(GenericRecord record) throws IOException {
-					String property = getProperty((ByteBuffer) record.get(0));
-					return recordToTuple(item, URIs.createURI(property), context, record);
+					URI p = property != null ? property : getProperty((ByteBuffer) record.get(0));
+					return recordToTuple(item, p, context, record);
 				}
 
 				void nextReaders() throws IOException {
@@ -960,7 +960,7 @@ public class KvinParquet implements Kvin {
 			}
 
 			if (firstTuple != null) {
-				URI firstTupleProperty = URIs.createURI(getProperty(ByteBuffer.wrap(firstTuple.id)));
+				URI firstTupleProperty = getProperty(ByteBuffer.wrap(firstTuple.id));
 				if (itemId == null) {
 					idMappings.propertyId = getId(firstTupleProperty, IdType.PROPERTY_ID);
 				}
