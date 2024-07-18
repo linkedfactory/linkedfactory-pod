@@ -1,8 +1,11 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
+import io.github.linkedfactory.core.kvin.KvinTuple;
 import net.enilink.commons.util.Pair;
+import net.enilink.komma.core.URI;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.reflect.ReflectData;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -14,10 +17,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static io.github.linkedfactory.core.kvin.parquet.Records.decodeRecord;
 
 public class ParquetHelpers {
 	static final Logger log = LoggerFactory.getLogger(ParquetHelpers.class);
@@ -50,6 +56,11 @@ public class ParquetHelpers {
 
 	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
 	static Pattern fileOrDotFileWithSeqNr = Pattern.compile("^\\.?([^.].*)__([0-9]+)\\..*$");
+	static Configuration configuration = new Configuration();
+
+	static {
+		configuration.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
+	}
 
 	static ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
 		return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, configuration))
@@ -64,11 +75,6 @@ public class ParquetHelpers {
 				.withDataModel(reflectData)
 				.withBloomFilterEnabled("id", true)
 				.build();
-	}
-
-	static Configuration configuration = new Configuration();
-	static {
-		configuration.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
 	}
 
 	static ParquetWriter<Object> getParquetMappingWriter(Path dataFile) throws IOException {
@@ -127,5 +133,22 @@ public class ParquetHelpers {
 				}
 			});
 		}
+	}
+
+	public static KvinTuple recordToTuple(URI item, URI property, URI context, GenericRecord record) throws IOException {
+		long time = (Long) record.get(1);
+		int seqNr = (Integer) record.get(2);
+		int fields = record.getSchema().getFields().size();
+		Object value = null;
+		for (int i = 3; i < fields; i++) {
+			value = record.get(i);
+			if (value != null) {
+				if (i == fields - 1) {
+					value = decodeRecord((ByteBuffer) value);
+				}
+				break;
+			}
+		}
+		return new KvinTuple(item, property, context, time, seqNr, value);
 	}
 }

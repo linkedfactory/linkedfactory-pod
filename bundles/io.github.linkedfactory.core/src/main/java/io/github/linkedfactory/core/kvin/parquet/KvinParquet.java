@@ -12,6 +12,9 @@ import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.HadoopReadOptions;
@@ -610,8 +613,7 @@ public class KvinParquet implements Kvin {
 		}
 	}
 
-	public String getProperty(KvinTupleInternal tuple) throws IOException {
-		ByteBuffer idBuffer = ByteBuffer.wrap(tuple.getId());
+	public String getProperty(ByteBuffer idBuffer) throws IOException {
 		idBuffer.getLong();
 		Long propertyId = idBuffer.getLong();
 		String cachedProperty = propertyIdReverseLookUpCache.getIfPresent(propertyId);
@@ -645,6 +647,32 @@ public class KvinParquet implements Kvin {
 				.build();
 	}
 
+	private ParquetReader<GenericRecord> createGenericReader(InputFile file, FilterCompat.Filter filter) throws IOException {
+		return AvroParquetReader.<GenericRecord>builder(file)
+				.withDataModel(GenericData.get())
+				.useStatsFilter()
+				.withFilter(filter)
+				.build();
+	}
+
+	static Comparator<KvinTuple> TUPLE_COMPARATOR = (a, b) -> {
+		int diff = a.property.equals(b.property) ? 0 : a.toString().compareTo(b.toString());
+		if (diff != 0) {
+			return diff;
+		}
+		diff = Long.compare(a.time, b.time);
+		if (diff != 0) {
+			// time is reverse
+			return -diff;
+		}
+		diff = Integer.compare(a.seqNr, b.seqNr);
+		if (diff != 0) {
+			// seqNr is reverse
+			return -diff;
+		}
+		return 0;
+	};
+
 	private synchronized IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) throws IOException {
 		Lock readLock = readLock();
 		try {
@@ -674,12 +702,11 @@ public class KvinParquet implements Kvin {
 				return NiceIterator.emptyIterator();
 			}
 			return new NiceIterator<KvinTuple>() {
-				final PriorityQueue<Pair<KvinTupleInternal, ParquetReader<KvinTupleInternal>>> nextTuples =
-						new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
-				KvinTupleInternal prevTuple, nextTuple;
+				final PriorityQueue<Pair<KvinTuple, ParquetReader<GenericRecord>>> nextTuples =
+						new PriorityQueue<>(Comparator.comparing(Pair::getFirst, TUPLE_COMPARATOR));
+				KvinTuple prevTuple, nextTuple;
 				long propertyValueCount;
 				int folderIndex = -1;
-				String currentProperty;
 				boolean closed;
 
 				{
@@ -697,7 +724,7 @@ public class KvinParquet implements Kvin {
 					}
 				}
 
-				KvinTupleInternal selectNextTuple() throws IOException {
+				KvinTuple selectNextTuple() throws IOException {
 					while (true) {
 						while (nextTuples.isEmpty() && folderIndex < dataFolders.size() - 1) {
 							nextReaders();
@@ -705,10 +732,11 @@ public class KvinParquet implements Kvin {
 						var min = nextTuples.isEmpty() ? null : nextTuples.poll();
 						if (min != null) {
 							// omit duplicates in terms of id, time, and seqNr
-							boolean isDuplicate = prevTuple != null && prevTuple.compareTo(min.getFirst()) == 0;
+							boolean isDuplicate = prevTuple != null && TUPLE_COMPARATOR.compare(prevTuple, min.getFirst()) == 0;
 
-							var tuple = min.getSecond().read();
-							if (tuple != null) {
+							var record = min.getSecond().read();
+							if (record != null) {
+								KvinTuple tuple = convert(record);
 								nextTuples.add(new Pair<>(tuple, min.getSecond()));
 							} else {
 								try {
@@ -735,15 +763,16 @@ public class KvinParquet implements Kvin {
 						// skipping properties if limit is reached
 						if (limit != 0 && propertyValueCount >= limit) {
 							while ((nextTuple = selectNextTuple()) != null) {
-								String property = getProperty(nextTuple);
-								if (!property.equals(currentProperty)) {
+								if (!nextTuple.property.equals(prevTuple.property)) {
 									propertyValueCount = 0;
-									currentProperty = property;
 									break;
 								}
 							}
 						}
-						nextTuple = selectNextTuple();
+						if (nextTuple == null) {
+							nextTuple = selectNextTuple();
+						}
+						propertyValueCount++;
 					} catch (IOException e) {
 						throw new UncheckedIOException(e);
 					}
@@ -760,48 +789,11 @@ public class KvinParquet implements Kvin {
 					if (!hasNext()) {
 						throw new NoSuchElementException();
 					} else {
-						KvinTupleInternal tuple = nextTuple;
+						KvinTuple tuple = nextTuple;
 						prevTuple = tuple;
 						nextTuple = null;
-						try {
-							return internalTupleToKvinTuple(tuple);
-						} catch (IOException e) {
-							close();
-							throw new UncheckedIOException(e);
-						}
+						return tuple;
 					}
-				}
-
-				private KvinTuple internalTupleToKvinTuple(KvinTupleInternal internalTuple) throws IOException {
-					Object value = null;
-					if (internalTuple.valueInt != null) {
-						value = internalTuple.valueInt;
-					} else if (internalTuple.valueLong != null) {
-						value = internalTuple.valueLong;
-					} else if (internalTuple.valueFloat != null) {
-						value = internalTuple.valueFloat;
-					} else if (internalTuple.valueDouble != null) {
-						value = internalTuple.valueDouble;
-					} else if (internalTuple.valueString != null) {
-						value = internalTuple.valueString;
-					} else if (internalTuple.valueBool != null) {
-						value = internalTuple.valueBool == 1;
-					} else if (internalTuple.valueObject != null) {
-						value = decodeRecord(ByteBuffer.wrap(internalTuple.valueObject));
-					}
-
-					// checking for property change
-					String property = getProperty(internalTuple);
-					if (currentProperty == null) {
-						currentProperty = property;
-					} else if (!property.equals(currentProperty)) {
-						currentProperty = property;
-						propertyValueCount = 0;
-					}
-
-					propertyValueCount++;
-					return new KvinTuple(item, URIs.createURI(property), context,
-							internalTuple.time, internalTuple.seqNr, value);
 				}
 
 				@Override
@@ -821,15 +813,20 @@ public class KvinParquet implements Kvin {
 					}
 				}
 
+				KvinTuple convert(GenericRecord record) throws IOException {
+					String property = getProperty((ByteBuffer) record.get(0));
+					return recordToTuple(item, URIs.createURI(property), context, record);
+				}
+
 				void nextReaders() throws IOException {
 					folderIndex++;
 					List<Path> currentFiles = getDataFiles(dataFolders.get(folderIndex).toString());
 					for (Path file : currentFiles) {
 						HadoopInputFile inputFile = getFile(file);
-						ParquetReader<KvinTupleInternal> reader = createReader(inputFile, FilterCompat.get(filterFinal));
-						KvinTupleInternal tuple = reader.read();
-						if (tuple != null) {
-							nextTuples.add(new Pair<>(tuple, reader));
+						ParquetReader<GenericRecord> reader = createGenericReader(inputFile, FilterCompat.get(filterFinal));
+						GenericRecord record = reader.read();
+						if (record != null) {
+							nextTuples.add(new Pair<>(convert(record), reader));
 						} else {
 							try {
 								reader.close();
@@ -963,7 +960,7 @@ public class KvinParquet implements Kvin {
 			}
 
 			if (firstTuple != null) {
-				URI firstTupleProperty = URIs.createURI(getProperty(firstTuple));
+				URI firstTupleProperty = URIs.createURI(getProperty(ByteBuffer.wrap(firstTuple.id)));
 				if (itemId == null) {
 					idMappings.propertyId = getId(firstTupleProperty, IdType.PROPERTY_ID);
 				}
@@ -1012,7 +1009,9 @@ public class KvinParquet implements Kvin {
 				@Override
 				public void close() {
 					super.close();
-					readLock.release();
+					if (readLock.isActive()) {
+						readLock.release();
+					}
 				}
 			};
 		} catch (IOException e) {

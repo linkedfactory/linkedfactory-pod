@@ -139,14 +139,10 @@ public class KvinParquetTest {
 
 	@Test
 	public void shouldFetchProperties() {
-		try {
-			URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/1");
-			IExtendedIterator<URI> properties = kvinParquet.properties(item);
-			assertNotNull(properties);
-			assertEquals(10, properties.toList().size());
-			properties.close();
-		} catch (Exception e) {
-			fail("Something went wrong while testing KvinParquet properties() method");
-		}
+		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/1");
+		IExtendedIterator<URI> properties = kvinParquet.properties(item);
+		assertNotNull(properties);
+		assertEquals(10, properties.toList().size());
+		properties.close();
 	}
 }
