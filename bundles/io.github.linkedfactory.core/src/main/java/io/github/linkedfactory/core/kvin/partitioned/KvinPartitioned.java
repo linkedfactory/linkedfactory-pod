@@ -151,7 +151,12 @@ public class KvinPartitioned implements Kvin {
 
 	@Override
 	public void put(Iterable<KvinTuple> tuples) {
-		hotStore.put(tuples);
+		Lock readLock = readLock();
+		try {
+			hotStore.put(tuples);
+		} finally {
+			readLock.release();
+		}
 	}
 
 	public void createNewHotDataStore() throws IOException {

@@ -991,7 +991,11 @@ public class KvinParquet implements Kvin {
 						currentTuple = getFirstTuple(URIs.createURI(previousTuple.getItem()), previousTuple.getItemId(),
 								previousTuple.getPropertyId() + 1, null);
 					}
-					return currentTuple != null;
+					if (currentTuple == null) {
+						close();
+						return false;
+					}
+					return true;
 				}
 
 				@Override
