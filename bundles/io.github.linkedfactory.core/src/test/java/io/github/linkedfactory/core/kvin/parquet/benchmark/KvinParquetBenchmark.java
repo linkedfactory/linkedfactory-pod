@@ -4,6 +4,7 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
+import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinFederatedService;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
@@ -13,7 +14,6 @@ import org.apache.commons.io.FileUtils;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.QueryLanguage;
 import org.eclipse.rdf4j.query.TupleQueryResult;
-import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.repository.sail.SailRepository;
 import org.eclipse.rdf4j.repository.sail.SailRepositoryConnection;
@@ -31,6 +31,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Collections;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 
@@ -95,7 +97,7 @@ public class KvinParquetBenchmark {
 
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
-                .include(KvinParquetBenchmark.class.getSimpleName()) // adapt to control which benchmark tests to run
+                .include(KvinParquetBenchmark.class.getSimpleName() + ".testKvinParquetReadPerformanceForProcessUseCase") // adapt to control which benchmark tests to run
                 .forks(1)
                 .build();
 
@@ -143,12 +145,13 @@ public class KvinParquetBenchmark {
     private TupleQueryResult readFromStore(Kvin store, String query, String baseURI) {
         MemoryStore memoryStore = new MemoryStore();
         SailRepository repository = new SailRepository(memoryStore);
-        repository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
+        var resolver = new BaseFederatedServiceResolver() {
             @Override
             protected FederatedService createService(String s) throws QueryEvaluationException {
-                return new KvinFederatedService(store, false);
+                return new KvinFederatedService(store, this::getExecutorService, false);
             }
-        });
+        };
+        repository.setFederatedServiceResolver(resolver);
 
         repository.init();
         SailRepositoryConnection conn = repository.getConnection();
@@ -158,8 +161,10 @@ public class KvinParquetBenchmark {
         while (result.hasNext()) {
             result.next();
         }
+        result.close();
         conn.close();
         repository.shutDown();
+        resolver.shutDown();
 
         return result;
     }

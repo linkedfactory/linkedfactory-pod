@@ -30,6 +30,7 @@ import org.junit.{After, Assert, Before, Test}
 import java.io.{File, IOException}
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
+import java.util.concurrent.Executors
 import scala.util.Random
 
 class ServiceTest {
@@ -352,9 +353,16 @@ class ServiceTest {
     val sailRepository = new SailRepository(memoryStore)
 
     sailRepository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
+      val executorService = Executors.newCachedThreadPool()
+
       override def createService(url: String) = {
-        val service = new KvinFederatedService(store, false)
+        val service = new KvinFederatedService(store, () => executorService, false)
         service
+      }
+
+      override def shutDown(): Unit = {
+        super.shutDown()
+        executorService.shutdownNow()
       }
     })
 

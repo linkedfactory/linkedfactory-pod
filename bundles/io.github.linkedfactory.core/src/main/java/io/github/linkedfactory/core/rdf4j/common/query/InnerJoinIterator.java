@@ -3,10 +3,9 @@ package io.github.linkedfactory.core.rdf4j.common.query;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Queue;
 import java.util.concurrent.*;
+import java.util.function.Supplier;
 
-import io.github.linkedfactory.core.rdf4j.kvin.query.KvinFetchEvaluationStep;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.common.iteration.LookAheadIteration;
@@ -23,9 +22,9 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	 *-----------*/
 
 	private static final BindingSet NULL_BINDINGS = new EmptyBindingSet();
-	private static final ExecutorService executor = Executors.newCachedThreadPool();
 	private static final ThreadLocal<Boolean> isAsync = new ThreadLocal<>();
 	private final EvaluationStrategy strategy;
+	private final Supplier<ExecutorService> executorService;
 	private final CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
 	private final QueryEvaluationStep preparedJoinArg;
 	private final List<BlockingQueue<BindingSet>> joined;
@@ -35,9 +34,10 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	 * Constructors *
 	 *--------------*/
 
-	public InnerJoinIterator(EvaluationStrategy strategy, QueryEvaluationStep leftPrepared,
+	public InnerJoinIterator(EvaluationStrategy strategy, Supplier<ExecutorService> executorService, QueryEvaluationStep leftPrepared,
 	                         QueryEvaluationStep rightPrepared, BindingSet bindings, boolean lateral, boolean async) throws QueryEvaluationException {
 		this.strategy = strategy;
+		this.executorService = executorService;
 
 		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = leftPrepared.evaluate(bindings);
 		if (leftIt.hasNext() || lateral) {
@@ -112,7 +112,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 			// probably, one of the iterations has been closed concurrently in
 			// handleClose()
 		} catch (InterruptedException e) {
-			handleClose();
+			close();
 		}
 
 		return null;
@@ -123,19 +123,28 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 			BlockingQueue<BindingSet> queue = new ArrayBlockingQueue<>(50);
 			joined.add(queue);
 			BindingSet next = leftIter.next();
-			executor.submit(() -> {
+			executorService.get().submit(() -> {
 				isAsync.set(true);
 				var rightIt = preparedJoinArg.evaluate(next);
 				try {
 					while (rightIt.hasNext()) {
-						queue.put(rightIt.next());
+						BindingSet bindings = rightIt.next();
+						while (! queue.offer(bindings, 100, TimeUnit.MILLISECONDS)) {
+							if (isClosed()) {
+								return;
+							}
+						}
 					}
 					rightIt.close();
-					queue.put(NULL_BINDINGS);
+					while (! queue.offer(NULL_BINDINGS, 100, TimeUnit.MILLISECONDS)) {
+						if (isClosed()) {
+							return;
+						}
+					}
 				} catch (InterruptedException e) {
-					rightIt.close();
-					return;
+					// just return
 				} finally {
+					rightIt.close();
 					isAsync.remove();
 				}
 			});

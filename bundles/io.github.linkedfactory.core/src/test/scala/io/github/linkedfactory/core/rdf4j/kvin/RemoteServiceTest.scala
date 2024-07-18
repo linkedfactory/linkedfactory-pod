@@ -19,11 +19,11 @@ import io.github.linkedfactory.core.kvin.http.KvinHttp
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.core.kvin.util.JsonFormatParser
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple}
+import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}
 import org.eclipse.rdf4j.model.Literal
 import org.eclipse.rdf4j.query.QueryLanguage
-import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver
 import org.eclipse.rdf4j.repository.Repository
 import org.eclipse.rdf4j.repository.sail.SailRepository
 import org.eclipse.rdf4j.sail.memory.MemoryStore
@@ -94,7 +94,7 @@ class RemoteServiceTest {
     val memoryStore = new MemoryStore
     val sailRepository = new SailRepository(memoryStore)
 
-    sailRepository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
+    sailRepository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
       override def createService(url: String): KvinFederatedService = {
         if (getKvinServiceUrl(url).isDefined) {
           val endpoint = getKvinServiceUrl(url).get
@@ -110,11 +110,11 @@ class RemoteServiceTest {
               val jsonParser = new JsonFormatParser(new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8)))
               jsonParser.parse
             }
-          }, true)
+          }, getExecutorService _, true)
           kvinHttpInstance.count = kvinHttpInstance.count + 1
           return service
         }
-        val service = new KvinFederatedService(store, false)
+        val service = new KvinFederatedService(store, getExecutorService _, false)
         service
       }
     })

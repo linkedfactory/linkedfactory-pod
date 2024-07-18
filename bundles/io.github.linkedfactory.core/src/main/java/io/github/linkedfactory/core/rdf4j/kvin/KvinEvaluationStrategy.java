@@ -32,6 +32,8 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.*;
 
@@ -40,13 +42,15 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
     final Kvin kvin;
     final ParameterScanner scanner;
     final ValueFactory vf;
+    final Supplier<ExecutorService> executorService;
 
-    public KvinEvaluationStrategy(Kvin kvin, ParameterScanner scanner, ValueFactory vf, Dataset dataset,
-        FederatedServiceResolver serviceResolver, Map<Value, Object> valueToData) {
+    public KvinEvaluationStrategy(Kvin kvin, Supplier<ExecutorService> executorService, ParameterScanner scanner, ValueFactory vf, Dataset dataset,
+                                  FederatedServiceResolver serviceResolver, Map<Value, Object> valueToData) {
         super(new KvinTripleSource(vf), dataset, serviceResolver);
         this.kvin = kvin;
         this.scanner = scanner;
         this.vf = vf;
+        this.executorService = executorService;
     }
 
     @Override
@@ -211,13 +215,13 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                     .anyMatch(name -> assured.contains(name));
                 if (leftDependsOnRight) {
                     // swap left and right argument
-                    return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this,
+                    return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this, executorService,
                         rightPrepared, leftPrepared, bindingSet, true, true
                     );
                 }
             }
             boolean async = findFirstFetch(join.getRightArg()) != null;
-            return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this,
+            return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this, executorService,
                 leftPrepared, rightPrepared, bindingSet, lateral, async
             );
         }

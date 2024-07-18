@@ -674,7 +674,7 @@ public class KvinParquet implements Kvin {
 				return NiceIterator.emptyIterator();
 			}
 			return new NiceIterator<KvinTuple>() {
-				PriorityQueue<Pair<KvinTupleInternal, ParquetReader<KvinTupleInternal>>> nextTuples =
+				final PriorityQueue<Pair<KvinTupleInternal, ParquetReader<KvinTupleInternal>>> nextTuples =
 						new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
 				KvinTupleInternal prevTuple, nextTuple;
 				long propertyValueCount;

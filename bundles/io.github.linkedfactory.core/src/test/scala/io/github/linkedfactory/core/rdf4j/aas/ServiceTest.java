@@ -1,13 +1,11 @@
 package io.github.linkedfactory.core.rdf4j.aas;
 
+import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver;
 import org.eclipse.rdf4j.query.TupleQueryResult;
-import org.eclipse.rdf4j.query.Update;
-import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.repository.Repository;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.repository.sail.SailRepository;
-import org.eclipse.rdf4j.repository.util.RepositoryUtil;
 import org.eclipse.rdf4j.rio.RDFFormat;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
 import org.junit.After;
@@ -35,10 +33,10 @@ public class ServiceTest {
 		var memoryStore = new MemoryStore();
 		var sailRepository = new SailRepository(memoryStore);
 
-		sailRepository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
+		sailRepository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
 			@Override
 			public FederatedService createService(String url) {
-				var service = new AasFederatedService(url.replaceFirst("^aas-api:", ""));
+				var service = new AasFederatedService(url.replaceFirst("^aas-api:", ""), this::getExecutorService);
 				return service;
 			}
 		});

@@ -33,6 +33,8 @@ import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.compareAndBind;
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.findFirstFetch;
@@ -43,13 +45,15 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 	final ParameterScanner scanner;
 	final ValueFactory vf;
 	final Map<Value, Object> valueCache = new HashMap<>();
+	final Supplier<ExecutorService> executorService;
 
-	public AasEvaluationStrategy(AasClient client, ParameterScanner scanner, ValueFactory vf, Dataset dataset,
+	public AasEvaluationStrategy(AasClient client, Supplier<ExecutorService> executorService, ParameterScanner scanner, ValueFactory vf, Dataset dataset,
 	                             FederatedServiceResolver serviceResolver, Map<Value, Object> valueToData) {
 		super(new AasTripleSource(vf), dataset, serviceResolver);
 		this.client = client;
 		this.scanner = scanner;
 		this.vf = vf;
+		this.executorService = executorService;
 	}
 
 	@Override
@@ -289,12 +293,12 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				if (leftDependsOnRight) {
 					// swap left and right argument
 					return bindingSet -> new InnerJoinIterator(AasEvaluationStrategy.this,
-							rightPrepared, leftPrepared, bindingSet, true, false
+							executorService, rightPrepared, leftPrepared, bindingSet, true, false
 					);
 				}
 			}
 			return bindingSet -> new InnerJoinIterator(AasEvaluationStrategy.this,
-					leftPrepared, rightPrepared, bindingSet, lateral, false
+					executorService, leftPrepared, rightPrepared, bindingSet, lateral, false
 			);
 		}
 	}

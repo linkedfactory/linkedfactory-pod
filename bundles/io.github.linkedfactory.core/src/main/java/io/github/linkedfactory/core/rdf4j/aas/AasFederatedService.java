@@ -22,15 +22,20 @@ import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 
 public class AasFederatedService implements FederatedService {
 
     static final ValueFactory vf = SimpleValueFactory.getInstance();
     protected boolean initialized = false;
     AasClient client;
+    Supplier<ExecutorService> executorService;
 
-    public AasFederatedService(String endpoint) {
+    public AasFederatedService(String endpoint, Supplier<ExecutorService> executorService) {
         this.client = new AasClient(endpoint);
+        this.executorService = executorService;
     }
 
     @Override
@@ -88,7 +93,7 @@ public class AasFederatedService implements FederatedService {
         // System.out.println(service);
 
         Map<Value, Object> valueToData = new WeakHashMap<>();
-        EvaluationStrategy strategy = new AasEvaluationStrategy(client, scanner, vf, null, null, valueToData);
+        EvaluationStrategy strategy = new AasEvaluationStrategy(client, executorService, scanner, vf, null, null, valueToData);
 
         List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
         while (bindings.hasNext()) {

@@ -17,8 +17,8 @@ package io.github.linkedfactory.core.rdf4j.kvin
 
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple}
+import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver
 import net.enilink.komma.core.URIs
-import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver
 import org.eclipse.rdf4j.repository.Repository
 import org.eclipse.rdf4j.repository.sail.SailRepository
 import org.eclipse.rdf4j.sail.memory.MemoryStore
@@ -86,9 +86,9 @@ class KvinSailTest {
     val kvinSail = new KvinSail(store, memoryStore)
     val sailRepository = new SailRepository(kvinSail)
 
-    sailRepository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
+    sailRepository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
       override def createService(url: String) = {
-        val service = new KvinFederatedService(store, false)
+        val service = new KvinFederatedService(store, getExecutorService _, false)
         service
       }
     })

@@ -22,6 +22,9 @@ import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 
 public class KvinFederatedService implements FederatedService {
 
@@ -29,9 +32,11 @@ public class KvinFederatedService implements FederatedService {
     protected boolean initialized = false;
     Kvin kvin;
     boolean closeKvinOnShutdown;
+    Supplier<ExecutorService> executorService;
 
-    public KvinFederatedService(Kvin kvin, boolean closeKvinOnShutdown) {
+    public KvinFederatedService(Kvin kvin, Supplier<ExecutorService> executorService, boolean closeKvinOnShutdown) {
         this.kvin = kvin;
+        this.executorService = executorService;
         this.closeKvinOnShutdown = closeKvinOnShutdown;
     }
 
@@ -90,7 +95,7 @@ public class KvinFederatedService implements FederatedService {
         // System.out.println(service);
 
         Map<Value, Object> valueToData = new WeakHashMap<>();
-        EvaluationStrategy strategy = new KvinEvaluationStrategy(kvin, scanner, vf, null, null, valueToData);
+        EvaluationStrategy strategy = new KvinEvaluationStrategy(kvin, executorService, scanner, vf, null, null, valueToData);
 
         List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
         while (bindings.hasNext()) {
