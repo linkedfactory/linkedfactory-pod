@@ -1,6 +1,5 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
-import io.github.linkedfactory.core.kvin.partitioned.KvinPartitioned;
 import net.enilink.commons.util.Pair;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
@@ -16,18 +15,17 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 public class ParquetHelpers {
 	static final Logger log = LoggerFactory.getLogger(ParquetHelpers.class);
 	static final ReflectData reflectData = new ReflectData(ParquetHelpers.class.getClassLoader());
 
 	// parquet file writer config
-	static final long ROW_GROUP_SIZE = 1048576;  // 1 MB
+	static final long ROW_GROUP_SIZE_MAPPINGS = 1048576L;  // 1 MB
+	static final long ROW_GROUP_SIZE = 134217728L; // Parquet Java default
 	static final int PAGE_SIZE = 8192; // 8 KB
 	static final int DICT_PAGE_SIZE = 1048576; // 1 MB
 	static final int ZSTD_COMPRESSION_LEVEL = 12; // 1 - 22
@@ -64,6 +62,7 @@ public class ParquetHelpers {
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
 				.withDataModel(reflectData)
+				.withBloomFilterEnabled("id", true)
 				.build();
 	}
 
@@ -79,9 +78,10 @@ public class ParquetHelpers {
 				.withDictionaryEncoding(true)
 				//.withCompressionCodec(CompressionCodecName.ZSTD)
 				.withCompressionCodec(CompressionCodecName.SNAPPY)
-				.withRowGroupSize(ROW_GROUP_SIZE)
+				.withRowGroupSize(ROW_GROUP_SIZE_MAPPINGS)
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
+				.withBloomFilterEnabled("value", true)
 				.withDataModel(reflectData)
 				.build();
 	}
