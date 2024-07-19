@@ -58,6 +58,10 @@ public class KvinFetch extends UnaryTupleOperator implements Fetch {
         return assuredBindingNames;
     }
 
+    public Parameters getParams() {
+        return params;
+    }
+
     public Set<String> getRequiredBindings() {
         return requiredBindings;
     }
