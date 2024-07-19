@@ -12,7 +12,6 @@ import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
-import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
@@ -36,7 +35,6 @@ import org.apache.parquet.io.api.Binary;
 import org.eclipse.rdf4j.common.concurrent.locks.Lock;
 import org.eclipse.rdf4j.common.concurrent.locks.ReadPrefReadWriteLockManager;
 import org.eclipse.rdf4j.common.concurrent.locks.ReadWriteLockManager;
-import org.eclipse.rdf4j.query.algebra.In;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,7 +54,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static io.github.linkedfactory.core.kvin.parquet.ParquetHelpers.*;
-import static io.github.linkedfactory.core.kvin.parquet.Records.decodeRecord;
 import static io.github.linkedfactory.core.kvin.parquet.Records.encodeRecord;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
@@ -87,6 +84,7 @@ public class KvinParquet implements Kvin {
 	Map<Path, HadoopInputFile> inputFileCache = new HashMap<>(); // hadoop input file cache
 	Cache<Long, URI> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	Cache<java.nio.file.Path, Properties> metaCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	Cache<java.nio.file.Path, List<Path>> filesCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	String archiveLocation;
 	ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 
@@ -423,6 +421,7 @@ public class KvinParquet implements Kvin {
 
 			// clear cache with meta data
 			metaCache.invalidateAll();
+			filesCache.invalidateAll();
 
 			// invalidate id caches - TODO could be improved by directly updating the caches
 			itemIdCache.invalidateAll();
@@ -864,10 +863,14 @@ public class KvinParquet implements Kvin {
 	}
 
 	private List<Path> getDataFiles(String path) throws IOException {
-		return Files.walk(Paths.get(path), 1).skip(1)
-				.filter(p -> p.getFileName().toString().startsWith("data__"))
-				.map(p -> new Path(p.toString()))
-				.collect(Collectors.toList());
+		try {
+			return filesCache.get(Paths.get(path), () -> Files.walk(Paths.get(path), 1).skip(1)
+					.filter(p -> p.getFileName().toString().startsWith("data__"))
+					.map(p -> new Path(p.toString()))
+					.collect(Collectors.toList()));
+		} catch (ExecutionException e) {
+			throw new IOException(e);
+		}
 	}
 
 	private List<java.nio.file.Path> getDataFolders(IdMappings idMappings) throws IOException {
