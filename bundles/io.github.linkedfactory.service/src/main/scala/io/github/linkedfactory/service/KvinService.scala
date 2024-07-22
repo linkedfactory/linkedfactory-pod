@@ -177,7 +177,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
               }).flatten.toList
 
               // print header row
-              csvPrinter.printRecord(("time" :: itemProperties.map(p => s"<${p._1}>@<${p._2}")).asJava)
+              csvPrinter.printRecord(("time" :: itemProperties.map(p => s"<${p._1}>@<${p._2}>")).asJava)
 
               var itemData = values.map(v => {
                 val ps = propertiesParam openOr v._2.map(_._1).toSet.toList.sorted
