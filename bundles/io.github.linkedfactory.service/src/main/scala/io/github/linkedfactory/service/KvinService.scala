@@ -112,29 +112,29 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           }
         }
 
+        def recordToJson(r : Record) : JObject = JObject(r.iterator().asScala.map { e =>
+          JField(e.getProperty.toString, e.getValue match {
+            case r : Record => recordToJson(r)
+            case uri : URI => JObject(JField("@id", uri.toString))
+            case other => decompose(other)
+          })
+        }.toList)
+
+        // fast path to avoid value->JSON->string conversion for simple types
+        def value2Str(value: Any, quoteStrings: Boolean = true) = value match {
+          case null => "null"
+          case b: Boolean => b.toString
+          case n: Number => n.toString
+          case uri : URI => compactRender(JObject(JField("@id", uri.toString)))
+          case x: JValue => compactRender(x)
+          case e: Record => compactRender(recordToJson(e))
+          case other if quoteStrings => compactRender(JString(other.toString))
+          case other => other.toString
+        }
+
         val response = responseType(req) map {
           case "application/json" =>
             // { "item" : { "property1" : [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "seqNr" : 5, "value" : 3.2 } ] } }
-
-            def recordToJson(r : Record) : JObject = JObject(r.iterator().asScala.map { e =>
-              JField(e.getProperty.toString, e.getValue match {
-                case r : Record => recordToJson(r)
-                case uri : URI => JObject(JField("@id", uri.toString))
-                case other => decompose(other)
-              })
-            }.toList)
-
-            // fast path to avoid value->JSON->string conversion for simple types
-            def value2Str(value: Any) = value match {
-              case null => "null"
-              case b: Boolean => b.toString
-              case n: Number => n.toString
-              case s: String => compactRender(JString(s))
-              case uri : URI => compactRender(JObject(JField("@id", uri.toString)))
-              case x: JValue => compactRender(x)
-              case e: Record => compactRender(recordToJson(e))
-              case _ => compactRender(decompose(value))
-            }
             val streamer = (os: OutputStream) => {
               val streamWriter = new OutputStreamWriter(os)
               // open JSON result object, then iterate over the items
@@ -169,45 +169,52 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
               val csvFormat = CSVFormat.EXCEL
               val csvPrinter = new CSVPrinter(streamWriter, csvFormat)
 
-              // FIXME: only supports properties for a single item ATM
-              values.headOption foreach { case (item, itemData) =>
-                // "item" : { ... }
-                val propertiesList = S.param("properties").map(_.split("\\s+").toList) openOr itemData.keys.toList.sorted
+              // either use supplied properties or properties retrieved from database
+              val propertiesParam = S.param("properties").map(_.split("\\s+").toList)
 
-                // print header row
-                csvPrinter.printRecord(("time" :: propertiesList).asJava)
+              val itemProperties = values.map(v => {
+                (propertiesParam openOr v._2.map(_._1).toSet.toList.sorted).map((v._1, _))
+              }).flatten.toList
 
-                val cachedValues = mutable.Map.empty[String, KvinTuple]
-                // as long as any of the iterators has a next entry
-                // or property values are left in cache
-                while (cachedValues.nonEmpty || itemData.exists(_._2.hasNext)) {
-                  itemData foreach {
-                    // for each property with no value cached and values left, call next on iterator
-                    case (property, propertyData) if !cachedValues.isDefinedAt(property) && propertyData.hasNext =>
-                      cachedValues.put(property, propertyData.next)
-                      if (!propertyData.hasNext) propertyData.close()
-                    case _ => // value still cached or iterator finished, ignore
-                  }
+              // print header row
+              csvPrinter.printRecord(("time" :: itemProperties.map(p => s"<${p._1}>@<${p._2}")).asJava)
 
-                  // determine row timestamp as max ts of cached columns values
-                  val rowTs = cachedValues.maxBy(_._2.time)._2.time
+              var itemData = values.map(v => {
+                val ps = propertiesParam openOr v._2.map(_._1).toSet.toList.sorted
+                ps.flatMap(p => v._2.get(p).map(it => (if (it.hasNext()) it.next() else null, it)))
+              }).flatten
 
-                  // build row by consuming those cached values that share the max timestamp
-                  val row = mutable.Map.empty[String, Any]
-                  cachedValues.filterInPlace { (property, entry) =>
-                    entry.time match {
-                      // cached value shares row timestamp, consume
-                      case `rowTs` => row.put(property, entry.value); false
-                      // entry does not share row timestamp, retain in cache
-                      case _ => true
-                    }
-                  }
+              val ordering: Ordering[KvinTuple] = (a: KvinTuple, b: KvinTuple) => {
+                // compare first by time and then by seqNr
+                val diffTime = a.time - b.time
+                if (diffTime != 0) diffTime.toInt else a.seqNr - b.seqNr
+              }
+              var finished = false
+              while (!finished) {
+                val nextTuples = itemData.map(_._1).filter(_ != null)
+                val maxTuple = if (nextTuples.isEmpty) null else nextTuples.max(ordering)
+                if (maxTuple != null) {
                   // print the row, properties without values at row timestamp stay unset
-                  csvPrinter.printRecord((formatDate(rowTs) :: {
-                    propertiesList.map { p => row.getOrElse(p, null) }
-                  }).asJava)
+                  csvPrinter.printRecord((formatDate(maxTuple.time) :: itemData.map(d => {
+                    if (d._1 != null && ordering.compare(maxTuple, d._1) == 0 && d._1.value != null) value2Str(d._1.value, false) else null
+                  }).toList).asJava)
+
+                  // select next tuple from iterators
+                  itemData = itemData.map(d => {
+                    if (d._1 != null && ordering.compare(maxTuple, d._1) == 0) {
+                      val it = d._2
+                      val next = if (it.hasNext()) it.next() else {
+                        it.close()
+                        null
+                      }
+                      (next, if (next != null) it else null)
+                    } else d
+                  })
+                } else {
+                  finished = true
                 }
               }
+
               csvPrinter.close()
             }
             OutputStreamResponse(streamer, -1, ("Content-Type", "text/csv; charset=utf-8") ::
