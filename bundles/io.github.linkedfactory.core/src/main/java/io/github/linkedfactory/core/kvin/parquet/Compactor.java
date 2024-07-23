@@ -204,8 +204,15 @@ public class Compactor {
 			while (!nextTuples.isEmpty()) {
 				var pair = nextTuples.poll();
 				if (prevTuple == null || prevTuple.compareTo(pair.getFirst()) != 0) {
-					compactionFileWriter.write(pair.getFirst());
-					prevTuple = pair.getFirst();
+					var tuple = pair.getFirst();
+					// update the first flag
+					if (prevTuple == null || !Arrays.equals(prevTuple.id, tuple.id)) {
+						tuple.setFirst(true);
+					} else {
+						tuple.setFirst(null);
+					}
+					compactionFileWriter.write(tuple);
+					prevTuple = tuple;
 				} else if (prevTuple != null) {
 					// omit tuple as it is duplicate in terms of id, time, and seqNr
 				}

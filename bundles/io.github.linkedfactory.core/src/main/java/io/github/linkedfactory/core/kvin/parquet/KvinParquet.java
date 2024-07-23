@@ -9,6 +9,7 @@ import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
+import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -231,6 +232,7 @@ public class KvinParquet implements Kvin {
 
 			WriterState writerState = null;
 			String prevKey = null;
+			KvinTupleInternal prevTuple = null;
 			for (KvinTuple tuple : tuples) {
 				KvinTupleInternal internalTuple = new KvinTupleInternal();
 
@@ -268,9 +270,14 @@ public class KvinParquet implements Kvin {
 				} else {
 					internalTuple.setValueObject(null);
 				}
+				// set first flag
+				if (prevTuple == null || !Arrays.equals(prevTuple.id, internalTuple.id)) {
+					internalTuple.setFirst(true);
+				}
 				writerState.writer.write(internalTuple);
 				writerState.minMax[0] = Math.min(writerState.minMax[0], writeContext.itemIdCounter);
 				writerState.minMax[1] = Math.max(writerState.minMax[1], writeContext.itemIdCounter);
+				prevTuple = internalTuple;
 			}
 
 			for (WriterState state : writers.values()) {
@@ -745,7 +752,7 @@ public class KvinParquet implements Kvin {
 										propertyValueCount = 0;
 									}
 								}
-								if (! skipAfterLimit) {
+								if (!skipAfterLimit) {
 									prevRecord = min.getFirst();
 									tuple = convert(min.getFirst());
 									propertyValueCount++;
@@ -926,98 +933,63 @@ public class KvinParquet implements Kvin {
 		return null;
 	}
 
-	private long getNextPropertyId(long itemId, long lastPropertyId, long contextId) {
+	private List<URI> getProperties(long itemId, long contextId) {
 		try {
-			ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * (lastPropertyId > 0 ? 2 : 1));
-			keyBuffer.putLong(itemId);
-			if (lastPropertyId > 0) {
-				keyBuffer.putLong(lastPropertyId + 1);
-			}
-			FilterPredicate filter = gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array()));
+			ByteBuffer lowKey = ByteBuffer.allocate(Long.BYTES);
+			lowKey.putLong(itemId);
+			ByteBuffer highKey = ByteBuffer.allocate(Long.BYTES * 2);
+			highKey.putLong(itemId);
+			highKey.putLong(Long.MAX_VALUE);
+			FilterPredicate filter = and(eq(FilterApi.booleanColumn("first"), true), and(
+					gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(lowKey.array())),
+					lt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(highKey.array()))));
 
 			IdMappings idMappings = new IdMappings();
 			idMappings.itemId = itemId;
 			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
+			Set<Long> propertyIds = new LinkedHashSet<>();
 
-			long minPropertyId = 0;
 			for (java.nio.file.Path dataFolder : dataFolders) {
 				for (Path dataFile : getDataFiles(dataFolder.toString())) {
 					ParquetReader<GenericRecord> reader = createGenericReader(getFile(dataFile), FilterCompat.get(filter));
 					GenericRecord record;
 					while ((record = reader.read()) != null) {
 						ByteBuffer idBb = (ByteBuffer) record.get(0);
-						if (itemId != idBb.getLong()) {
-							break;
-						}
-						// we are reading property ids which are lower than last given property id
+						idBb.getLong();
 						long currentPropertyId = idBb.getLong();
-						if (minPropertyId == 0 || currentPropertyId < minPropertyId) {
-							minPropertyId = currentPropertyId;
-						}
-						break;
+						propertyIds.add(currentPropertyId);
 					}
 					reader.close();
 				}
 			}
-			return minPropertyId;
-		} catch (Exception e) {
-			throw new RuntimeException(e);
+
+			return propertyIds.stream().map(id -> {
+				try {
+					return getProperty(id);
+				} catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			}).collect(Collectors.toList());
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
 		}
 	}
 
 	@Override
 	public synchronized IExtendedIterator<URI> properties(URI item) {
+		Lock readLock = null;
 		try {
-			Lock readLock = readLock();
+			readLock = readLock();
 			IdMappings idMappings = getIdMappings(item, null, null);
 			if (idMappings.itemId == 0L) {
 				return NiceIterator.emptyIterator();
 			}
-			return new NiceIterator<>() {
-				long lastPropertyId = 0L;
-				long nextPropertyId = 0L;
-				URI nextProperty;
-				boolean closed = false;
-
-				@Override
-				public boolean hasNext() {
-					if (!closed && nextPropertyId == 0) {
-						nextPropertyId = getNextPropertyId(idMappings.itemId, lastPropertyId, 0);
-					}
-					if (nextPropertyId == 0) {
-						close();
-						return false;
-					}
-					try {
-						nextProperty = getProperty(nextPropertyId);
-					} catch (IOException e) {
-						throw new UncheckedIOException(e);
-					}
-					return true;
-				}
-
-				@Override
-				public URI next() {
-					if (nextProperty == null) {
-						throw new NoSuchElementException();
-					}
-					URI property = nextProperty;
-					lastPropertyId = nextPropertyId;
-					nextPropertyId = 0;
-					return property;
-				}
-
-				@Override
-				public void close() {
-					super.close();
-					closed = true;
-					if (readLock.isActive()) {
-						readLock.release();
-					}
-				}
-			};
+			List<URI> properties = getProperties(idMappings.itemId, 0L);
+			return WrappedIterator.create(properties.iterator());
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
+		} finally {
+			readLock.release();
 		}
 	}
 

@@ -46,6 +46,7 @@ public class ParquetHelpers {
 			.name("id").type().bytesType().noDefault()
 			.name("time").type().longType().noDefault()
 			.name("seqNr").type().intType().intDefault(0)
+			.name("first").type().nullable().booleanType().noDefault()
 			.name("valueInt").type().nullable().intType().noDefault()
 			.name("valueLong").type().nullable().longType().noDefault()
 			.name("valueFloat").type().nullable().floatType().noDefault()
@@ -53,6 +54,8 @@ public class ParquetHelpers {
 			.name("valueString").type().nullable().stringType().noDefault()
 			.name("valueBool").type().nullable().intType().noDefault()
 			.name("valueObject").type().nullable().bytesType().noDefault().endRecord();
+
+	static int kvinTupleFirstField = kvinTupleSchema.getField("valueInt").pos();
 
 	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
 	static Pattern fileOrDotFileWithSeqNr = Pattern.compile("^\\.?([^.].*)__([0-9]+)\\..*$");
@@ -140,7 +143,7 @@ public class ParquetHelpers {
 		int seqNr = (Integer) record.get(2);
 		int fields = record.getSchema().getFields().size();
 		Object value = null;
-		for (int i = 3; i < fields; i++) {
+		for (int i = kvinTupleFirstField; i < fields; i++) {
 			value = record.get(i);
 			if (value != null) {
 				if (i == fields - 1) {

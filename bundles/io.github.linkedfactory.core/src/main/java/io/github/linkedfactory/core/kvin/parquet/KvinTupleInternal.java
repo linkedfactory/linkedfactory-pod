@@ -6,6 +6,7 @@ public class KvinTupleInternal implements Comparable<KvinTupleInternal> {
 	protected byte[] id;
 	protected Long time;
 	protected Integer seqNr;
+	protected Boolean first;
 	protected Integer valueInt;
 	protected Long valueLong;
 	protected Float valueFloat;
@@ -36,6 +37,15 @@ public class KvinTupleInternal implements Comparable<KvinTupleInternal> {
 
 	public void setSeqNr(int seqNr) {
 		this.seqNr = seqNr;
+	}
+
+	public Boolean getFirst() {
+		return first;
+	}
+
+	public KvinTupleInternal setFirst(Boolean first) {
+		this.first = first;
+		return this;
 	}
 
 	public Integer getValueInt() {
