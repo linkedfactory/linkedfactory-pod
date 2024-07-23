@@ -23,7 +23,7 @@ if [ -n "$RELEASEVERSION" ]; then
 mvn versions:set -DnewVersion=$RELEASEVERSION -DgroupId='*' -DartifactId='*' -DprocessAllModules -DgenerateBackupPoms=false -P versions
 
 git commit -a -m "prepare release $RELEASEVERSION"
-git tag -a v$RELEASEVERSION -m "LinkedFactory POD release $RELEASEVERSION"
+git tag -a v$RELEASEVERSION -m "LinkedFactory Pod release $RELEASEVERSION"
 fi
 
 if [ -n "$DEVELOPMENTVERSION" ]; then
