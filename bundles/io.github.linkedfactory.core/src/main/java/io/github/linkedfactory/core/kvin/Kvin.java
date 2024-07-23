@@ -132,19 +132,6 @@ public interface Kvin extends Closeable {
 	IExtendedIterator<URI> properties(URI item);
 
 	/**
-	 * Determines the approximate storage space for a given item and property
-	 * within the time interval [begin, end].
-	 *
-	 * @param item     The item URI.
-	 * @param property The property URI.
-	 * @param context  The context URI.
-	 * @param end      The end of the time interval.
-	 * @param begin    The begin of the time interval.
-	 * @return The approximate storage space for the values
-	 */
-	long approximateSize(URI item, URI property, URI context, long end, long begin);
-
-	/**
 	 * Closes the store and frees resources.
 	 */
 	@Override

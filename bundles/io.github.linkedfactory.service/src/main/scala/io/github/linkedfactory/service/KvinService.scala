@@ -85,7 +85,6 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         case Failure(msg, _, _) => FailureResponse(msg)
         case _ => OkResponse()
       }
-    case list Get req if list.endsWith("values" :: "size" :: Nil) => createJsonResponse(getSize(path ++ list.dropRight(2)))
     case list Get req if list.endsWith("values" :: Nil) =>
       val limit = S.param("limit") flatMap (v => tryo(v.toLong)) filter (_ > 0) openOr 10000L
 
@@ -280,15 +279,6 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   def getSingleItem(path: List[String]): URI = S.param("item") flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(path)
-
-  def getSize(path: List[String]): JObject = {
-    val uri = S.param("item") flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(path)
-    val end = S.param("to") flatMap (v => tryo(v.toLong)) openOr Long.MaxValue
-    val begin = S.param("from") flatMap (v => tryo(v.toLong)) openOr 0L
-    JObject(JField("size", store.approximateSize(uri,
-      S.param("property") flatMap { s => tryo(URIs.createURI(s)) } openOr valueProperty,
-      Kvin.DEFAULT_CONTEXT, end, begin)) :: Nil)
-  }
 
   def getValues(path: List[String], limit: Long): Map[String, Map[String, IExtendedIterator[KvinTuple]]] = {
     val items = (S.param("item") or S.param("items")).map {

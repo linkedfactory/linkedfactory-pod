@@ -68,11 +68,6 @@ public class DelegatingKvin implements Kvin {
     }
 
     @Override
-    public long approximateSize(URI item, URI property, URI context, long end, long begin) {
-        return getDelegate().approximateSize(item, property, context, end, begin);
-    }
-
-    @Override
     public void close() {
         getDelegate().close();
     }

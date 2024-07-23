@@ -739,21 +739,6 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     }
   }
 
-  override def approximateSize(item: URI, property: URI, context: URI, end: Long = KvinTuple.TIME_MAX_VALUE, begin: Long = 0L): Long = {
-    val id = toId(item, property, context, generate = false)
-    if (id == null) 0L else {
-      val size = id.length + Varint.MAX_BYTES
-      val lowKey = ByteBuffer.allocate(size).order(BYTE_ORDER)
-      lowKey.put(id)
-      writeVarint(lowKey, end)
-      val highKey = ByteBuffer.allocate(size).order(BYTE_ORDER)
-      highKey.put(id)
-      writeVarint(highKey, begin)
-      val sizes = values.getApproximateSizes(new Range(lowKey.array, highKey.array))
-      sizes(0)
-    }
-  }
-
   override def close(): Unit = {
     var errors: List[IOException] = Nil
     try {

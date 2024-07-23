@@ -994,11 +994,6 @@ public class KvinParquet implements Kvin {
 	}
 
 	@Override
-	public long approximateSize(URI item, URI property, URI context, long end, long begin) {
-		return 0;
-	}
-
-	@Override
 	public void close() {
 	}
 
