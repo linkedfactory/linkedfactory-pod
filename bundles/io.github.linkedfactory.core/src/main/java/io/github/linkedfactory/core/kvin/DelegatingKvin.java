@@ -48,23 +48,23 @@ public class DelegatingKvin implements Kvin {
     }
 
     @Override
-    public boolean delete(URI item) {
-        return getDelegate().delete(item);
+    public boolean delete(URI item, URI context) {
+        return getDelegate().delete(item, context);
     }
 
     @Override
-    public IExtendedIterator<URI> descendants(URI item) {
-        return getDelegate().descendants(item);
+    public IExtendedIterator<URI> descendants(URI item, URI context) {
+        return getDelegate().descendants(item, context);
     }
 
     @Override
-    public IExtendedIterator<URI> descendants(URI item, long limit) {
-        return getDelegate().descendants(item, limit);
+    public IExtendedIterator<URI> descendants(URI item, URI context, long limit) {
+        return getDelegate().descendants(item, context, limit);
     }
 
     @Override
-    public IExtendedIterator<URI> properties(URI item) {
-        return getDelegate().properties(item);
+    public IExtendedIterator<URI> properties(URI item, URI context) {
+        return getDelegate().properties(item, context);
     }
 
     @Override

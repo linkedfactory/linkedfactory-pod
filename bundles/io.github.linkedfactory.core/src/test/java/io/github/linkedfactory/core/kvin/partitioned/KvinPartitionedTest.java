@@ -101,7 +101,7 @@ public class KvinPartitionedTest {
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673218800000L).generate());
 
 		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 5);
-		IExtendedIterator<URI> properties = kvinPartitioned.properties(item);
+		IExtendedIterator<URI> properties = kvinPartitioned.properties(item, null);
 
 		assertNotNull(properties);
 		assertTrue(properties.toList().size() > 0);

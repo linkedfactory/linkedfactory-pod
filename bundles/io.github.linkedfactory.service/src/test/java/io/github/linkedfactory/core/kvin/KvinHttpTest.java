@@ -303,7 +303,7 @@ public class KvinHttpTest extends Mockito {
                     return httpClient;
                 }
             };
-            IExtendedIterator<URI> descendants = kvinHttp.descendants(item);
+            IExtendedIterator<URI> descendants = kvinHttp.descendants(item, Kvin.DEFAULT_CONTEXT);
             assertNotNull(descendants);
             int descendantCount = 0;
             while (descendants.hasNext()) {
@@ -336,7 +336,7 @@ public class KvinHttpTest extends Mockito {
                     return httpClient;
                 }
             };
-            IExtendedIterator<URI> properties = kvinHttp.properties(item);
+            IExtendedIterator<URI> properties = kvinHttp.properties(item, Kvin.DEFAULT_CONTEXT);
             assertNotNull(properties);
             int propertyCount = 0;
             while (properties.hasNext()) {
@@ -679,7 +679,7 @@ public class KvinHttpTest extends Mockito {
                     return client;
                 }
             };
-            IExtendedIterator<URI> uris = kvinHttp.properties(item);
+            IExtendedIterator<URI> uris = kvinHttp.properties(item, null);
             assertNotNull(uris);
             int count = 0;
             while (uris.hasNext()) {

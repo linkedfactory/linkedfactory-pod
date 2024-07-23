@@ -56,7 +56,7 @@ object EntryType {
   }
 }
 
-object SPCtoId extends EntryType {
+object SCPtoId extends EntryType {
   val id = 9
 }
 
@@ -69,7 +69,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   val locks: Striped[ReadWriteLock] = Striped.readWriteLock(64)
 
   val uriToIdCache: Cache[(URI, Int), Array[Byte]] = CacheBuilder.newBuilder.maximumSize(20000).build[(URI, Int), Array[Byte]]
-  val spcToIdCache: Cache[(URI, URI, URI), Array[Byte]] = CacheBuilder.newBuilder.maximumSize(20000).build[(URI, URI, URI), Array[Byte]]
+  val scpToIdCache: Cache[(URI, URI, URI), Array[Byte]] = CacheBuilder.newBuilder.maximumSize(20000).build[(URI, URI, URI), Array[Byte]]
 
   // open the LevelDB instance
   def createOptions(timeSeries: Boolean): Options = {
@@ -196,22 +196,22 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   def contextOrDefault(context: URI): URI = if (context == null) Kvin.DEFAULT_CONTEXT else context
 
   def toId(item: URI, property: URI, context: URI, generate: Boolean): Array[Byte] = {
-    val cacheKey = (item, property, context)
-    var id = spcToIdCache.getIfPresent(cacheKey)
+    val cacheKey = (item, context, property)
+    var id = scpToIdCache.getIfPresent(cacheKey)
     if (id == null) {
       val itemId = toId(item, EntryType.SubjectToId, generate)
       if (itemId != null) {
-        val propertyId = toId(property, EntryType.PropertyToId, generate)
-        if (propertyId != null) {
-          val contextId = toId(contextOrDefault(context), EntryType.ContextToId, generate)
-          if (contextId != null) {
+        val contextId = toId(contextOrDefault(context), EntryType.ContextToId, generate)
+        if (contextId != null) {
+          val propertyId = toId(property, EntryType.PropertyToId, generate)
+          if (propertyId != null) {
             id = new Array[Byte](contextId.length + itemId.length + propertyId.length)
 
-            System.arraycopy(itemId, 0, id, 0, itemId.length)
-            System.arraycopy(propertyId, 0, id, itemId.length, propertyId.length)
-            System.arraycopy(contextId, 0, id, itemId.length + propertyId.length, contextId.length)
+            System.arraycopy(itemId, 0, id,0, itemId.length)
+            System.arraycopy(contextId, 0, id, itemId.length, contextId.length)
+            System.arraycopy(propertyId, 0, id, itemId.length + contextId.length, propertyId.length)
 
-            spcToIdCache.put(cacheKey, id)
+            scpToIdCache.put(cacheKey, id)
           }
           id
         } else null
@@ -224,15 +224,15 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     if (uriBytes == null) None else Some(URIs.createURI(new String(uriBytes, "UTF-8")))
   }
 
-  override def delete(item: URI): Boolean = {
+  override def delete(item: URI, context: URI): Boolean = {
     val BATCH_SIZE = 100000
+    val contextId = toId(if (context == null) Kvin.DEFAULT_CONTEXT else context, EntryType.ContextToId, false)
     val itemId = toId(item, EntryType.SubjectToId, generate = false)
     var deletedAny = false
-    if (itemId != null) {
-      deleteId(item, EntryType.SubjectToId)
-
-      val prefix = new Array[Byte](itemId.length + java.lang.Long.BYTES + 1)
+    if (itemId != null && contextId != null) {
+      val prefix = new Array[Byte](itemId.length + contextId.length)
       System.arraycopy(itemId, 0, prefix, 0, itemId.length)
+      System.arraycopy(contextId, 0, prefix, itemId.length, contextId.length)
 
       val it = values.iterator
       try {
@@ -260,6 +260,12 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
         if (batch != null && count % BATCH_SIZE != 0) {
           values.write(batch, new WriteOptions().sync(false))
+        }
+
+        it.seek(itemId)
+        if (! it.hasNext) {
+          // no more values for item in the given context exist
+          deleteId(item, EntryType.SubjectToId)
         }
       } finally {
         it.close()
@@ -329,53 +335,87 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     }
   }
 
-  override def descendants(uri: URI): IExtendedIterator[URI] = descendants(uri, Long.MaxValue)
+  override def descendants(uri: URI, context: URI): IExtendedIterator[URI] = descendants(uri, context, Long.MaxValue)
 
-  override def descendants(uri: URI, limit: Long): IExtendedIterator[URI] = entries(EntryType.SubjectToId, uri, limit)
+  override def descendants(uri: URI, context: URI, limit: Long): IExtendedIterator[URI] = entries(EntryType.SubjectToId, uri, context, limit)
 
-  def entries(entryType: EntryType, uriPrefix: URI, limit: Long): IExtendedIterator[URI] = {
-    val uriBytes = uriPrefix.toString.getBytes("UTF-8")
-    val prefix = new Array[Byte](uriBytes.length + 1)
-    prefix(0) = entryType.id.toByte
-    System.arraycopy(uriBytes, 0, prefix, 1, uriBytes.length)
+  def entries(entryType: EntryType, uriPrefix: URI, context: URI, limit: Long): IExtendedIterator[URI] = {
+    val contextId = toId(if (context == null) Kvin.DEFAULT_CONTEXT else context, EntryType.ContextToId, false)
+    if (contextId == null) {
+      NiceIterator.emptyIterator()
+    } else {
+      val uriBytes = uriPrefix.toString.getBytes("UTF-8")
+      val prefix = new Array[Byte](uriBytes.length + 1)
+      prefix(0) = entryType.id.toByte
+      System.arraycopy(uriBytes, 0, prefix, 1, uriBytes.length)
 
-    val it = ids.iterator
-    var count = 0L
-    new StoreIterator[URI](it) {
-      lazy val seen = mutable.Set.empty[URI]
+      val valuesPrefix = new Array[Byte]((LONG_BYTES + 1) * 2)
 
-      override def init(): Unit = {
-        it.seek(prefix)
-      }
+      val it = ids.iterator
+      val valuesIt = values.iterator
+      var count = 0L
+      new StoreIterator[URI](it) {
+        lazy val seen = mutable.Set.empty[URI]
 
-      override def computeNext: Option[URI] = {
-        val entry = it.next
-        val key = entry.getKey
-        var done = false
-        var result: Option[URI] = None
-        while (it.hasNext && !done) {
-          if (key.startsWith(prefix) && count < limit) {
-            // create array of character bytes without prefix and without trailing 0
-            val uriBytes = new Array[Byte](key.indexOf(0) - 1)
-            System.arraycopy(key, 1, uriBytes, 0, uriBytes.length)
-            val uri = URIs.createURI(new String(uriBytes, "UTF-8"))
-            if (seen.add(uri)) {
-              count += 1
-              result = Some(uri)
-              done = true
-            }
-          } else done = true
+        override def init(): Unit = {
+          it.seek(prefix)
         }
-        result
+
+        override def computeNext: Option[URI] = {
+          val entry = it.next
+          val key = entry.getKey
+          var done = false
+          var result: Option[URI] = None
+          while (it.hasNext && !done) {
+            if (key.startsWith(prefix) && count < limit) {
+              val itemId = entry.getValue
+              System.arraycopy(itemId, 0, valuesPrefix, 0, itemId.length)
+              System.arraycopy(contextId, 0, valuesPrefix, itemId.length, contextId.length)
+              util.Arrays.fill(valuesPrefix, itemId.length + contextId.length, valuesPrefix.length, 0.asInstanceOf[Byte])
+
+              // test if there is an entry with the given context in the values table
+              valuesIt.seek(valuesPrefix)
+              if (valuesIt.hasNext() &&
+                util.Arrays.compare(valuesIt.next().getKey(), 0, itemId.length + contextId.length,
+                  valuesPrefix, 0, itemId.length + contextId.length) == 0) {
+
+                // create array of character bytes without prefix and without trailing 0
+                val uriBytes = new Array[Byte](key.indexOf(0) - 1)
+                System.arraycopy(key, 1, uriBytes, 0, uriBytes.length)
+                val uri = URIs.createURI(new String(uriBytes, "UTF-8"))
+                if (seen.add(uri)) {
+                  count += 1
+                  result = Some(uri)
+                  done = true
+                }
+              }
+            } else done = true
+          }
+          result
+        }
+
+        override def close(): Unit = {
+            try {
+              if (open) valuesIt.close()
+            } finally {
+              super.close()
+            }
+        }
       }
     }
   }
 
-  override def properties(item: URI): IExtendedIterator[URI] = {
+  override def properties(item: URI, context: URI): IExtendedIterator[URI] = {
+    val contextId = toId(if (context == null) Kvin.DEFAULT_CONTEXT else context, EntryType.ContextToId, generate = false)
     val itemId = toId(item, EntryType.SubjectToId, generate = false)
-    if (itemId == null) NiceIterator.emptyIterator[URI] else {
-      val prefix = new Array[Byte](itemId.length + java.lang.Long.BYTES + 1)
+    if (contextId == null || itemId == null) NiceIterator.emptyIterator[URI] else {
+      val itemAndContextId = new Array[Byte](contextId.length + itemId.length)
+      System.arraycopy(itemId, 0, itemAndContextId, 0, itemId.length)
+      System.arraycopy(contextId, 0, itemAndContextId, itemId.length, contextId.length)
+
+      val prefix = new Array[Byte](itemId.length + contextId.length + java.lang.Long.BYTES + 1)
       System.arraycopy(itemId, 0, prefix, 0, itemId.length)
+      System.arraycopy(contextId, 0, prefix, itemId.length, contextId.length)
 
       val it = values.iterator
       var propertyId: Long = 0
@@ -388,12 +428,12 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           override def computeNext: Option[URI] = {
             val entry = it.next
             val key = entry.getKey
-            if (key.startsWith(itemId)) {
-              val propertyIdLength = varIntLength(key, itemId.length)
+            if (key.startsWith(itemAndContextId)) {
+              val propertyIdLength = varIntLength(key, itemId.length + contextId.length)
               val propertyIdBytes = new Array[Byte](propertyIdLength)
-              System.arraycopy(key, itemId.length, propertyIdBytes, 0, propertyIdBytes.length)
+              System.arraycopy(key, itemId.length + contextId.length, propertyIdBytes, 0, propertyIdBytes.length)
               propertyId = Varint.readUnsigned(ByteBuffer.wrap(propertyIdBytes))
-              Varint.writeUnsigned(prefix, itemId.length, propertyId + 1)
+              Varint.writeUnsigned(prefix, contextId.length + itemId.length, propertyId + 1)
               // go to next property
               it.seek(prefix)
               toUri(propertyIdBytes, EntryType.PropertyToId)
@@ -429,24 +469,26 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           val entry = it.next
           val key = entry.getKey
           val keyBb = ByteBuffer.wrap(key)
+
           val itemIdLength = Varint.firstToLength(keyBb.get(keyBb.position()))
           val newItemId = Varint.readUnsigned(keyBb)
           if (newItemId != itemId) {
             item = toUri(subArray(key, 0, itemIdLength), EntryType.SubjectToId).getOrElse(null)
             itemId = newItemId
           }
-          val propertyIdLength = Varint.firstToLength(keyBb.get(keyBb.position()))
-          val newPropertyId = Varint.readUnsigned(keyBb)
-          if (newPropertyId != propertyId) {
-            property = toUri(subArray(key, itemIdLength, propertyIdLength), EntryType.PropertyToId).getOrElse(null)
-            propertyId = newPropertyId
-          }
           val contextIdLength = Varint.firstToLength(keyBb.get(keyBb.position()))
           val newContextId = Varint.readUnsigned(keyBb)
           if (newContextId != contextId) {
-            context = toUri(subArray(key, itemIdLength + propertyIdLength, contextIdLength), EntryType.ContextToId).getOrElse(null)
+            context = toUri(subArray(key, itemIdLength, contextIdLength), EntryType.ContextToId).getOrElse(null)
             contextId = newContextId
           }
+          val propertyIdLength = Varint.firstToLength(keyBb.get(keyBb.position()))
+          val newPropertyId = Varint.readUnsigned(keyBb)
+          if (newPropertyId != propertyId) {
+            property = toUri(subArray(key, itemIdLength + contextIdLength, propertyIdLength), EntryType.PropertyToId).getOrElse(null)
+            propertyId = newPropertyId
+          }
+
           if (item != null && property != null && context != null) {
             val time = readVarint(keyBb)
             val seq: Int = if (keyBb.hasRemaining) readVarint(keyBb).toInt else 0
@@ -655,7 +697,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
                     begin: Long = 0L, limit: Long = 0L, interval: Long = 0L): IExtendedIterator[KvinTuple] = {
     val currentContext = if (context == null) Kvin.DEFAULT_CONTEXT else context
     val propertiesIt: IExtendedIterator[URI] = if (property == null) {
-      properties(item)
+      properties(item, context)
     } else {
       WrappedIterator.create(List(property).asJava.iterator())
     }

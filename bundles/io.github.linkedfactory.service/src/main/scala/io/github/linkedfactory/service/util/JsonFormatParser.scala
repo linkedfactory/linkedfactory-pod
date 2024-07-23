@@ -39,7 +39,7 @@ object JsonFormatParser extends Loggable {
     factory
   }
 
-  def parseItem(rootItem: URI, json: JValue, currentTime: Long = System.currentTimeMillis): Box[List[KvinTuple]] = {
+  def parseItem(rootItem: URI, context: URI, json: JValue, currentTime: Long = System.currentTimeMillis): Box[List[KvinTuple]] = {
     var activeContexts = List[JValue]()
 
     def collectErrors(a: Box[List[KvinTuple]], b: Box[List[KvinTuple]]): Box[List[KvinTuple]] = {
@@ -101,13 +101,13 @@ object JsonFormatParser extends Loggable {
 
           parseValue((fields \ "value").toOpt.getOrElse(fields \ "v")) match {
             case Full(value) =>
-              Full(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, time, seqNr, value))
+              Full(new KvinTuple(item, property, context, time, seqNr, value))
             case _ =>
               Failure("Invalid value for item \"" + item + "\" and property \"" + property + "\".")
           }
         case other => parseValue(other) match {
           case Full(value) =>
-            Full(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, currentTime, value))
+            Full(new KvinTuple(item, property, context, currentTime, value))
           case _ =>
             Failure("Invalid value for item \"" + item + "\" and property \"" + property + "\".")
         }

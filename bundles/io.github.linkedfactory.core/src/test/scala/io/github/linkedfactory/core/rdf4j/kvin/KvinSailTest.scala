@@ -88,7 +88,7 @@ class KvinSailTest {
 
     sailRepository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
       override def createService(url: String) = {
-        val service = new KvinFederatedService(store, getExecutorService _, false)
+        val service = new KvinFederatedService(store, getExecutorService _, null,false)
         service
       }
     })

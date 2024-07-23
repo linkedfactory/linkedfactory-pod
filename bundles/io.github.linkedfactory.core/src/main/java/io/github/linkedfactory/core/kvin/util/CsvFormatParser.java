@@ -41,12 +41,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class CsvFormatParser {
-	final static Logger logger = LoggerFactory.getLogger(CsvFormatParser.class);
-	final static Pattern itemProperty = Pattern.compile("(?:((?:\\@|\\>|[^>@])+)@)?((?:\\@|\\>|[^>@])+)");
-	final URI base;
-	final List<Pair<URI, URI>> itemProperties;
-	CSVReader csvReader;
-	char separator;
+	protected final static Logger logger = LoggerFactory.getLogger(CsvFormatParser.class);
+	protected final static Pattern itemProperty = Pattern.compile("(?:((?:\\@|\\>|[^>@])+)@)?((?:\\@|\\>|[^>@])+)");
+	protected final URI base;
+	protected final List<Pair<URI, URI>> itemProperties;
+	protected CSVReader csvReader;
+	protected char separator;
+	protected URI context = Kvin.DEFAULT_CONTEXT;
 
 	public CsvFormatParser(URI base, char separator, InputStream content) throws IOException {
 		this.base = base;
@@ -155,7 +156,7 @@ public class CsvFormatParser {
 								String valueStr = line[column].trim();
 								Object value = parseValue(valueStr);
 								tuple = new KvinTuple(itemProperty.getFirst(), itemProperty.getSecond(),
-										Kvin.DEFAULT_CONTEXT, time, value);
+										context, time, value);
 							}
 							column++;
 						}
@@ -238,5 +239,14 @@ public class CsvFormatParser {
 		}
 		// TODO - support json values
 		return value;
+	}
+
+	public CsvFormatParser setContext(URI context) {
+		this.context = context;
+		return this;
+	}
+
+	public URI getContext() {
+		return context;
 	}
 }

@@ -15,6 +15,7 @@
  */
 package io.github.linkedfactory.service.test
 
+import io.github.linkedfactory.core.kvin.Kvin
 import io.github.linkedfactory.service.util.{LineProtocolParser, Parser, Tokenizer}
 import net.liftweb.common.Failure
 import org.junit.Test
@@ -31,9 +32,10 @@ class LineProtocolParserTest {
   def test = {
     val p = new Parser
     val time = System.currentTimeMillis
+    val context = Kvin.DEFAULT_CONTEXT
 
     // int value
-    val d1 = p.parse("""http://example.org/intProperty,item=http://example.org/item value=42i""", time)
+    val d1 = p.parse("""http://example.org/intProperty,item=http://example.org/item value=42i""", context, time)
     Assert.assertEquals(URIs.createURI("http://example.org/item"), d1.item)
     Assert.assertEquals(URIs.createURI("http://example.org/intProperty"), d1.property)
     // timestamp not given, should be set to current time
@@ -41,7 +43,7 @@ class LineProtocolParserTest {
     Assert.assertEquals(42, d1.value)
 
     // string value with escaped characters
-    val d2 = p.parse("http://example.org/stringProperty,item=http://example.org/item value=\"escaped\\ characters:\\\t\\ \\\"\\=\\,\"", time)
+    val d2 = p.parse("http://example.org/stringProperty,item=http://example.org/item value=\"escaped\\ characters:\\\t\\ \\\"\\=\\,\"", context, time)
     Assert.assertEquals(URIs.createURI("http://example.org/item"), d2.item)
     Assert.assertEquals(URIs.createURI("http://example.org/stringProperty"), d2.property)
     // timestamp not given, should be set to current time
@@ -49,7 +51,7 @@ class LineProtocolParserTest {
     Assert.assertEquals("escaped characters:\t \"=,", d2.value)
 
     // double value (default) and timestamp in ns
-    val d3 = p.parse("""http://example.org/property\,type\=Double,item=http://example.org/item value=23 1529592952925259295""", time)
+    val d3 = p.parse("""http://example.org/property\,type\=Double,item=http://example.org/item value=23 1529592952925259295""", context, time)
     Assert.assertEquals(URIs.createURI("http://example.org/item"), d3.item)
     Assert.assertEquals(URIs.createURI("http://example.org/property,type=Double"), d3.property)
     // timestamp given (in nanoseconds)
@@ -58,7 +60,7 @@ class LineProtocolParserTest {
 
     // boolean value (false) and additional tag b, field d
     // FIXME: additional tags and fields are parsed, but ignored
-    val d4 = p.parse("""a,item=http://example.org/item,b=c value=f,d=t""", time)
+    val d4 = p.parse("""a,item=http://example.org/item,b=c value=f,d=t""", context, time)
     Assert.assertEquals(URIs.createURI("http://example.org/item"), d4.item)
     Assert.assertEquals(URIs.createURI("a"), d4.property)
    // timestamp not given, should be set to current time
@@ -79,6 +81,7 @@ class LineProtocolParserTest {
     val l = """http://example.org/property,item=http://example.org/item value=42i 1529592952925259295"""
     //val l = """http://example.org/property,item=http://example.org/item value=42i"""
 
+    val context = Kvin.DEFAULT_CONTEXT
     val p = new Parser
 
     // HOTspot warm-up
@@ -90,12 +93,12 @@ class LineProtocolParserTest {
         if (i == 1) println("tokenizer: " + d)
       }
       // parser
-      val d = p.parse(l)
+      val d = p.parse(l, context)
       if (i == 1) println("parser: " + d)
       // regex
       l match {
         case LinePattern(property, item, value, time) =>
-          val d = LineProtocolParser.mkItemData(property, item, value, time)
+          val d = LineProtocolParser.mkItemData(property, item, context, value, time)
           if (i == 1) println("regex: " + d)
         case o @ _ => Failure("Invalid line: " + o)
       }
@@ -113,14 +116,14 @@ class LineProtocolParserTest {
 
     time = System.currentTimeMillis
     for (i <- 1 to iterations) {
-      p.parse(l)
+      p.parse(l, context)
     }
     println(iterations + " (Parser): " + (System.currentTimeMillis - time) + "ms")
 
     time = System.currentTimeMillis
     for (i <- 1 to iterations) {
       l match {
-        case LinePattern(property, item, value, time) => LineProtocolParser.mkItemData(property, item, value, time)
+        case LinePattern(property, item, value, time) => LineProtocolParser.mkItemData(property, item, context, value, time)
         case o @ _ => Failure("Invalid line: " + o)
       }
     }

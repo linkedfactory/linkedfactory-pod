@@ -32,7 +32,6 @@ import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 
 import java.util.*;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -183,7 +182,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
             if (subjectValue != null && subjectValue.isIRI()) {
                 Parameters params = scanner.getParameters(stmt.getObjectVar());
-                return new KvinEvaluationUtil(kvin).evaluate(vf, bs, params == null ? new Parameters() : params, stmt);
+                return new KvinEvaluationUtil(kvin).evaluate(vf, bs, params == null ? new Parameters() : params, stmt, dataset);
             }
         }
         return new EmptyIteration<>();
@@ -310,7 +309,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
     @Override
     public QueryEvaluationStep precompile(TupleExpr expr, QueryEvaluationContext context) {
         if (expr instanceof KvinFetch) {
-            return new KvinFetchEvaluationStep(KvinEvaluationStrategy.this, (KvinFetch) expr);
+            return new KvinFetchEvaluationStep(KvinEvaluationStrategy.this, (KvinFetch) expr, context);
         }
         return super.precompile(expr, context);
     }

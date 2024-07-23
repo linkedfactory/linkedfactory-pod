@@ -1,5 +1,7 @@
 package io.github.linkedfactory.core.rdf4j;
 
+import com.google.inject.Binding;
+import com.google.inject.Key;
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.http.KvinHttp;
 import io.github.linkedfactory.core.rdf4j.aas.AasFederatedService;
@@ -7,31 +9,23 @@ import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinFederatedService;
 import io.github.linkedfactory.core.rdf4j.kvin.functions.DateTimeFunction;
 import net.enilink.komma.model.IModelSet;
-
-import java.util.Optional;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
-import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolverClient;
 import org.eclipse.rdf4j.query.algebra.evaluation.function.FunctionRegistry;
 import org.eclipse.rdf4j.repository.Repository;
-import org.osgi.service.component.annotations.Activate;
-import org.osgi.service.component.annotations.Component;
-import org.osgi.service.component.annotations.Deactivate;
-import org.osgi.service.component.annotations.Reference;
+import org.osgi.service.component.annotations.*;
 
-import com.google.inject.Binding;
-import com.google.inject.Key;
+import java.util.Optional;
 
 @Component
 public class FederatedServiceComponent {
 	IModelSet ms;
 	Kvin kvin;
 	AbstractFederatedServiceResolver serviceResolver;
+	@Reference(cardinality = ReferenceCardinality.OPTIONAL)
+	volatile ContextProvider contextProvider;
 
 	@Activate
 	void activate() {
@@ -50,10 +44,15 @@ public class FederatedServiceComponent {
 						if (serviceUrl.startsWith("aas-api:")) {
 							return new AasFederatedService(serviceUrl.replaceFirst("^aas-api:", ""), this::getExecutorService);
 						} else if (serviceUrl.equals("kvin:")) {
-							return new KvinFederatedService(kvin, this::getExecutorService, false);
+							return new KvinFederatedService(kvin,
+									this::getExecutorService,
+									() -> contextProvider == null ? Kvin.DEFAULT_CONTEXT : contextProvider.getContext(),
+									false);
 						} else if (getKvinServiceUrl(serviceUrl).isPresent()) {
 							String url = getKvinServiceUrl(serviceUrl).get();
-							return new KvinFederatedService(new KvinHttp(url), this::getExecutorService, true);
+							return new KvinFederatedService(new KvinHttp(url), this::getExecutorService,
+									() -> contextProvider == null ? Kvin.DEFAULT_CONTEXT : contextProvider.getContext(),
+									true);
 						}
 						return null;
 					}

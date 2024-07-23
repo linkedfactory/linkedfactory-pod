@@ -15,9 +15,10 @@
  */
 package io.github.linkedfactory.service.snippet
 
+import io.github.linkedfactory.core.kvin.Kvin
 import io.github.linkedfactory.service.Data
 import net.enilink.komma.core.IEntity
-import net.enilink.platform.lift.util.{AjaxHelpers, CurrentContext}
+import net.enilink.platform.lift.util.{AjaxHelpers, CurrentContext, Globals}
 import net.liftweb.common.{Empty, Full}
 import net.liftweb.http.js.JsCmds._
 import net.liftweb.util.ClearNodes
@@ -33,7 +34,7 @@ class Items {
     AjaxHelpers.onEvents("onclick" :: Nil, _ => {
       val item = c.subject.asInstanceOf[IEntity]
       val result = if (item.getURI != null && Data.kvin.isDefined) {
-        if (Data.kvin.get.delete(item.getURI)) {
+        if (Data.kvin.get.delete(item.getURI, Globals.contextModel.vend.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT))) {
           item.getEntityManager.removeRecursive(item, true)
           Full(Alert("Test"))
         }

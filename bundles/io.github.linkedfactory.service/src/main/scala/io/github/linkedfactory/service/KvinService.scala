@@ -20,6 +20,7 @@ import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.service.util.{JsonFormatParser, LineProtocolParser}
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}
+import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.Box.box2Iterable
 import net.liftweb.common._
 import net.liftweb.http.rest.RestHelper
@@ -234,7 +235,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
-    JsonFormatParser.parseItem(parentUri, json, currentTime) map ( _.foreach { tuple =>
+    JsonFormatParser.parseItem(parentUri, contextModelUri, json, currentTime) map ( _.foreach { tuple =>
         store.put(tuple)
     })
   }
@@ -260,7 +261,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
     try {
       val separator = S.param("separator").map(_.trim).filter(_.nonEmpty).map(_.charAt(0)).getOrElse(',')
-      val tuples : IExtendedIterator[KvinTuple] = new CsvFormatParser(parentUri, separator, in).parse()
+      val parser = new CsvFormatParser(parentUri, separator, in)
+      parser.setContext(contextModelUri)
+      val tuples : IExtendedIterator[KvinTuple] = parser.parse()
       store.put(tuples)
       Empty
     } catch {
@@ -273,7 +276,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
-    LineProtocolParser.parseLines(parentUri, is, currentTime) map ( _.foreach { tuple =>
+    LineProtocolParser.parseLines(parentUri, contextModelUri, is, currentTime) map ( _.foreach { tuple =>
         store.put(tuple)
     })
   }
@@ -297,14 +300,14 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         property <- {
           (S.param("property") or S.param("properties")).map {
             _.split("\\s+").flatMap { s => tryo(URIs.createURI(s)) }.toList
-          } openOr store.properties(item).toList.asScala
+          } openOr store.properties(item, contextModelUri).toList.asScala
         }
       ) yield {
         val propertyData = (interval, op) match {
           case (_, Full(op)) if interval > 0 =>
-            store.fetch(item, property, Kvin.DEFAULT_CONTEXT, end, begin, limit, interval, op)
+            store.fetch(item, property, contextModelUri, end, begin, limit, interval, op)
           case _ =>
-            store.fetch(item, property, Kvin.DEFAULT_CONTEXT, end, begin, limit, 0, null)
+            store.fetch(item, property, contextModelUri, end, begin, limit, 0, null)
         }
         property.toString -> propertyData
       }
@@ -326,11 +329,11 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         val properties = {
           (S.param("property") or S.param("properties")).map {
             _.split("\\s+").flatMap { s => tryo(URIs.createURI(s)) }.toList
-          } openOr store.properties(item).toList.asScala
+          } openOr store.properties(item, contextModelUri).toList.asScala
         }
         count + properties.foldLeft(0L) {
           case (count2: Long, property: URI) =>
-            count2 + store.delete(item, property, Kvin.DEFAULT_CONTEXT, end, begin)
+            count2 + store.delete(item, property, contextModelUri, end, begin)
         }
     }
 
@@ -347,7 +350,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       }
     }
 
-    val descendants = store.descendants(uri).iterator.asScala.map {
+    val descendants = store.descendants(uri, contextModelUri).iterator.asScala.map {
       uri => JObject(JField("@id", uri.toString) :: Nil)
     }
     JArray(descendants.toList)
@@ -355,9 +358,11 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
   def getProperties(path: List[String]): JArray = {
     val uri = getSingleItem(path)
-    val properties = store.properties(uri).iterator.asScala.map {
+    val properties = store.properties(uri, contextModelUri).iterator.asScala.map {
       uri => JObject(JField("@id", uri.toString) :: Nil)
     }
     JArray(properties.toList)
   }
+
+  def contextModelUri: URI = Data.currentModel.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT)
 }

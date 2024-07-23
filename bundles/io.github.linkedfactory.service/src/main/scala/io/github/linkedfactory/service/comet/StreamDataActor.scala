@@ -18,6 +18,7 @@ package io.github.linkedfactory.service.comet
 import io.github.linkedfactory.core.kvin.{Kvin, KvinListener, KvinTuple}
 import io.github.linkedfactory.service.Data
 import net.enilink.komma.core.{URI, URIs}
+import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.Full
 import net.liftweb.http.CometActor
 import net.liftweb.http.js.JE.JsRaw
@@ -59,6 +60,7 @@ class StreamDataActor extends CometActor with KvinListener {
   var itemsOrPatterns = Set.empty[URI]
   var prefixes: TreeSet[String] = null
   var items = mutable.Map.empty[URI, mutable.Map[URI, PropertyInfo]]
+  var context = Kvin.DEFAULT_CONTEXT
 
   override def lifespan = Full(5.second)
 
@@ -67,10 +69,10 @@ class StreamDataActor extends CometActor with KvinListener {
   /**
    * Expand prefixes into real data points
    */
-  def computeItems(kvin: Kvin, urisOrPatterns: Iterable[URI]): List[URI] = urisOrPatterns.flatMap {
+  def computeItems(kvin: Kvin, context: URI, urisOrPatterns: Iterable[URI]): List[URI] = urisOrPatterns.flatMap {
     case uri if uri.lastSegment == "**" => {
       val prefix = trimStar(uri)
-      kvin.descendants(prefix).toList.asScala
+      kvin.descendants(prefix, context).toList.asScala
     }
     // convert to relative URI
     case uri if "r".equals(uri.scheme()) => Some(URIs.createURI(uri.toString.substring(2)))
@@ -80,7 +82,7 @@ class StreamDataActor extends CometActor with KvinListener {
   /**
    * Retrieve item properties
    */
-  def computeProperties(kvin: Kvin, item: URI): List[URI] = kvin.properties(item).iterator.asScala.toList
+  def computeProperties(kvin: Kvin, item: URI, context: URI): List[URI] = kvin.properties(item, context).iterator.asScala.toList
 
   def propertyInfos(item: URI) = items.getOrElseUpdate(item, mutable.Map.empty[URI, PropertyInfo])
 
@@ -89,13 +91,13 @@ class StreamDataActor extends CometActor with KvinListener {
   override def render = {
     val jsCmd = Data.kvin map { kvin =>
       val data = for ((item, propInfos) <- items) yield {
-        val itemData = computeProperties(kvin, item) map { property =>
+        val itemData = computeProperties(kvin, item, context) map { property =>
           val propInfo = propertyInfo(property, propInfos)
           var timestamp = propInfo.lastTimestamp
           val end = if (timestamp == 0L) KvinTuple.TIME_MAX_VALUE else timestamp
 
           val field = JField(property.toString, JArray(
-            kvin.fetch(item, property, Kvin.DEFAULT_CONTEXT, end, 0L, limit, 0L, null)
+            kvin.fetch(item, property,context, end, 0L, limit, 0L, null)
               .iterator.asScala.map { e =>
               timestamp = timestamp.max(e.time)
               ("time", e.time) ~ ("seqNr", decompose(e.seqNr)) ~ ("value", decompose(e.value))
@@ -113,6 +115,7 @@ class StreamDataActor extends CometActor with KvinListener {
   }
 
   override def localSetup {
+    context = Globals.contextModel.vend.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT)
     limit = attributes.get("limit").map(_.toInt).getOrElse(DEFAULT_LIMIT)
     itemsOrPatterns = attributes.get("items").map(_.split("\\s+").filter(_.nonEmpty).map(URIs.createURI(_, true)))
       .filter(_.nonEmpty).map(_.toSet).getOrElse {
@@ -126,7 +129,7 @@ class StreamDataActor extends CometActor with KvinListener {
       }
     }
     Data.kvin map { kvin =>
-      items = mutable.Map(computeItems(kvin, itemsOrPatterns).map { (_, mutable.Map.empty[URI, PropertyInfo]) }: _*)
+      items = mutable.Map(computeItems(kvin, context, itemsOrPatterns).map { (_, mutable.Map.empty[URI, PropertyInfo]) }: _*)
       kvin.addListener(this)
     }
   }

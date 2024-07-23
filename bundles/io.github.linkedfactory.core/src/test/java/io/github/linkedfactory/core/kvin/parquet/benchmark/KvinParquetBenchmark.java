@@ -148,7 +148,7 @@ public class KvinParquetBenchmark {
         var resolver = new BaseFederatedServiceResolver() {
             @Override
             protected FederatedService createService(String s) throws QueryEvaluationException {
-                return new KvinFederatedService(store, this::getExecutorService, false);
+                return new KvinFederatedService(store, this::getExecutorService, null, false);
             }
         };
         repository.setFederatedServiceResolver(resolver);

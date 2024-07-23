@@ -322,19 +322,19 @@ public class KvinPartitioned implements Kvin {
 	}
 
 	@Override
-	public boolean delete(URI item) {
+	public boolean delete(URI item, URI context) {
 		Lock readLock = readLock();
 		try {
-			return hotStore.delete(item);
+			return hotStore.delete(item, context);
 		} finally {
 			readLock.release();
 		}
 	}
 
 	@Override
-	public IExtendedIterator<URI> descendants(URI item) {
+	public IExtendedIterator<URI> descendants(URI item, URI context) {
 		Lock readLock = readLock();
-		IExtendedIterator<URI> results = hotStore.descendants(item);
+		IExtendedIterator<URI> results = hotStore.descendants(item, context);
 		return new NiceIterator<>() {
 			boolean closed;
 
@@ -371,9 +371,9 @@ public class KvinPartitioned implements Kvin {
 	}
 
 	@Override
-	public IExtendedIterator<URI> descendants(URI item, long limit) {
+	public IExtendedIterator<URI> descendants(URI item, URI context, long limit) {
 		Lock readLock = readLock();
-		IExtendedIterator<URI> results = hotStore.descendants(item, limit);
+		IExtendedIterator<URI> results = hotStore.descendants(item, context, limit);
 		return new NiceIterator<>() {
 			boolean closed;
 
@@ -410,15 +410,15 @@ public class KvinPartitioned implements Kvin {
 	}
 
 	@Override
-	public IExtendedIterator<URI> properties(URI item) {
+	public IExtendedIterator<URI> properties(URI item, URI context) {
 		Set<URI> properties = new HashSet<>();
 		Lock readLock = readLock();
 		try {
-			properties.addAll(hotStore.properties(item).toList());
+			properties.addAll(hotStore.properties(item, context).toList());
 			if (hotStoreArchive != null) {
-				properties.addAll(hotStoreArchive.properties(item).toList());
+				properties.addAll(hotStoreArchive.properties(item, context).toList());
 			}
-			properties.addAll(archiveStore.properties(item).toList());
+			properties.addAll(archiveStore.properties(item, context).toList());
 		} finally {
 			readLock.release();
 		}

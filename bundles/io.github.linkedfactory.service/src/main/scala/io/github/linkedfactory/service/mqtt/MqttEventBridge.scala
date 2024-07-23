@@ -16,8 +16,9 @@
 package io.github.linkedfactory.service.mqtt
 
 import com.google.common.cache.{Cache, CacheBuilder}
+import io.github.linkedfactory.core.kvin.Kvin
 import io.github.linkedfactory.service.ItemDataEvents
-import io.github.linkedfactory.service.util.{JsonFormatParser}
+import io.github.linkedfactory.service.util.JsonFormatParser
 import net.enilink.komma.core.{IReference, URIs}
 import net.enilink.komma.em.concepts.IResource
 import net.enilink.platform.core.PluginConfigModel
@@ -93,7 +94,7 @@ class MqttEventBridge {
                   val topic = "linkedfactory/itemEvent/external"
                   val item = "http://" + authority + "/" + path
 
-                  JsonFormatParser.parseItem(URIs.createURI(item), json) match {
+                  JsonFormatParser.parseItem(URIs.createURI(item), Kvin.DEFAULT_CONTEXT, json) match {
                     case Full(values) => values.map { tuple =>
                         val properties = new HashMap[String, Any]
                         properties.put(ItemDataEvents.ITEM, item)

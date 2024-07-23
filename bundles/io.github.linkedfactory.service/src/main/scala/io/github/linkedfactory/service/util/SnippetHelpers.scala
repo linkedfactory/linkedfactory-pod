@@ -23,7 +23,7 @@ import net.liftweb.http.S
 object SnippetHelpers {
   import scala.language.implicitConversions
   
-  implicit def uriToStr(uri: URI) = uri.toString
+  implicit def uriToStr(uri: URI): String = uri.toString
   def paramNotEmpty(name: String, msg: String) = S.param(name).map(_.trim).filterMsg(name + ":" + msg)(!_.isEmpty)
 
   def doAlert[T](box: Box[T]) = box match {

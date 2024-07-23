@@ -16,6 +16,7 @@
 package io.github.linkedfactory.service
 
 import io.github.linkedfactory.core.kvin.Kvin
+import io.github.linkedfactory.core.rdf4j.ContextProvider
 import net.enilink.komma.core.{IReference, URI, URIs}
 import net.enilink.komma.em.concepts.IResource
 import net.enilink.platform.lift.LiftService
@@ -64,6 +65,13 @@ class LiftModule {
   var shutdownHooks: List[() => Any] = Nil
 
   def boot {
+    // provide current context for Kvin operations
+    Option(FrameworkUtil.getBundle(getClass)).foreach { bundle =>
+      bundle.getBundleContext.registerService(classOf[ContextProvider], new ContextProvider {
+        def getContext(): URI = Globals.contextModel.vend.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT)
+      }, new util.Hashtable[String, Any]())
+    }
+
     // create version info from commit ID and bundle version
     Option(FrameworkUtil.getBundle(getClass)).foreach { bundle =>
       val commitId = Option(bundle.getHeaders.get("Git-Commit-Id"))

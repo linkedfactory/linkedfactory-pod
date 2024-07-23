@@ -174,7 +174,7 @@ object Data {
         manager.setNamespace("factory", URIs.createURI(NAMESPACE))
 
         // re-create existing hierarchy from valuestore
-        kvin.descendants(URIs.createURI("")).iterator.asScala.foreach {
+        kvin.descendants(URIs.createURI(""), model.getURI).iterator.asScala.foreach {
           uri => createHierarchy(uri, manager)
         }
     }
@@ -193,7 +193,7 @@ object Data {
     }
   }
 
-  def currentModel: Box[IModel] = Globals.contextModelSet.vend.map(_.getModel(modelURI, false)).filter(_ != null)
+  def currentModel: Box[IModel] = Globals.contextModel.vend or Globals.contextModelSet.vend.map(_.getModel(modelURI, false)).filter(_ != null)
 
   def pathToURI(relativePath: Seq[String]) = {
     S.request map { r => r.hostAndPath } map (URIs.createURI(_).appendSegments(relativePath.toArray)) openOrThrowException ("Invocation outside of request.")

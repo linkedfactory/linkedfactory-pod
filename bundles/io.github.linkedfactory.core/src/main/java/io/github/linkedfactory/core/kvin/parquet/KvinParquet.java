@@ -515,8 +515,8 @@ public class KvinParquet implements Kvin {
 
 		ByteBuffer idBuffer = ByteBuffer.allocate(Long.BYTES * 3);
 		idBuffer.putLong(itemId);
-		idBuffer.putLong(propertyId);
 		idBuffer.putLong(contextId);
+		idBuffer.putLong(propertyId);
 		return idBuffer.array();
 	}
 
@@ -584,20 +584,20 @@ public class KvinParquet implements Kvin {
 	}
 
 	private FilterPredicate generateFetchFilter(IdMappings idMappings) {
-		if (idMappings.propertyId != 0L && idMappings.contextId != 0L) {
+		if (idMappings.itemId != 0L && idMappings.propertyId != 0L && idMappings.contextId != 0L) {
 			ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * 3);
 			keyBuffer.putLong(idMappings.itemId);
-			keyBuffer.putLong(idMappings.propertyId);
 			keyBuffer.putLong(idMappings.contextId);
+			keyBuffer.putLong(idMappings.propertyId);
 			return eq(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array()));
-		} else if (idMappings.propertyId != 0L) {
+		} else if (idMappings.contextId != 0L) {
 			ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * 2);
 			keyBuffer.putLong(idMappings.itemId);
-			keyBuffer.putLong(idMappings.propertyId);
+			keyBuffer.putLong(idMappings.contextId);
 			return and(gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array())),
 					lt(FilterApi.binaryColumn("id"),
 							Binary.fromConstantByteArray(ByteBuffer.allocate(Long.BYTES * 2)
-									.putLong(idMappings.itemId).putLong(idMappings.propertyId + 1).array())));
+									.putLong(idMappings.itemId).putLong(idMappings.contextId + 1).array())));
 		} else {
 			ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES);
 			keyBuffer.putLong(idMappings.itemId);
@@ -637,6 +637,8 @@ public class KvinParquet implements Kvin {
 
 	public URI getProperty(ByteBuffer idBuffer) throws IOException {
 		// skip item id
+		idBuffer.getLong();
+		// skip context id
 		idBuffer.getLong();
 		return getProperty(idBuffer.getLong());
 	}
@@ -683,11 +685,11 @@ public class KvinParquet implements Kvin {
 	private synchronized IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) throws IOException {
 		Lock readLock = readLock();
 		try {
+			URI contextFinal = context != null ? context : Kvin.DEFAULT_CONTEXT;
 			// filters
-			IdMappings idMappings = getIdMappings(item, property, context);
-			if (idMappings.itemId == 0L
-					|| property != null && idMappings.propertyId == 0L
-					|| context != null && idMappings.contextId == 0L) {
+			IdMappings idMappings = getIdMappings(item, property, contextFinal);
+			if (idMappings.itemId == 0L || idMappings.contextId == 0L
+					|| property != null && idMappings.propertyId == 0L) {
 				// ensure read lock is freed
 				readLock.release();
 				return NiceIterator.emptyIterator();
@@ -822,7 +824,7 @@ public class KvinParquet implements Kvin {
 
 				KvinTuple convert(GenericRecord record) throws IOException {
 					URI p = property != null ? property : getProperty((ByteBuffer) record.get(0));
-					return recordToTuple(item, p, context, record);
+					return recordToTuple(item, p, contextFinal, record);
 				}
 
 				void nextReaders() throws IOException {
@@ -855,7 +857,7 @@ public class KvinParquet implements Kvin {
 	}
 
 	@Override
-	public boolean delete(URI item) {
+	public boolean delete(URI item, URI context) {
 		return false;
 	}
 
@@ -924,21 +926,23 @@ public class KvinParquet implements Kvin {
 	}
 
 	@Override
-	public IExtendedIterator<URI> descendants(URI item) {
+	public IExtendedIterator<URI> descendants(URI item, URI context) {
 		return null;
 	}
 
 	@Override
-	public IExtendedIterator<URI> descendants(URI item, long limit) {
+	public IExtendedIterator<URI> descendants(URI item, URI context, long limit) {
 		return null;
 	}
 
 	private List<URI> getProperties(long itemId, long contextId) {
 		try {
-			ByteBuffer lowKey = ByteBuffer.allocate(Long.BYTES);
+			ByteBuffer lowKey = ByteBuffer.allocate(Long.BYTES * 2);
 			lowKey.putLong(itemId);
-			ByteBuffer highKey = ByteBuffer.allocate(Long.BYTES * 2);
+			lowKey.putLong(contextId);
+			ByteBuffer highKey = ByteBuffer.allocate(Long.BYTES * 3);
 			highKey.putLong(itemId);
+			highKey.putLong(contextId);
 			highKey.putLong(Long.MAX_VALUE);
 			FilterPredicate filter = and(eq(FilterApi.booleanColumn("first"), true), and(
 					gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(lowKey.array())),
@@ -946,6 +950,7 @@ public class KvinParquet implements Kvin {
 
 			IdMappings idMappings = new IdMappings();
 			idMappings.itemId = itemId;
+			idMappings.contextId = contextId;
 			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
 			Set<Long> propertyIds = new LinkedHashSet<>();
 
@@ -955,6 +960,9 @@ public class KvinParquet implements Kvin {
 					GenericRecord record;
 					while ((record = reader.read()) != null) {
 						ByteBuffer idBb = (ByteBuffer) record.get(0);
+						// skip item id
+						idBb.getLong();
+						// skip context id
 						idBb.getLong();
 						long currentPropertyId = idBb.getLong();
 						propertyIds.add(currentPropertyId);
@@ -976,15 +984,18 @@ public class KvinParquet implements Kvin {
 	}
 
 	@Override
-	public synchronized IExtendedIterator<URI> properties(URI item) {
+	public synchronized IExtendedIterator<URI> properties(URI item, URI context) {
+		if (context == null) {
+			context = Kvin.DEFAULT_CONTEXT;
+		}
 		Lock readLock = null;
 		try {
 			readLock = readLock();
-			IdMappings idMappings = getIdMappings(item, null, null);
-			if (idMappings.itemId == 0L) {
+			IdMappings idMappings = getIdMappings(item, null, context);
+			if (idMappings.itemId == 0L || idMappings.contextId == 0L) {
 				return NiceIterator.emptyIterator();
 			}
-			List<URI> properties = getProperties(idMappings.itemId, 0L);
+			List<URI> properties = getProperties(idMappings.itemId, idMappings.contextId);
 			return WrappedIterator.create(properties.iterator());
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);

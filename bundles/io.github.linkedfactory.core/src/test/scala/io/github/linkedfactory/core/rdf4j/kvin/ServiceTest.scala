@@ -356,7 +356,7 @@ class ServiceTest {
       val executorService = Executors.newCachedThreadPool()
 
       override def createService(url: String) = {
-        val service = new KvinFederatedService(store, () => executorService, false)
+        val service = new KvinFederatedService(store, () => executorService, null, false)
         service
       }
 

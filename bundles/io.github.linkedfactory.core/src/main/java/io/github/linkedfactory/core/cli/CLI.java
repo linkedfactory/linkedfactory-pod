@@ -66,10 +66,12 @@ public class CLI {
 	}
 
 	@Command(description = "Retrieves all descendants of a given item")
-	int descendants(@Parameters(paramLabel = "<item>", defaultValue = "", description = "the target item") String item) {
+	int descendants(@Parameters(paramLabel = "<item>", defaultValue = "", description = "the target item") String item,
+	                @Parameters(paramLabel = "<context>", defaultValue = Kvin.DEFAULT_CONTEXT_VALUE, description = "the context") String context) {
 		URI itemUri = URIs.createURI(item);
+		URI contextUri = URIs.createURI(context);
 		try (Kvin store = createStore(storeLocation)) {
-			store.descendants(itemUri).forEach(d -> {
+			store.descendants(itemUri, contextUri).forEach(d -> {
 				System.out.println(d);
 			});
 		} catch (Exception e) {
@@ -80,10 +82,12 @@ public class CLI {
 	}
 
 	@Command(description = "Retrieves all properties of a given item")
-	int properties(@Parameters(paramLabel = "<item>", description = "the target item") String item) {
+	int properties(@Parameters(paramLabel = "<item>", description = "the target item") String item,
+	               @Parameters(paramLabel = "<context>", defaultValue = Kvin.DEFAULT_CONTEXT_VALUE, description = "the context") String context) {
 		URI itemUri = URIs.createURI(item);
+		URI contextUri = URIs.createURI(context);
 		try (Kvin store = createStore(storeLocation)) {
-			store.properties(itemUri).forEach(p -> {
+			store.properties(itemUri, contextUri).forEach(p -> {
 				System.out.println(p);
 			});
 		} catch (Exception e) {
@@ -117,7 +121,7 @@ public class CLI {
 				try (sink) {
 					IExtendedIterator<URI> items;
 					if ("*".equals(item)) {
-						items = store.descendants(URIs.createURI(""));
+						items = store.descendants(URIs.createURI(""), contextUri);
 					} else {
 						items = WrappedIterator.create(Arrays.asList(URIs.createURI(item)).iterator());
 					}
@@ -201,7 +205,7 @@ public class CLI {
 			try (Kvin store = createStore(cli.storeLocation)) {
 				IExtendedIterator<URI> items;
 				if ("*".equals(item)) {
-					items = store.descendants(URIs.createURI(""));
+					items = store.descendants(URIs.createURI(""), contextUri);
 				} else {
 					items = WrappedIterator.create(Arrays.asList(URIs.createURI(item)).iterator());
 				}

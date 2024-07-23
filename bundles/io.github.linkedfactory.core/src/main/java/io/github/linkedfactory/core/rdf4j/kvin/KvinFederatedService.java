@@ -1,6 +1,7 @@
 package io.github.linkedfactory.core.rdf4j.kvin;
 
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.rdf4j.ContextProvider;
 import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.core.rdf4j.kvin.query.KvinFetchOptimizer;
 import io.github.linkedfactory.core.rdf4j.kvin.query.ParameterScanner;
@@ -13,6 +14,7 @@ import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
+import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
@@ -20,10 +22,10 @@ import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryOptimizer;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
+import org.eclipse.rdf4j.query.impl.SimpleDataset;
 
 import java.util.*;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 public class KvinFederatedService implements FederatedService {
@@ -33,10 +35,12 @@ public class KvinFederatedService implements FederatedService {
     Kvin kvin;
     boolean closeKvinOnShutdown;
     Supplier<ExecutorService> executorService;
+    ContextProvider contextProvider;
 
-    public KvinFederatedService(Kvin kvin, Supplier<ExecutorService> executorService, boolean closeKvinOnShutdown) {
+    public KvinFederatedService(Kvin kvin, Supplier<ExecutorService> executorService, ContextProvider contextProvider, boolean closeKvinOnShutdown) {
         this.kvin = kvin;
         this.executorService = executorService;
+        this.contextProvider = contextProvider;
         this.closeKvinOnShutdown = closeKvinOnShutdown;
     }
 
@@ -95,7 +99,11 @@ public class KvinFederatedService implements FederatedService {
         // System.out.println(service);
 
         Map<Value, Object> valueToData = new WeakHashMap<>();
-        EvaluationStrategy strategy = new KvinEvaluationStrategy(kvin, executorService, scanner, vf, null, null, valueToData);
+        SimpleDataset dataset = new SimpleDataset();
+        if (this.contextProvider != null) {
+            dataset.addDefaultGraph(vf.createIRI(this.contextProvider.getContext().toString()));
+        }
+        EvaluationStrategy strategy = new KvinEvaluationStrategy(kvin, executorService, scanner, vf, dataset, null, valueToData);
 
         List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
         while (bindings.hasNext()) {

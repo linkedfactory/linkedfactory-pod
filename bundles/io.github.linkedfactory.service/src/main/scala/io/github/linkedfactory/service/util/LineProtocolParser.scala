@@ -36,12 +36,12 @@ import net.liftweb.util.Helpers.tryo
  * LF properties map to InfluxDB's measurements, LF items map to tags (key='item').
  */
 object LineProtocolParser extends Loggable {
-  def parseLines(rootItem: URI, is: InputStream, currentTime: Long = System.currentTimeMillis): Box[List[KvinTuple]] = {
+  def parseLines(rootItem: URI, context: URI, is: InputStream, currentTime: Long = System.currentTimeMillis): Box[List[KvinTuple]] = {
     val reader = new BufferedReader(new InputStreamReader(is))
     val p = new Parser
     // FIXME: toList -> all read into memory
     val result = LazyList.continually(reader.readLine()).takeWhile(_ != null).filter(!_.isEmpty).toList.map { l =>
-      tryo(p.parse(l, currentTime))
+      tryo(p.parse(l, context, currentTime))
     }
     reader.close()
     result.foldRight(Empty: Box[List[KvinTuple]]) {
@@ -55,11 +55,11 @@ object LineProtocolParser extends Loggable {
     }
   }
 
-  def mkItemData(property: String, item: String, value: String, time: String, currentTime: Long = System.currentTimeMillis): KvinTuple = {
+  def mkItemData(property: String, item: String, context: URI, value: String, time: String, currentTime: Long = System.currentTimeMillis): KvinTuple = {
     new KvinTuple(
       URIs.createURI(item.trim),
       URIs.createURI(property.trim),
-      Kvin.DEFAULT_CONTEXT,
+      context,
       // Note: line protocol timestamp defaults to nanosecond precision
       if (time == null || time.trim.isEmpty) currentTime else time.trim.toLong / 1000 / 1000,
       value.trim match {
@@ -77,7 +77,7 @@ object LineProtocolParser extends Loggable {
  * Simple Parser to handle line protocol entries for InfluxDB's line protocol.
  */
 class Parser {
-  def parse(input: CharSequence, currentTime: Long = System.currentTimeMillis): KvinTuple = {
+  def parse(input: CharSequence, context: URI, currentTime: Long = System.currentTimeMillis): KvinTuple = {
     val t = new Tokenizer(input)
     class ParseException(val reason: String) extends Exception(reason + " @ " + t.pos + ": '" + t.remainder + "'")
 
@@ -119,7 +119,7 @@ class Parser {
 
     // FIXME: improve error message if tag 'item' or key 'value' are missing
     // FIXME: handle additional fields (and maybe tags as different items to update?)
-    LineProtocolParser.mkItemData(measurement, tagSet("item"), fieldSet("value"), timestamp, currentTime)
+    LineProtocolParser.mkItemData(measurement, tagSet("item"), context, fieldSet("value"), timestamp, currentTime)
   }
 }
 

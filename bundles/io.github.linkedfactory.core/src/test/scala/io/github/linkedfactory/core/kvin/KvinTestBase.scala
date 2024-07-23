@@ -110,7 +110,7 @@ abstract class KvinTestBase {
 
     val item4 = itemUri(4)
     val properties = (1 to 5).map(propertyUri(_)).toSet
-    assertEquals(properties, store.properties(item4).toList.asScala.toSet)
+    assertEquals(properties, store.properties(item4, null).toList.asScala.toSet)
   }
 
   @Test
@@ -137,16 +137,16 @@ abstract class KvinTestBase {
     addData(3, valueCount)
 
     // exactly one item should exist
-    assertEquals(1, store.descendants(itemUri(1)).toList.size)
+    assertEquals(1, store.descendants(itemUri(1), null).toList.size)
     // item should have values
     assertEquals(valueCount, store.fetch(itemUri(1), valueProperty, null, 0).toList.size)
 
-    store.delete(itemUri(1))
+    store.delete(itemUri(1), null)
 
     // the number of values should be 0
     assertEquals(0, store.fetch(itemUri(1), valueProperty, null, 5).toList.size)
     // the item should not exist
-    assertEquals(0, store.descendants(itemUri(1)).toList.size)
+    assertEquals(0, store.descendants(itemUri(1), null).toList.size)
   }
 
   @Test

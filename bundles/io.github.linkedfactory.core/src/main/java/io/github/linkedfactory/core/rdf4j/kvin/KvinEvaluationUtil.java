@@ -16,11 +16,13 @@ import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
+import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.Var;
 
 import java.util.NoSuchElementException;
+import java.util.Set;
 
 import static io.github.linkedfactory.core.rdf4j.common.Conversions.getLongValue;
 import static io.github.linkedfactory.core.rdf4j.common.Conversions.toRdfValue;
@@ -48,7 +50,7 @@ public class KvinEvaluationUtil {
     }
 
     public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(ValueFactory vf,
-        BindingSet bs, Parameters params, StatementPattern stmt) {
+        BindingSet bs, Parameters params, StatementPattern stmt, Dataset dataset) {
         net.enilink.komma.core.URI item = toKommaUri(getVarValue(stmt.getSubjectVar(), bs));
         if (item == null) {
             return new EmptyIteration<>();
@@ -67,7 +69,7 @@ public class KvinEvaluationUtil {
         if (contextValue[0] != null) {
             context[0] = toKommaUri(contextValue[0]);
         }
-        if (context[0] == null) {
+        if (context[0] == null && dataset.getDefaultGraphs().isEmpty()) {
             context[0] = Kvin.DEFAULT_CONTEXT;
             contextValue[0] = vf.createIRI(context[0].toString());
         }
@@ -143,7 +145,19 @@ public class KvinEvaluationUtil {
                     // System.out.println("item=" + item + " property=" + currentProperty + " bindings=" + bs);
 
                     // create iterator with values for property
-                    it = kvin.fetch(item, predFinal, context[0], endFinal, beginFinal, limitFinal, interval, aggregationFunc);
+                    if (context[0] != null) {
+                        it = kvin.fetch(item, predFinal, context[0], endFinal, beginFinal, limitFinal, interval, aggregationFunc);
+                    } else {
+                        for (IRI defaultGraph: dataset.getDefaultGraphs()) {
+                            URI contextUri = toKommaUri(defaultGraph);
+                            it = kvin.fetch(item, predFinal, contextUri, endFinal, beginFinal, limitFinal, interval, aggregationFunc);
+                            if (it.hasNext()) {
+                                break;
+                            }
+                            it.close();
+                            it = null;
+                        }
+                    }
                 }
                 if (it != null) {
                     if (isClosed()) {

@@ -28,7 +28,12 @@ public interface Kvin extends Closeable {
 	/**
 	 * The default context that is used for <code>null</code> values.
 	 */
-	URI DEFAULT_CONTEXT = URIs.createURI("kvin:nil");
+	String DEFAULT_CONTEXT_VALUE = "kvin:nil";
+
+	/**
+	 * The default context that is used for <code>null</code> values.
+	 */
+	URI DEFAULT_CONTEXT = URIs.createURI(DEFAULT_CONTEXT_VALUE);
 
 	/**
 	 * Add a listener to be notified of changes.
@@ -102,34 +107,38 @@ public interface Kvin extends Closeable {
 	 * Deletes the given item and all of its associated values from the store.
 	 *
 	 * @param item The item URI.
+	 * @param context  The context URI.
 	 * @return <code>true</code> if item exists in the store else
 	 * <code>false</code>.
 	 */
-	boolean delete(URI item);
+	boolean delete(URI item, URI context);
 
 	/**
 	 * Returns all known sub-items of a given item.
 	 *
 	 * @param item The item URI.
+	 * @param context  The context URI.
 	 * @return A list with descendants of the given item.
 	 */
-	IExtendedIterator<URI> descendants(URI item);
+	IExtendedIterator<URI> descendants(URI item, URI context);
 
 	/**
 	 * Returns all known sub-items of a given item.
 	 *
 	 * @param item The item URI.
+	 * @param context  The context URI.
 	 * @return A list with descendants of the given item.
 	 */
-	IExtendedIterator<URI> descendants(URI item, long limit);
+	IExtendedIterator<URI> descendants(URI item, URI context, long limit);
 
 	/**
 	 * Returns all known properties of a given item.
 	 *
 	 * @param item The item URI.
+	 * @param context  The context URI.
 	 * @return A list with properties of the given item.
 	 */
-	IExtendedIterator<URI> properties(URI item);
+	IExtendedIterator<URI> properties(URI item, URI context);
 
 	/**
 	 * Closes the store and frees resources.

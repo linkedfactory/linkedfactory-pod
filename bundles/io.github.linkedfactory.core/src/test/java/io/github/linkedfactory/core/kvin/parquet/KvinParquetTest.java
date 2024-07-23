@@ -140,7 +140,7 @@ public class KvinParquetTest {
 	@Test
 	public void shouldFetchProperties() {
 		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/1");
-		IExtendedIterator<URI> properties = kvinParquet.properties(item);
+		IExtendedIterator<URI> properties = kvinParquet.properties(item, null);
 		assertNotNull(properties);
 		assertEquals(10, properties.toList().size());
 		properties.close();

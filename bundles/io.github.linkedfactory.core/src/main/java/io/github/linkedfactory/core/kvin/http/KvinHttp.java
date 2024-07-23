@@ -171,6 +171,7 @@ public class KvinHttp implements Kvin {
             uriBuilder.setParameter("item", item.toString());
             if (item != null) uriBuilder.setParameter("item", item.toString());
             if (property != null) uriBuilder.setParameter("property", property.toString());
+            if (context != null) uriBuilder.setParameter("model", context.toString());
             if (limit != null) uriBuilder.setParameter("limit", Long.toString(limit));
             if (end != null) uriBuilder.setParameter("to", Long.toString(end));
             if (begin != null) uriBuilder.setParameter("from", Long.toString(begin));
@@ -221,25 +222,26 @@ public class KvinHttp implements Kvin {
     }
 
     @Override
-    public boolean delete(URI item) {
+    public boolean delete(URI item, URI context) {
         return false;
     }
 
     @Override
-    public IExtendedIterator<URI> descendants(URI item) {
-        return descendantsInternal(item, null);
+    public IExtendedIterator<URI> descendants(URI item, URI context) {
+        return descendantsInternal(item, context, null);
     }
 
     @Override
-    public IExtendedIterator<URI> descendants(URI item, long limit) {
-        return descendantsInternal(item, limit);
+    public IExtendedIterator<URI> descendants(URI item, URI context, long limit) {
+        return descendantsInternal(item, context, limit);
     }
 
-    private IExtendedIterator<URI> descendantsInternal(URI item, Long limit) {
+    private IExtendedIterator<URI> descendantsInternal(URI item, URI context, Long limit) {
         try {
             // building url
             URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/**");
             uriBuilder.setParameter("item", item.toString());
+            if (context != null) uriBuilder.setParameter("model", context.toString());
             if (limit != null) uriBuilder.setParameter("limit", Long.toString(limit));
             java.net.URI getRequestUri = uriBuilder.build();
 
@@ -304,11 +306,12 @@ public class KvinHttp implements Kvin {
     }
 
     @Override
-    public IExtendedIterator<URI> properties(URI item) {
+    public IExtendedIterator<URI> properties(URI item, URI context) {
         try {
             // building url
             URIBuilder uriBuilder = new URIBuilder(this.hostEndpoint + "/properties");
             uriBuilder.setParameter("item", item.toString());
+            if (context != null) uriBuilder.setParameter("model", context.toString());
             java.net.URI getRequestUri = uriBuilder.build();
 
             // sending get request to the endpoint
