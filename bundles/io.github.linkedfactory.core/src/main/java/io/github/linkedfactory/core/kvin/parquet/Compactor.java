@@ -1,6 +1,5 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
-import io.github.linkedfactory.core.kvin.KvinTuple;
 import net.enilink.commons.util.Pair;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -58,7 +57,6 @@ public class Compactor {
 
 		Lock writeLock = kvinParquet.writeLock();
 		try {
-			clearCache();
 			// replace existing files with compacted files
 			if (!compactedMappings.isEmpty()) {
 				// delete compacted mapping files
@@ -84,6 +82,8 @@ public class Compactor {
 			// completely delete compaction folder
 			FileUtils.deleteDirectory(compactionFolder);
 		} finally {
+			// clear all caches
+			kvinParquet.clearCaches();
 			writeLock.release();
 		}
 	}
@@ -231,12 +231,6 @@ public class Compactor {
 			compactionFileWriter.close();
 		} finally {
 			readLock.release();
-		}
-	}
-
-	private void clearCache() {
-		synchronized (kvinParquet.inputFileCache) {
-			kvinParquet.inputFileCache.clear();
 		}
 	}
 }

@@ -39,13 +39,16 @@ import org.eclipse.rdf4j.common.concurrent.locks.ReadWriteLockManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.file.CopyOption;
 import java.nio.file.Files;
+import java.nio.file.OpenOption;
 import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.util.*;
@@ -93,6 +96,12 @@ public class KvinParquet implements Kvin {
 		this.archiveLocation = archiveLocation;
 		if (!this.archiveLocation.endsWith("/")) {
 			this.archiveLocation = this.archiveLocation + "/";
+		}
+		java.nio.file.Path tempPath = Paths.get(archiveLocation, ".tmp");
+		try {
+			validateAndRepairTempFiles(tempPath);
+		} catch (IOException e) {
+			log.error("Error while repairing unfinished transaction", e);
 		}
 	}
 
@@ -214,12 +223,10 @@ public class KvinParquet implements Kvin {
 			Map<String, WriterState> writers = new HashMap<>();
 
 			java.nio.file.Path tempPath = Paths.get(archiveLocation, ".tmp");
-			if (Files.exists(tempPath)) {
-				// delete temporary files if a previous put was not finished completely
-				Files.walk(tempPath).sorted(Comparator.reverseOrder()).map(java.nio.file.Path::toFile)
-						.forEach(File::delete);
-			}
+			validateAndRepairTempFiles(tempPath);
+
 			writeLock.release();
+			writeLock = null;
 
 			Files.createDirectories(tempPath);
 			Path itemMappingFile = new Path(tempPath.toString(), "metadata/items__1.parquet");
@@ -244,7 +251,12 @@ public class KvinParquet implements Kvin {
 				if (!key.equals(prevKey)) {
 					writerState = writers.get(key);
 					if (writerState == null) {
-						java.nio.file.Path file = tempPath.resolve(key + "_data.parquet");
+						String yearFolderName = String.format("%04d", year);
+						String weekFolderName = String.format("%02d", week);
+						java.nio.file.Path file = tempPath.resolve(yearFolderName)
+								.resolve(weekFolderName)
+								.resolve("data__1.parquet");
+						Files.createDirectories(file.getParent());
 						writerState = new WriterState(file, getParquetDataWriter(new Path(file.toString())),
 								year, week);
 						writers.put(key, writerState);
@@ -314,7 +326,7 @@ public class KvinParquet implements Kvin {
 				});
 			}
 
-			java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
+			var metaPath = Paths.get(archiveLocation, "meta.properties");
 			Properties meta = new Properties();
 			if (Files.exists(metaPath)) {
 				meta.load(Files.newInputStream(metaPath));
@@ -355,8 +367,6 @@ public class KvinParquet implements Kvin {
 				}
 			});
 
-			writeLock = writeLock();
-
 			Map<Integer, List<WriterState>> writersPerYear = writers.values().stream()
 					.collect(Collectors.groupingBy(s -> s.year));
 			for (Map.Entry<Integer, List<WriterState>> entry : writersPerYear.entrySet()) {
@@ -365,75 +375,17 @@ public class KvinParquet implements Kvin {
 				long[] minMaxYear = minMaxYears.get(year);
 				meta.put(yearFolderName, minMaxYear[0] + "-" + minMaxYear[1]);
 			}
-			meta.store(Files.newOutputStream(metaPath), null);
 
-			for (Map.Entry<Integer, List<WriterState>> entry : writersPerYear.entrySet()) {
-				int year = entry.getKey();
-				String yearFolderName = String.format("%04d", year);
-				java.nio.file.Path yearFolder = Paths.get(archiveLocation, yearFolderName);
-				Files.createDirectories(yearFolder);
+			meta.store(Files.newOutputStream(tempPath.resolve("meta.properties")), null);
+			createMetaFiles(tempPath, writersPerYear);
 
-				java.nio.file.Path yearMetaPath = yearFolder.resolve("meta.properties");
-				Properties yearMeta = new Properties();
-				if (Files.exists(yearMetaPath)) {
-					yearMeta.load(Files.newInputStream(yearMetaPath));
-				}
-				for (WriterState state : entry.getValue()) {
-					String weekFolderName = String.format("%02d", state.week);
-					String idRange = yearMeta.getProperty(weekFolderName);
-					if (idRange != null) {
-						long[] minMax = splitRange(idRange);
-						yearMeta.put(weekFolderName, Math.min(minMax[0], state.minMax[0]) + "-" + Math.max(minMax[1], state.minMax[1]));
-					} else {
-						yearMeta.put(weekFolderName, state.minMax[0] + "-" + state.minMax[1]);
-					}
-
-					java.nio.file.Path weekFolder = yearFolder.resolve(weekFolderName);
-					Files.createDirectories(weekFolder);
-					int maxSeqNr = Files.list(weekFolder).map(p -> {
-						String name = p.getFileName().toString();
-						if (name.startsWith("data")) {
-							Matcher m = fileWithSeqNr.matcher(name);
-							if (m.matches()) {
-								return Integer.parseInt(m.group(2));
-							}
-						}
-						return 0;
-					}).max(Integer::compareTo).orElse(0);
-					String filename = "data__" + (maxSeqNr + 1) + ".parquet";
-
-					log.debug("moving: " + state.file + " -> " + weekFolder.resolve(filename));
-					Files.move(state.file, weekFolder.resolve(filename));
-				}
-				yearMeta.store(Files.newOutputStream(yearMetaPath), null);
+			java.nio.file.Path validPath = tempPath.resolve("valid");
+			try (BufferedWriter writer = Files.newBufferedWriter(validPath)) {
+				writer.write(String.valueOf(System.currentTimeMillis()));
 			}
 
-			java.nio.file.Path tempMetadataPath = tempPath.resolve("metadata");
-			Files.createDirectories(metadataPath);
-			Map<String, List<Pair<String, Integer>>> newMappingFiles = getMappingFiles(tempMetadataPath);
-			Map<String, List<Pair<String, Integer>>> existingMappingFiles = getMappingFiles(metadataPath);
-			for (Map.Entry<String, List<Pair<String, Integer>>> newMapping : newMappingFiles.entrySet()) {
-				int seqNr = Optional.ofNullable(existingMappingFiles.get(newMapping.getKey()))
-						.filter(l -> !l.isEmpty())
-						.map(l -> l.get(l.size() - 1).getSecond())
-						.orElse(0) + 1;
-				Files.move(tempMetadataPath.resolve(newMapping.getValue().get(0).getFirst()),
-						metadataPath.resolve(newMapping.getKey() + "__" + seqNr + ".parquet"));
-			}
-
-			// completely delete temporary directory
-			Files.walk(tempPath).sorted(Comparator.reverseOrder())
-					.map(java.nio.file.Path::toFile)
-					.forEach(File::delete);
-
-			// clear cache with meta data
-			metaCache.invalidateAll();
-			filesCache.invalidateAll();
-
-			// invalidate id caches - TODO could be improved by directly updating the caches
-			itemIdCache.invalidateAll();
-			propertyIdCache.invalidateAll();
-			contextIdCache.invalidateAll();
+			writeLock = writeLock();
+			moveTempFiles(tempPath);
 		} catch (Throwable e) {
 			log.error("Error while adding data", e);
 		} finally {
@@ -442,6 +394,123 @@ public class KvinParquet implements Kvin {
 			}
 			Thread.currentThread().setContextClassLoader(contextCl);
 		}
+	}
+
+	private void moveTempFiles(java.nio.file.Path tempPath) throws IOException {
+		moveDataFiles(tempPath);
+		moveMappingFiles(tempPath);
+		deleteTempFiles(tempPath);
+		clearCaches();
+	}
+
+	private void deleteTempFiles(java.nio.file.Path tempPath) throws IOException {
+		// completely delete temporary directory
+		Files.walk(tempPath).sorted(Comparator.reverseOrder())
+				.map(java.nio.file.Path::toFile)
+				.forEach(File::delete);
+	}
+
+	private void validateAndRepairTempFiles(java.nio.file.Path tempPath) throws IOException {
+		if (Files.exists(tempPath)) {
+			if (Files.exists(tempPath.resolve("valid"))) {
+				moveTempFiles(tempPath);
+			} else {
+				deleteTempFiles(tempPath);
+			}
+		}
+	}
+
+	private void moveMappingFiles(java.nio.file.Path tempPath) throws IOException {
+		java.nio.file.Path metadataPath = Paths.get(archiveLocation, "metadata");
+		java.nio.file.Path tempMetadataPath = tempPath.resolve("metadata");
+		Files.createDirectories(metadataPath);
+		Map<String, List<Pair<String, Integer>>> newMappingFiles = getMappingFiles(tempMetadataPath);
+		Map<String, List<Pair<String, Integer>>> existingMappingFiles = getMappingFiles(metadataPath);
+		for (Map.Entry<String, List<Pair<String, Integer>>> newMapping : newMappingFiles.entrySet()) {
+			int seqNr = Optional.ofNullable(existingMappingFiles.get(newMapping.getKey()))
+					.filter(l -> !l.isEmpty())
+					.map(l -> l.get(l.size() - 1).getSecond())
+					.orElse(0) + 1;
+			Files.move(tempMetadataPath.resolve(newMapping.getValue().get(0).getFirst()),
+					metadataPath.resolve(newMapping.getKey() + "__" + seqNr + ".parquet"));
+		}
+	}
+
+	private void moveDataFiles(java.nio.file.Path source) throws IOException {
+		java.nio.file.Path destination = Paths.get(archiveLocation);
+		Files.walk(source)
+				.skip(1)
+				.filter(p -> Files.isRegularFile(p))
+				.forEach(sourceFile -> {
+					java.nio.file.Path dest = destination.resolve(source.relativize(sourceFile)).getParent();
+					try {
+						java.nio.file.Path destFile = null;
+						if (sourceFile.getFileName().toString().startsWith("data__")) {
+							Files.createDirectories(dest);
+							int maxSeqNr = Files.list(dest).map(p -> {
+								String name = p.getFileName().toString();
+								if (name.startsWith("data__")) {
+									Matcher m = fileWithSeqNr.matcher(name);
+									if (m.matches()) {
+										return Integer.parseInt(m.group(2));
+									}
+								}
+								return 0;
+							}).max(Integer::compareTo).orElse(0);
+							String filename = "data__" + (maxSeqNr + 1) + ".parquet";
+							destFile = dest.resolve(filename);
+						} else if (sourceFile.getFileName().toString().startsWith("meta.properties")) {
+							destFile = dest.resolve(sourceFile.getFileName());
+							Files.deleteIfExists(destFile);
+						}
+						if (destFile != null) {
+							log.debug("moving: " + sourceFile + " -> " + destFile);
+							Files.createDirectories(destFile.getParent());
+							Files.move(sourceFile, destFile);
+						}
+					} catch (IOException e) {
+						throw new UncheckedIOException(e);
+					}
+				});
+	}
+
+	private void createMetaFiles(java.nio.file.Path tempPath, Map<Integer, List<WriterState>> writersPerYear) throws IOException {
+		for (Map.Entry<Integer, List<WriterState>> entry : writersPerYear.entrySet()) {
+			int year = entry.getKey();
+			String yearFolderName = String.format("%04d", year);
+			java.nio.file.Path yearFolder = Paths.get(archiveLocation, yearFolderName);
+
+			java.nio.file.Path yearMetaPath = yearFolder.resolve("meta.properties");
+			Properties yearMeta = new Properties();
+			if (Files.exists(yearMetaPath)) {
+				yearMeta.load(Files.newInputStream(yearMetaPath));
+			}
+			for (WriterState state : entry.getValue()) {
+				String weekFolderName = String.format("%02d", state.week);
+				String idRange = yearMeta.getProperty(weekFolderName);
+				if (idRange != null) {
+					long[] minMax = splitRange(idRange);
+					yearMeta.put(weekFolderName, Math.min(minMax[0], state.minMax[0]) + "-" + Math.max(minMax[1], state.minMax[1]));
+				} else {
+					yearMeta.put(weekFolderName, state.minMax[0] + "-" + state.minMax[1]);
+				}
+			}
+			var tempYearFolder = tempPath.resolve(yearFolderName);
+			Files.createDirectories(tempYearFolder);
+			yearMeta.store(Files.newOutputStream(tempYearFolder.resolve("meta.properties")), null);
+		}
+	}
+
+	public void clearCaches() {
+		// clear cache with meta data
+		metaCache.invalidateAll();
+		filesCache.invalidateAll();
+		inputFileCache.clear();
+
+		// invalidate id caches - TODO could be improved by directly updating the caches
+		itemIdCache.invalidateAll();
+		propertyIdCache.invalidateAll();
+		contextIdCache.invalidateAll();
 	}
 
 	private Calendar getDate(long timestamp) {
@@ -682,7 +751,7 @@ public class KvinParquet implements Kvin {
 				.build();
 	}
 
-	private synchronized IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) throws IOException {
+	private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) throws IOException {
 		Lock readLock = readLock();
 		try {
 			URI contextFinal = context != null ? context : Kvin.DEFAULT_CONTEXT;
@@ -984,7 +1053,7 @@ public class KvinParquet implements Kvin {
 	}
 
 	@Override
-	public synchronized IExtendedIterator<URI> properties(URI item, URI context) {
+	public IExtendedIterator<URI> properties(URI item, URI context) {
 		if (context == null) {
 			context = Kvin.DEFAULT_CONTEXT;
 		}
