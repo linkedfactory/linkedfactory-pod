@@ -140,7 +140,7 @@
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
-			<version>1.7.26</version>
+			<version>2.0.13</version>
 		</dependency>
 		<dependency>
 			<groupId>com.google.guava</groupId>
@@ -195,6 +195,21 @@
 			<groupId>info.picocli</groupId>
 			<artifactId>picocli</artifactId>
 			<version>4.7.5</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.arrow</groupId>
+			<artifactId>arrow-dataset</artifactId>
+			<version>15.0.2</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.arrow</groupId>
+			<artifactId>arrow-memory-unsafe</artifactId>
+			<version>15.0.2</version>
+		</dependency>
+		<dependency>
+			<groupId>io.substrait</groupId>
+			<artifactId>core</artifactId>
+			<version>0.37.0</version>
 		</dependency>
 	</dependencies>
 
