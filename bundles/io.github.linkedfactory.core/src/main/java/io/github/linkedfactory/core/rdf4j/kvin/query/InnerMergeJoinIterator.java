@@ -13,8 +13,12 @@ package io.github.linkedfactory.core.rdf4j.kvin.query;
 
 import java.util.Comparator;
 import java.util.NoSuchElementException;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
+import io.github.linkedfactory.core.rdf4j.common.query.AsyncIterator;
+import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIterator;
 import org.eclipse.rdf4j.common.annotation.Experimental;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.query.Binding;
@@ -35,44 +39,48 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 	private final Comparator<V> cmp;
 	private final Function<BindingSet, V> valueFunction;
 	private final QueryEvaluationContext context;
-
+	// -1 for unset, 0 for equal, 1 for different
+	int currentLeftValueAndPeekEquals = -1;
 	private BindingSet next;
 	private BindingSet currentLeft;
 	private V currentLeftValue;
 	private V leftPeekValue;
-
-	// -1 for unset, 0 for equal, 1 for different
-	int currentLeftValueAndPeekEquals = -1;
-
 	private boolean closed = false;
 
-	InnerMergeJoinIterator(CloseableIteration<BindingSet, QueryEvaluationException> leftIterator, CloseableIteration<BindingSet, QueryEvaluationException> rightIterator,
-			Comparator<V> cmp, Function<BindingSet, V> valueFunction, QueryEvaluationContext context)
+	InnerMergeJoinIterator(PeekMarkIterator<BindingSet> leftIterator, PeekMarkIterator<BindingSet> rightIterator,
+	                       Comparator<V> cmp, Function<BindingSet, V> valueFunction, QueryEvaluationContext context)
 			throws QueryEvaluationException {
 
-		this.leftIterator = new PeekMarkIterator<>(leftIterator);
-		this.rightIterator = new PeekMarkIterator<>(rightIterator);
+		this.leftIterator = leftIterator;
+		this.rightIterator = rightIterator;
 		this.cmp = cmp;
 		this.valueFunction = valueFunction;
 		this.context = context;
 	}
 
-	public static <V> CloseableIteration<BindingSet, QueryEvaluationException> getInstance(QueryEvaluationStep leftPrepared,
+	public static <V> CloseableIteration<BindingSet, QueryEvaluationException> getInstance(
+			QueryEvaluationStep leftPrepared,
 			QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp,
-			Function<BindingSet, V> value, QueryEvaluationContext context) {
+			Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService) {
 
 		CloseableIteration<BindingSet, QueryEvaluationException> leftIter = leftPrepared.evaluate(bindings);
 		if (leftIter == QueryEvaluationStep.EMPTY_ITERATION) {
 			return leftIter;
 		}
 
-		CloseableIteration<BindingSet, QueryEvaluationException> rightIter = preparedRight.evaluate(bindings);
+		CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
+		if (InnerJoinIterator.isAsync.get() != Boolean.TRUE) {
+			rightIter = new AsyncIterator<>(() -> preparedRight.evaluate(bindings), executorService);
+		} else {
+			rightIter = preparedRight.evaluate(bindings);
+		}
+
 		if (rightIter == QueryEvaluationStep.EMPTY_ITERATION) {
 			leftIter.close();
 			return rightIter;
 		}
 
-		return new InnerMergeJoinIterator<V>(leftIter, rightIter, cmp, value, context);
+		return new InnerMergeJoinIterator<V>(new PeekMarkIterator<>(leftIter), new PeekMarkIterator<>(rightIter), cmp, value, context);
 	}
 
 	private BindingSet join(BindingSet left, BindingSet right, boolean createNewBindingSet) {

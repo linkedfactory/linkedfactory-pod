@@ -255,7 +255,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                                 values[i++] = ((Literal) bs.getValue(name)).longValue();
                             }
                             return values;
-                        }, context);
+                        }, context, executorService);
             } else {
                 return bindingSet -> new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
             }
