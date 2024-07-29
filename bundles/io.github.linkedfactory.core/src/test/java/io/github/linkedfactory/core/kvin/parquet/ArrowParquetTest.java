@@ -41,8 +41,13 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -62,9 +67,6 @@ public class ArrowParquetTest {
 	}
 
 	protected TypeCreator R = TypeCreator.REQUIRED;
-	protected ExtensionCollector functionCollector = new ExtensionCollector();
-	protected PlanProtoConverter planProtoConverter = new PlanProtoConverter();
-	private BufferAllocator allocator = null;
 
 	io.substrait.proto.ExtendedExpression filterTable() {
 		SubstraitBuilder b = new SubstraitBuilder(defaultExtensionCollection);
@@ -140,20 +142,6 @@ public class ArrowParquetTest {
 		// return planProtoConverter.toProto(plan);
 	}
 
-	@Before
-	public void setUp() {
-		allocator = new RootAllocator(Long.MAX_VALUE);
-	}
-
-	@After
-	public void tearDown() {
-		allocator.close();
-	}
-
-	protected BufferAllocator rootAllocator() {
-		return allocator;
-	}
-
 	@Test
 	public void testParseFilter() throws IOException {
 		String base64EncodedSubstraitFilter =
@@ -167,9 +155,10 @@ public class ArrowParquetTest {
 
 	@Test
 	public void testReadData() throws Exception {
+		var allocator = new RootAllocator(Long.MAX_VALUE);
 		FileSystemDatasetFactory factory =
 				new FileSystemDatasetFactory(
-						rootAllocator(),
+						allocator,
 						NativeMemoryPool.getDefault(),
 						FileFormat.PARQUET,
 						getClass().getResource("/data__1.parquet").toURI().toString());
@@ -205,17 +194,18 @@ public class ArrowParquetTest {
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
-		AutoCloseables.close(dataset);
-		AutoCloseables.close(factory);
+		AutoCloseables.close(dataset, factory, allocator);
 	}
 
 	@Test
 	public void testReadDataNative() throws Exception {
-		FilterPredicate filter = and(
+		FilterPredicate filter =
+				gtEq(FilterApi.longColumn("time"), 1720512185231L);
+		/* FilterPredicate filter = and(
 				gtEq(FilterApi.longColumn("time"), 1720512185231L),
-				lt(FilterApi.longColumn("time"), 1720512189207L));
+				lt(FilterApi.longColumn("time"), 1720512189207L)); */
 
-		for (int i = 0; i < 3; i++) {
+		for (int i = 0; i < 20; i++) {
 			var reader = AvroParquetReader.<GenericRecord>builder(HadoopInputFile.fromPath(new Path(getClass().getResource("/data__1.parquet").toString()), new Configuration()))
 					.withDataModel(GenericData.get())
 					.useStatsFilter()
@@ -234,6 +224,27 @@ public class ArrowParquetTest {
 			reader.close();
 		}
 
+	}
+
+	@Test
+	public void testReadDataDuckDb() throws Exception {
+		Connection conn = DriverManager.getConnection("jdbc:duckdb:");
+
+		String query = "SELECT * FROM read_parquet('" + new File(getClass().getResource("/data__1.parquet").toURI()) + "') "
+				+ "WHERE time >= 1720512185231"; // and time < 1720512189207";
+		for (int i = 0; i < 20; i++) {
+			long start = System.currentTimeMillis();
+			long count = 0;
+			Statement stmt = conn.createStatement();
+			try (ResultSet rs = stmt.executeQuery(query)) {
+				while (rs.next()) {
+					count++;
+				}
+			}
+			stmt.close();
+			System.out.println("count: " + count);
+			System.out.println("reading took: " + (System.currentTimeMillis() - start));
+		}
 	}
 
 }
