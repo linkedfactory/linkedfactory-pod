@@ -38,8 +38,8 @@ import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
 @Fork(value = 1, jvmArgs = {"-Dorg.slf4j.simpleLogger.defaultLogLevel=warn", "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=1044"})
-@Warmup(iterations = 3, time = 500, timeUnit = TimeUnit.MILLISECONDS)
-@Measurement(iterations = 3, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Warmup(iterations = 3, time = 5000, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 3, time = 5000, timeUnit = TimeUnit.MILLISECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 public class KvinParquetBenchmark {
@@ -97,7 +97,7 @@ public class KvinParquetBenchmark {
 
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
-                .include(KvinParquetBenchmark.class.getSimpleName() + ".testKvinParquetReadPerformanceForProcessUseCase") // adapt to control which benchmark tests to run
+                .include(KvinParquetBenchmark.class.getSimpleName()) // adapt to control which benchmark tests to run
                 .forks(1)
                 .build();
 

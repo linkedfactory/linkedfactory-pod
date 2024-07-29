@@ -76,7 +76,7 @@ public class ParquetHelpers {
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
 				.withDataModel(reflectData)
-				.withBloomFilterEnabled("id", true)
+				//.withBloomFilterEnabled("id", true)
 				.build();
 	}
 
@@ -90,7 +90,7 @@ public class ParquetHelpers {
 				.withRowGroupSize(ROW_GROUP_SIZE_MAPPINGS)
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
-				.withBloomFilterEnabled("value", true)
+				//.withBloomFilterEnabled("value", true)
 				.withDataModel(reflectData)
 				.build();
 	}
