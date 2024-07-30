@@ -16,8 +16,10 @@
 package io.github.linkedfactory.core.kvin;
 
 import java.io.Closeable;
+import java.util.List;
 
 import net.enilink.commons.iterator.IExtendedIterator;
+import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 
@@ -78,7 +80,7 @@ public interface Kvin extends Closeable {
 	 * @param property The property URI.
 	 * @param context  The context URI.
 	 * @param end      The end of the time interval.
-	 * @param begin    The begin of the time interval.
+	 * @param begin    The beginning of the time interval.
 	 * @param limit    Maximum number of elements that should be fetched.
 	 * @param interval Minimum distance (in milliseconds) between two data points
 	 *                 starting from given end or from the timestamp of the most
@@ -91,6 +93,56 @@ public interface Kvin extends Closeable {
 	                                   long interval, String op);
 
 	/**
+	 * Fetches the values of a given items and properties within the time interval
+	 * [begin, end].
+	 *
+	 * @param items      The item URIs.
+	 * @param properties The property URIs.
+	 * @param context    The context URI.
+	 * @param end        The end of the time interval.
+	 * @param begin      The beginning of the time interval.
+	 * @param limit      Maximum number of elements that should be fetched.
+	 * @param interval   Minimum distance (in milliseconds) between two data points
+	 *                   starting from given end or from the timestamp of the most
+	 *                   recent value.
+	 * @param op         Operator that is used to aggregate the values within the given
+	 *                   interval.
+	 * @return A list of pairs of unique value URIs and associated values.
+	 */
+	default IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end, long begin,
+	                                           long limit, long interval, String op) {
+		IExtendedIterator<KvinTuple> it = NiceIterator.emptyIterator();
+		for (URI item : items) {
+			for (URI property : properties) {
+				// use lazy initialization for further iterators
+				it = it.andThen(new NiceIterator<>() {
+					IExtendedIterator<KvinTuple> base;
+
+					@Override
+					public boolean hasNext() {
+						if (base == null) {
+							base = fetch(item, property, context, end, begin, limit, interval, op);
+						}
+						return base.hasNext();
+					}
+
+					@Override
+					public KvinTuple next() {
+						ensureHasNext();
+						return base.next();
+					}
+
+					@Override
+					public void close() {
+						base.close();
+					}
+				});
+			}
+		}
+		return it;
+	}
+
+	/**
 	 * Deletes the values of a given item and property within the time interval
 	 * [begin, end].
 	 *
@@ -98,7 +150,7 @@ public interface Kvin extends Closeable {
 	 * @param property The property URI.
 	 * @param context  The context URI.
 	 * @param end      The end of the time interval.
-	 * @param begin    The begin of the time interval.
+	 * @param begin    The beginning of the time interval.
 	 * @return Number of deleted records.
 	 */
 	long delete(URI item, URI property, URI context, long end, long begin);
@@ -106,8 +158,8 @@ public interface Kvin extends Closeable {
 	/**
 	 * Deletes the given item and all of its associated values from the store.
 	 *
-	 * @param item The item URI.
-	 * @param context  The context URI.
+	 * @param item    The item URI.
+	 * @param context The context URI.
 	 * @return <code>true</code> if item exists in the store else
 	 * <code>false</code>.
 	 */
@@ -116,8 +168,8 @@ public interface Kvin extends Closeable {
 	/**
 	 * Returns all known sub-items of a given item.
 	 *
-	 * @param item The item URI.
-	 * @param context  The context URI.
+	 * @param item    The item URI.
+	 * @param context The context URI.
 	 * @return A list with descendants of the given item.
 	 */
 	IExtendedIterator<URI> descendants(URI item, URI context);
@@ -125,8 +177,8 @@ public interface Kvin extends Closeable {
 	/**
 	 * Returns all known sub-items of a given item.
 	 *
-	 * @param item The item URI.
-	 * @param context  The context URI.
+	 * @param item    The item URI.
+	 * @param context The context URI.
 	 * @return A list with descendants of the given item.
 	 */
 	IExtendedIterator<URI> descendants(URI item, URI context, long limit);
@@ -134,8 +186,8 @@ public interface Kvin extends Closeable {
 	/**
 	 * Returns all known properties of a given item.
 	 *
-	 * @param item The item URI.
-	 * @param context  The context URI.
+	 * @param item    The item URI.
+	 * @param context The context URI.
 	 * @return A list with properties of the given item.
 	 */
 	IExtendedIterator<URI> properties(URI item, URI context);

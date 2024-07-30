@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.rdf4j.kvin.query;
 
+import io.github.linkedfactory.core.rdf4j.common.query.BatchQueryEvaluationStep;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinEvaluationStrategy;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinEvaluationUtil;
 
@@ -9,23 +10,31 @@ import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 
-public class KvinFetchEvaluationStep implements QueryEvaluationStep {
+import java.util.List;
 
-    protected final KvinEvaluationStrategy strategy;
-    protected final KvinFetch fetch;
-    protected final KvinEvaluationUtil evalUtil;
-    protected final QueryEvaluationContext context;
+public class KvinFetchEvaluationStep implements QueryEvaluationStep, BatchQueryEvaluationStep {
 
-    public KvinFetchEvaluationStep(KvinEvaluationStrategy strategy, KvinFetch fetch, QueryEvaluationContext context) {
-        this.strategy = strategy;
-        this.fetch = fetch;
-        this.context = context;
-        this.evalUtil = new KvinEvaluationUtil(strategy.getKvin());
-    }
+	protected final KvinEvaluationStrategy strategy;
+	protected final KvinFetch fetch;
+	protected final KvinEvaluationUtil evalUtil;
+	protected final QueryEvaluationContext context;
 
-    @Override
-    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bs) {
-        return evalUtil
-            .evaluate(strategy.getValueFactory(), bs, fetch.params, fetch.getStatement(), context.getDataset());
-    }
+	public KvinFetchEvaluationStep(KvinEvaluationStrategy strategy, KvinFetch fetch, QueryEvaluationContext context) {
+		this.strategy = strategy;
+		this.fetch = fetch;
+		this.context = context;
+		this.evalUtil = new KvinEvaluationUtil(strategy.getKvin());
+	}
+
+	@Override
+	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bs) {
+		return evalUtil
+				.evaluate(strategy.getValueFactory(), bs, fetch.params, fetch.getStatement(), context.getDataset());
+	}
+
+	@Override
+	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
+		return evalUtil
+				.evaluate(strategy.getValueFactory(), bindingSets, fetch.params, fetch.getStatement(), context.getDataset());
+	}
 }

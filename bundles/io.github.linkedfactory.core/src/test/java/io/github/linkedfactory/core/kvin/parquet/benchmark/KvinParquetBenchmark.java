@@ -106,30 +106,38 @@ public class KvinParquetBenchmark {
 
     @Benchmark
     public void testKvinLevelDbReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        blackhole.consume(KvinParquetBenchmarkBase.LevelDBProcessUseCaseDataIterator);
-        TupleQueryResult result = readFromStore(processUseCaseLevelDbStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
-        blackhole.consume(result);
+        try (TupleQueryResult result = readFromStore(processUseCaseLevelDbStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/")) {
+            while (result.hasNext()) {
+                blackhole.consume(result.next());
+            }
+        }
     }
 
     @Benchmark
     public void testKvinLevelDbReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        blackhole.consume(KvinParquetBenchmarkBase.LevelDBMachineUseCaseDataIterator);
-        TupleQueryResult result = readFromStore(machineUseCaseLevelDbStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
-        blackhole.consume(result);
+        try (TupleQueryResult result = readFromStore(machineUseCaseLevelDbStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.")) {
+            while (result.hasNext()) {
+                blackhole.consume(result.next());
+            }
+        }
     }
 
     @Benchmark
     public void testKvinParquetReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        blackhole.consume(KvinParquetBenchmarkBase.parquetProcessUseCaseDataIterator);
-        TupleQueryResult result = readFromStore(processUseCaseParquetStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
-        blackhole.consume(result);
+        try (TupleQueryResult result = readFromStore(processUseCaseParquetStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/")) {
+            while (result.hasNext()) {
+                blackhole.consume(result.next());
+            }
+        }
     }
 
     @Benchmark
     public void testKvinParquetReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        blackhole.consume(KvinParquetBenchmarkBase.parquetMachineUseCaseDataIterator);
-        TupleQueryResult result = readFromStore(machineUseCaseParquetStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
-        blackhole.consume(result);
+        try (TupleQueryResult result = readFromStore(machineUseCaseParquetStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.")) {
+            while (result.hasNext()) {
+                blackhole.consume(result.next());
+            }
+        }
     }
 
     @Benchmark

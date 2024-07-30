@@ -21,8 +21,9 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	 * Variables *
 	 *-----------*/
 
-	private static final BindingSet NULL_BINDINGS = new EmptyBindingSet();
 	public static final ThreadLocal<Boolean> isAsync = new ThreadLocal<>();
+	private static final BindingSet NULL_BINDINGS = new EmptyBindingSet();
+	private static final int BATCH_SIZE = 200;
 	private final EvaluationStrategy strategy;
 	private final Supplier<ExecutorService> executorService;
 	private final CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
@@ -35,16 +36,16 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	 *--------------*/
 
 	public InnerJoinIterator(EvaluationStrategy strategy, Supplier<ExecutorService> executorService, QueryEvaluationStep leftPrepared,
-	                         QueryEvaluationStep rightPrepared, BindingSet bindings, boolean lateral, boolean async) throws QueryEvaluationException {
+	                         QueryEvaluationStep rightPrepared, List<BindingSet> bindingSets, boolean lateral, boolean async) throws QueryEvaluationException {
 		this.strategy = strategy;
 		this.executorService = executorService;
 
-		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = leftPrepared.evaluate(bindings);
+		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets);
 		if (leftIt.hasNext() || lateral) {
 			preparedJoinArg = rightPrepared;
 		} else {
 			leftIt.close();
-			leftIt = rightPrepared.evaluate(bindings);
+			leftIt = BatchQueryEvaluationStep.evaluate(rightPrepared, bindingSets);
 			preparedJoinArg = leftPrepared;
 		}
 		rightIter = new EmptyIteration<>();
@@ -79,8 +80,18 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 				// Right iteration exhausted
 				rightIter.close();
 
-				if (leftIter.hasNext()) {
-					rightIter = preparedJoinArg.evaluate(leftIter.next());
+				if (preparedJoinArg instanceof BatchQueryEvaluationStep) {
+					List<BindingSet> nextLefts = new ArrayList<>(BATCH_SIZE);
+					while (leftIter.hasNext() && nextLefts.size() < BATCH_SIZE) {
+						nextLefts.add(leftIter.next());
+					}
+					if (!nextLefts.isEmpty()) {
+						rightIter = ((BatchQueryEvaluationStep) preparedJoinArg).evaluate(nextLefts);
+					}
+				} else {
+					if (leftIter.hasNext()) {
+						rightIter = preparedJoinArg.evaluate(leftIter.next());
+					}
 				}
 			}
 		} catch (NoSuchElementException ignore) {
@@ -122,21 +133,29 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 		while (joined.size() < 5 && leftIter.hasNext()) {
 			BlockingQueue<BindingSet> queue = new ArrayBlockingQueue<>(50);
 			joined.add(queue);
-			BindingSet next = leftIter.next();
+			boolean useBatch = preparedJoinArg instanceof BatchQueryEvaluationStep;
+			List<BindingSet> nextLefts = useBatch ? new ArrayList<>(BATCH_SIZE) : List.of(leftIter.next());
+			if (useBatch) {
+				while (leftIter.hasNext() && nextLefts.size() < BATCH_SIZE) {
+					nextLefts.add(leftIter.next());
+				}
+			}
 			executorService.get().submit(() -> {
 				isAsync.set(true);
-				var rightIt = preparedJoinArg.evaluate(next);
+				var rightIt = useBatch ?
+						((BatchQueryEvaluationStep) preparedJoinArg).evaluate(nextLefts) :
+						preparedJoinArg.evaluate(nextLefts.get(0));
 				try {
 					while (rightIt.hasNext()) {
 						BindingSet bindings = rightIt.next();
-						while (! queue.offer(bindings, 100, TimeUnit.MILLISECONDS)) {
+						while (!queue.offer(bindings, 100, TimeUnit.MILLISECONDS)) {
 							if (isClosed()) {
 								return;
 							}
 						}
 					}
 					rightIt.close();
-					while (! queue.offer(NULL_BINDINGS, 100, TimeUnit.MILLISECONDS)) {
+					while (!queue.offer(NULL_BINDINGS, 100, TimeUnit.MILLISECONDS)) {
 						if (isClosed()) {
 							return;
 						}

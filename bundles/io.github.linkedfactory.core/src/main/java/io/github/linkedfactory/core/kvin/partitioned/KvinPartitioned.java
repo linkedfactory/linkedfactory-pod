@@ -173,8 +173,8 @@ public class KvinPartitioned implements Kvin {
 	}
 
 	@Override
-	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
-		IExtendedIterator<KvinTuple> internalResult = fetchInternal(item, property, context, end, begin, limit);
+	public IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end, long begin, long limit, long interval, String op) {
+		IExtendedIterator<KvinTuple> internalResult = fetchInternal(items, properties, context, end, begin, limit);
 		if (op != null) {
 			internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
 				@Override
@@ -186,7 +186,13 @@ public class KvinPartitioned implements Kvin {
 		return internalResult;
 	}
 
-	protected IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, long end, long begin, long limit) {
+	@Override
+	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
+		var properties = property == null ? Collections.<URI>emptyList() : List.of(property);
+		return fetch(List.of(item),	properties, context, end, begin, limit, interval, op);
+	}
+
+	protected IExtendedIterator<KvinTuple> fetchInternal(List<URI> items, List<URI> properties, URI context, long end, long begin, long limit) {
 		Lock readLock = readLock();
 		return new NiceIterator<>() {
 			final PriorityQueue<Pair<KvinTuple, IExtendedIterator<KvinTuple>>> nextTuples = new PriorityQueue<>(
@@ -225,7 +231,7 @@ public class KvinPartitioned implements Kvin {
 					}
 					stores.add(archiveStore);
 					for (Kvin store : stores) {
-						IExtendedIterator<KvinTuple> storeTuples = store.fetch(item, property, context, end, begin,
+						IExtendedIterator<KvinTuple> storeTuples = store.fetch(items, properties, context, end, begin,
 								limit, 0L, null);
 						if (storeTuples.hasNext()) {
 							nextTuples.add(new Pair<>(storeTuples.next(), storeTuples));

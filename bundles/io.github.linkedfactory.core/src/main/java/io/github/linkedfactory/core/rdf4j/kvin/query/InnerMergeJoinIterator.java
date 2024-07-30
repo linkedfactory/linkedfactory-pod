@@ -80,7 +80,7 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 			return rightIter;
 		}
 
-		return new InnerMergeJoinIterator<V>(new PeekMarkIterator<>(leftIter), new PeekMarkIterator<>(rightIter), cmp, value, context);
+		return new InnerMergeJoinIterator<>(new PeekMarkIterator<>(leftIter), new PeekMarkIterator<>(rightIter), cmp, value, context);
 	}
 
 	private BindingSet join(BindingSet left, BindingSet right, boolean createNewBindingSet) {

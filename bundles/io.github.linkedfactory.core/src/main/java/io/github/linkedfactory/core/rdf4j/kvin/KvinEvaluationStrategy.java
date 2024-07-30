@@ -5,10 +5,10 @@ import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.rdf4j.common.Conversions;
 import io.github.linkedfactory.core.rdf4j.common.HasValue;
-import io.github.linkedfactory.core.rdf4j.kvin.query.*;
 import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
-import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIterator;
-import net.enilink.komma.rdf4j.RDF4JValueConverter;
+import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIteratorEvaluationStep;
+import io.github.linkedfactory.core.rdf4j.common.query.BatchQueryEvaluationStep;
+import io.github.linkedfactory.core.rdf4j.kvin.query.*;
 import net.enilink.vocab.rdf.RDF;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
@@ -36,7 +36,8 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.*;
+import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.compareAndBind;
+import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.findFirstFetch;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
@@ -257,7 +258,21 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                             return values;
                         }, context, executorService);
             } else {
-                return bindingSet -> new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
+	            return new BatchQueryEvaluationStep() {
+		            @Override
+		            public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
+			            return new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
+		            }
+
+		            @Override
+		            public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
+			            return new HashJoinIteration(
+					            BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets),
+					            join.getLeftArg().getBindingNames(),
+					            BatchQueryEvaluationStep.evaluate(rightPrepared, bindingSets),
+					            join.getRightArg().getBindingNames(), false);
+		            }
+	            };
             }
         } else {
             // strictly use lateral joins if left arg contains a KVIN fetch as right arg probably depends on the results
@@ -271,14 +286,14 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                         .anyMatch(name -> assured.contains(name));
                 if (leftDependsOnRight) {
                     // swap left and right argument
-                    return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this, executorService,
-                            rightPrepared, leftPrepared, bindingSet, true, true
+                    return new InnerJoinIteratorEvaluationStep(KvinEvaluationStrategy.this, executorService,
+                            rightPrepared, leftPrepared, true, true
                     );
                 }
             }
             boolean async = findFirstFetch(join.getRightArg()) != null;
-            return bindingSet -> new InnerJoinIterator(KvinEvaluationStrategy.this, executorService,
-                    leftPrepared, rightPrepared, bindingSet, lateral, async
+            return new InnerJoinIteratorEvaluationStep(KvinEvaluationStrategy.this, executorService,
+                    leftPrepared, rightPrepared, lateral, async
             );
         }
     }

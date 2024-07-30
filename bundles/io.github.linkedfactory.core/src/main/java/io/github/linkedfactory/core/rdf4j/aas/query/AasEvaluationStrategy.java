@@ -6,6 +6,7 @@ import io.github.linkedfactory.core.rdf4j.aas.AasClient;
 import io.github.linkedfactory.core.rdf4j.common.HasValue;
 import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIterator;
+import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIteratorEvaluationStep;
 import io.github.linkedfactory.core.rdf4j.kvin.query.KvinFetch;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.WrappedIterator;
@@ -292,13 +293,13 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 						.anyMatch(name -> assured.contains(name));
 				if (leftDependsOnRight) {
 					// swap left and right argument
-					return bindingSet -> new InnerJoinIterator(AasEvaluationStrategy.this,
-							executorService, rightPrepared, leftPrepared, bindingSet, true, false
+					return new InnerJoinIteratorEvaluationStep(AasEvaluationStrategy.this,
+							executorService, rightPrepared, leftPrepared, true, false
 					);
 				}
 			}
-			return bindingSet -> new InnerJoinIterator(AasEvaluationStrategy.this,
-					executorService, leftPrepared, rightPrepared, bindingSet, lateral, false
+			return new InnerJoinIteratorEvaluationStep(AasEvaluationStrategy.this,
+					executorService, leftPrepared, rightPrepared, lateral, false
 			);
 		}
 	}

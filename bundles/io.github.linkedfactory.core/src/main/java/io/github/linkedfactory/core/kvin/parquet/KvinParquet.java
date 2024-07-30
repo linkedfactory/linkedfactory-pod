@@ -80,6 +80,7 @@ public class KvinParquet implements Kvin {
 		}
 		return 0;
 	};
+	static final long[] EMPTY_IDS = { 0 };
 	// used by reader
 	final Cache<URI, Long> itemIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final Cache<URI, Long> propertyIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
@@ -105,13 +106,23 @@ public class KvinParquet implements Kvin {
 		}
 	}
 
-	private IdMapping fetchMappingIds(Path mappingFile, FilterPredicate filter) throws IOException {
-		IdMapping id;
+	private List<IdMapping> fetchMappingIds(Path mappingFile, FilterPredicate filter) throws IOException {
+		List<IdMapping> mappings = null;
 		HadoopInputFile inputFile = getFile(mappingFile);
 		try (ParquetReader<IdMapping> reader = createReader(inputFile, FilterCompat.get(filter))) {
-			id = reader.read();
+			while (true) {
+				var mapping = reader.read();
+				if (mapping != null) {
+					if (mappings == null) {
+						mappings = new ArrayList<>();
+					}
+					mappings.add(mapping);
+				} else {
+					break;
+				}
+			}
 		}
-		return id;
+		return mappings == null ? Collections.emptyList() : mappings;
 	}
 
 	private void readMaxIds(WriteContext writeContext, java.nio.file.Path metadataPath) throws IOException {
@@ -627,8 +638,11 @@ public class KvinParquet implements Kvin {
 				}
 				IdMapping mapping = null;
 				for (File mappingFile : mappingFiles) {
-					mapping = fetchMappingIds(new Path(mappingFile.getPath()), filter);
-					if (mapping != null) break;
+					var mappings = fetchMappingIds(new Path(mappingFile.getPath()), filter);
+					if (! mappings.isEmpty()) {
+						mapping = mappings.get(0);
+						break;
+					}
 				}
 				return mapping != null ? mapping.getId() : 0L;
 			});
@@ -636,6 +650,70 @@ public class KvinParquet implements Kvin {
 			return 0L;
 		}
 		return id != null ? id : 0L;
+	}
+
+	private long[] getIds(List<URI> entities, IdType idType) {
+		Cache<URI, Long> idCache;
+		switch (idType) {
+			case ITEM_ID:
+				idCache = itemIdCache;
+				break;
+			case PROPERTY_ID:
+				idCache = propertyIdCache;
+				break;
+			default:
+				//case CONTEXT_ID:
+				idCache = contextIdCache;
+				break;
+		}
+		long[] ids = new long[entities.size()];
+		int i = 0;
+
+		var cachedIds = idCache.getAllPresent(entities);
+		Map<String, Integer> toFetch = new HashMap<>();
+		for (URI entity : entities) {
+			Long id = cachedIds.get(entity);
+			if (id != null) {
+				ids[i] = id;
+			} else {
+				toFetch.put(entity.toString(), i);
+			}
+			i++;
+		}
+		if (! toFetch.isEmpty()) {
+			// read from files
+			String name;
+			switch (idType) {
+				case ITEM_ID:
+					name = "items";
+					break;
+				case PROPERTY_ID:
+					name = "properties";
+					break;
+				default:
+					//case CONTEXT_ID:
+					name = "contexts";
+					break;
+			}
+			FilterPredicate filter = in(FilterApi.binaryColumn("value"),
+					toFetch.keySet().stream().map(k -> Binary.fromString(k)).collect(Collectors.toSet()));
+			File[] mappingFiles = new File(this.archiveLocation + "metadata/").listFiles((file, s) -> s.startsWith(name));
+			if (mappingFiles == null) {
+				return ids;
+			}
+			try {
+				for (File mappingFile : mappingFiles) {
+					var mappings = fetchMappingIds(new Path(mappingFile.getPath()), filter);
+					for (IdMapping mapping : mappings) {
+						ids[toFetch.get(mapping.getValue())] = mapping.getId();
+						idCache.put(URIs.createURI(mapping.getValue()), mapping.getId());
+					}
+				}
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+		}
+		return ids;
 	}
 
 	private IdMappings getIdMappings(URI item, URI property, URI context) throws IOException {
@@ -650,6 +728,42 @@ public class KvinParquet implements Kvin {
 			mappings.contextId = getId(context, IdType.CONTEXT_ID);
 		}
 		return mappings;
+	}
+
+	private List<IdMappings> getIdMappings(List<URI> items, List<URI> properties, URI context) throws IOException {
+		long[] itemIds = getIds(items, IdType.ITEM_ID);
+		long[] propertyIds = EMPTY_IDS;
+		if (! properties.isEmpty()) {
+			propertyIds = getIds(properties, IdType.PROPERTY_ID);
+		}
+		long contextId = 0;
+		if (context != null) {
+			contextId = getId(context, IdType.CONTEXT_ID);
+		}
+		if (contextId == 0L) {
+			return Collections.emptyList();
+		}
+		return getIdMappings(itemIds, propertyIds, contextId);
+	}
+
+	private List<IdMappings> getIdMappings(long[] itemIds, long[] propertyIds, long contextId) {
+		List<IdMappings> result = new ArrayList<>(itemIds.length * propertyIds.length);
+		for (long itemId : itemIds) {
+			if (itemId == 0L) {
+				continue;
+			}
+			for (long propertyId : propertyIds) {
+				if (propertyId == 0L && propertyIds!= EMPTY_IDS) {
+					continue;
+				}
+				IdMappings mappings = new IdMappings();
+				mappings.itemId = itemId;
+				mappings.propertyId = propertyId;
+				mappings.contextId = contextId;
+				result.add(mappings);
+			}
+		}
+		return result;
 	}
 
 	private FilterPredicate generateFetchFilter(IdMappings idMappings) {
@@ -678,18 +792,9 @@ public class KvinParquet implements Kvin {
 	}
 
 	@Override
-	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
+	public IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end, long begin, long limit, long interval, String op) {
 		try {
-			return fetchInternal(item, property, context, null, null, limit);
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
-	}
-
-	@Override
-	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
-		try {
-			IExtendedIterator<KvinTuple> internalResult = fetchInternal(item, property, context, end, begin, limit);
+			IExtendedIterator<KvinTuple> internalResult = fetchInternal(items, properties, context, end, begin, limit);
 			if (op != null) {
 				internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
 					@Override
@@ -704,12 +809,20 @@ public class KvinParquet implements Kvin {
 		}
 	}
 
-	public URI getProperty(ByteBuffer idBuffer) throws IOException {
-		// skip item id
-		idBuffer.getLong();
-		// skip context id
-		idBuffer.getLong();
-		return getProperty(idBuffer.getLong());
+	@Override
+	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
+		try {
+			return fetchInternal(List.of(item), property == null ? List.of() : List.of(property),
+					context, null, null, limit);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
+	@Override
+	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
+		var properties = property == null ? Collections.<URI>emptyList() : List.of(property);
+		return fetch(List.of(item),	properties, context, end, begin, limit, interval, op);
 	}
 
 	public URI getProperty(long propertyId) throws IOException {
@@ -721,8 +834,11 @@ public class KvinParquet implements Kvin {
 			IdMapping propertyMapping = null;
 
 			for (File mappingFile : mappingFiles) {
-				propertyMapping = fetchMappingIds(new Path(mappingFile.getPath()), filter);
-				if (propertyMapping != null) break;
+				var mappings = fetchMappingIds(new Path(mappingFile.getPath()), filter);
+				if (! mappings.isEmpty()) {
+					propertyMapping = mappings.get(0);
+					break;
+				}
 			}
 
 			if (propertyMapping == null) {
@@ -751,20 +867,34 @@ public class KvinParquet implements Kvin {
 				.build();
 	}
 
-	private IExtendedIterator<KvinTuple> fetchInternal(URI item, URI property, URI context, Long end, Long begin, Long limit) throws IOException {
+	private IExtendedIterator<KvinTuple> fetchInternal(List<URI> items, List<URI> properties, URI context, Long end, Long begin, Long limit) throws IOException {
 		Lock readLock = readLock();
 		try {
 			URI contextFinal = context != null ? context : Kvin.DEFAULT_CONTEXT;
+			long[] itemIds = getIds(items, IdType.ITEM_ID);
+			long[] propertyIds = properties.isEmpty() ? EMPTY_IDS : getIds(properties, IdType.PROPERTY_ID);
+			long contextId = 0;
+			if (context != null) {
+				contextId = getId(context, IdType.CONTEXT_ID);
+			}
+			if (contextId == 0L) {
+				// ensure read lock is freed
+				readLock.release();
+				return NiceIterator.emptyIterator();
+			}
 			// filters
-			IdMappings idMappings = getIdMappings(item, property, contextFinal);
-			if (idMappings.itemId == 0L || idMappings.contextId == 0L
-					|| property != null && idMappings.propertyId == 0L) {
+			List<IdMappings> mappingsList = getIdMappings(itemIds, propertyIds, contextId);
+			if (mappingsList.isEmpty()) {
 				// ensure read lock is freed
 				readLock.release();
 				return NiceIterator.emptyIterator();
 			}
 
-			FilterPredicate filter = generateFetchFilter(idMappings);
+			FilterPredicate filter = null;
+			for (IdMappings idMappings : mappingsList) {
+				var fetchFilter = generateFetchFilter(idMappings);
+				filter = filter == null ? fetchFilter : or(filter, fetchFilter);
+			}
 			if (begin != null) {
 				filter = and(filter, gtEq(FilterApi.longColumn("time"), begin));
 			}
@@ -773,7 +903,7 @@ public class KvinParquet implements Kvin {
 			}
 
 			final FilterPredicate filterFinal = filter;
-			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
+			List<java.nio.file.Path> dataFolders = getDataFolders(mappingsList);
 			if (dataFolders.isEmpty()) {
 				// ensure read lock is freed
 				readLock.release();
@@ -791,7 +921,7 @@ public class KvinParquet implements Kvin {
 				{
 					try {
 						nextReaders();
-						if (property == null) {
+						if (properties.isEmpty()) {
 							// directly load all relevant files if property is not given
 							// as data might be distributed over multiple files for one property
 							while (folderIndex < dataFolders.size() - 1) {
@@ -892,8 +1022,26 @@ public class KvinParquet implements Kvin {
 				}
 
 				KvinTuple convert(GenericRecord record) throws IOException {
-					URI p = property != null ? property : getProperty((ByteBuffer) record.get(0));
-					return recordToTuple(item, p, contextFinal, record);
+					var itemId = ((ByteBuffer) record.get(0)).getLong(0);
+					// skip item and context ids
+					var propertyId = ((ByteBuffer) record.get(0)).getLong(Long.BYTES * 2);
+					URI item = null;
+					URI property = null;
+					for (int i = 0; i < itemIds.length; i++) {
+						if (itemIds[i] == itemId) {
+							item = items.get(i);
+							break;
+						}
+					}
+					if (!properties.isEmpty()) {
+						for (int i = 0; i < propertyIds.length; i++) {
+							if (propertyIds[i] == propertyId) {
+								property = properties.get(i);
+								break;
+							}
+						}
+					}
+					return recordToTuple(item, property != null ? property : getProperty(propertyId), contextFinal, record);
 				}
 
 				void nextReaders() throws IOException {
@@ -949,8 +1097,7 @@ public class KvinParquet implements Kvin {
 		}
 	}
 
-	private List<java.nio.file.Path> getDataFolders(IdMappings idMappings) throws IOException {
-		long itemId = idMappings.itemId;
+	private List<java.nio.file.Path> getDataFolders(List<IdMappings> idMappings) throws IOException {
 		java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
 		Properties meta;
 		try {
@@ -967,7 +1114,7 @@ public class KvinParquet implements Kvin {
 		return meta.entrySet().stream().flatMap(entry -> {
 					String idRange = (String) entry.getValue();
 					long[] minMax = splitRange(idRange);
-					if (minMax != null && itemId >= minMax[0] && itemId <= minMax[1]) {
+					if (minMax != null && idMappings.stream().anyMatch(m -> m.itemId >= minMax[0] && m.itemId <= minMax[1])) {
 						java.nio.file.Path yearFolder = Paths.get(archiveLocation, entry.getKey().toString());
 						java.nio.file.Path yearMetaPath = yearFolder.resolve("meta.properties");
 						try {
@@ -981,7 +1128,7 @@ public class KvinParquet implements Kvin {
 							return yearMeta.entrySet().stream().filter(weekEntry -> {
 								String weekIdRange = (String) weekEntry.getValue();
 								long[] weekMinMax = splitRange(weekIdRange);
-								return weekMinMax != null && itemId >= weekMinMax[0] && itemId <= weekMinMax[1];
+								return weekMinMax != null && idMappings.stream().anyMatch(m -> m.itemId >= weekMinMax[0] && m.itemId <= weekMinMax[1]);
 							}).map(weekEntry -> yearFolder.resolve(weekEntry.getKey().toString()));
 						} catch (Exception e) {
 							log.error("Error while loading meta data", e);
@@ -1020,7 +1167,7 @@ public class KvinParquet implements Kvin {
 			IdMappings idMappings = new IdMappings();
 			idMappings.itemId = itemId;
 			idMappings.contextId = contextId;
-			List<java.nio.file.Path> dataFolders = getDataFolders(idMappings);
+			List<java.nio.file.Path> dataFolders = getDataFolders(List.of(idMappings));
 			Set<Long> propertyIds = new LinkedHashSet<>();
 
 			for (java.nio.file.Path dataFolder : dataFolders) {
