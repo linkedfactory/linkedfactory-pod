@@ -43,362 +43,360 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 public class KvinParquetBenchmark {
-    static File processUseCaseLevelDbStoreDir, processUseCaseParquetStoreDir, machineUseCaseLevelDbStoreDir, machineUseCaseParquetStoreDir;
-    static KvinLevelDb processUseCaseLevelDbStore, machineUseCaseLevelDbStore;
-    static KvinParquet processUseCaseParquetStore, machineUseCaseParquetStore;
+	static File processUseCaseLevelDbStoreDir, processUseCaseParquetStoreDir, machineUseCaseLevelDbStoreDir, machineUseCaseParquetStoreDir;
+	static KvinLevelDb processUseCaseLevelDbStore, machineUseCaseLevelDbStore;
+	static KvinParquet processUseCaseParquetStore, machineUseCaseParquetStore;
 
-    String processUseCaseQueryString = "prefix aq: <http://dm.adaproq.de/vocab/>\n" +
-            "\n" +
-            "select * {\n" +
-            "\n" +
-            "   service <kvin:> {\n" +
-            "     { select distinct ?wp { aq:gtc aq:workpiece [ <kvin:value> ?wp ] . } }\n" +
-            "     ?wp aq:abschnitt [ <kvin:value> \"anfang\" ; <kvin:limit> 1 ] .\n" +
-            "     ?wp ?property [ <kvin:value> ?v ; <kvin:time> ?t ].\n" +
-            "   }  \n" +
-            "}";
+	String processUseCaseQueryString = "prefix aq: <http://dm.adaproq.de/vocab/>\n" +
+			"\n" +
+			"select * {\n" +
+			"\n" +
+			"   service <kvin:> {\n" +
+			"     { select distinct ?wp { aq:gtc aq:workpiece [ <kvin:value> ?wp ] . } }\n" +
+			"     ?wp aq:abschnitt [ <kvin:value> \"anfang\" ; <kvin:limit> 1 ] .\n" +
+			"     ?wp ?property [ <kvin:value> ?v ; <kvin:time> ?t ].\n" +
+			"   }  \n" +
+			"}";
 
-    String machineUseCaseQueryString = "prefix esw: <http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.>\n" +
-            "prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\n" +
-            "\n" +
-            "select * {\n" +
-            "   # query data for specific parts\n" +
-            "   values ?part { <part:6> <part:7> <part:8> <part:9> <part:10> <part:11> }\n" +
-            "\n" +
-            "   service <kvin:> {\n" +
-            "     # angle and force are joined by time and index\n" +
-            "    { ?part esw:Channel1.Angle [ <kvin:value> ?a1 ; <kvin:time> ?t1 ; <kvin:index> ?s ] ; esw:Channel1.Force [ <kvin:value> ?f1 ; <kvin:time> ?t1 ; <kvin:index> ?s ] . }\n" +
-            "    { ?part esw:Channel2.Angle [ <kvin:value> ?a2 ; <kvin:time> ?t2 ; <kvin:index> ?s ] ; esw:Channel2.Force [ <kvin:value> ?f2 ; <kvin:time> ?t2 ; <kvin:index> ?s ] . }\n" +
-            "    { ?part esw:Channel3.Angle [ <kvin:value> ?a3 ; <kvin:time> ?t3 ; <kvin:index> ?s ] ; esw:Channel3.Force [ <kvin:value> ?f3 ; <kvin:time> ?t3 ; <kvin:index> ?s ] . }\n" +
-            "    { ?part esw:Channel4.Angle [ <kvin:value> ?a4 ; <kvin:time> ?t4 ; <kvin:index> ?s ] ; esw:Channel4.Force [ <kvin:value> ?f4 ; <kvin:time> ?t4 ; <kvin:index> ?s ] . }\n" +
-            "    { ?part esw:Channel5.Angle [ <kvin:value> ?a5 ; <kvin:time> ?t5 ; <kvin:index> ?s ] ; esw:Channel5.Force [ <kvin:value> ?f5 ; <kvin:time> ?t5 ; <kvin:index> ?s ] . }\n" +
-            "    { ?part esw:Channel6.Angle [ <kvin:value> ?a6 ; <kvin:time> ?t6 ; <kvin:index> ?s ] ; esw:Channel6.Force [ <kvin:value> ?f6 ; <kvin:time> ?t6 ; <kvin:index> ?s ] . }\n" +
-            "   }\n" +
-            "} order by ?part ?s";
+	String machineUseCaseQueryString = "prefix esw: <http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.>\n" +
+			"prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\n" +
+			"\n" +
+			"select * {\n" +
+			"   # query data for specific parts\n" +
+			"   values ?part { <part:6> <part:7> <part:8> <part:9> <part:10> <part:11> }\n" +
+			"\n" +
+			"   service <kvin:> {\n" +
+			"     # angle and force are joined by time and index\n" +
+			"    { ?part esw:Channel1.Angle [ <kvin:value> ?a1 ; <kvin:time> ?t1 ; <kvin:index> ?s ] ; esw:Channel1.Force [ <kvin:value> ?f1 ; <kvin:time> ?t1 ; <kvin:index> ?s ] . }\n" +
+			"    { ?part esw:Channel2.Angle [ <kvin:value> ?a2 ; <kvin:time> ?t2 ; <kvin:index> ?s ] ; esw:Channel2.Force [ <kvin:value> ?f2 ; <kvin:time> ?t2 ; <kvin:index> ?s ] . }\n" +
+			"    { ?part esw:Channel3.Angle [ <kvin:value> ?a3 ; <kvin:time> ?t3 ; <kvin:index> ?s ] ; esw:Channel3.Force [ <kvin:value> ?f3 ; <kvin:time> ?t3 ; <kvin:index> ?s ] . }\n" +
+			"    { ?part esw:Channel4.Angle [ <kvin:value> ?a4 ; <kvin:time> ?t4 ; <kvin:index> ?s ] ; esw:Channel4.Force [ <kvin:value> ?f4 ; <kvin:time> ?t4 ; <kvin:index> ?s ] . }\n" +
+			"    { ?part esw:Channel5.Angle [ <kvin:value> ?a5 ; <kvin:time> ?t5 ; <kvin:index> ?s ] ; esw:Channel5.Force [ <kvin:value> ?f5 ; <kvin:time> ?t5 ; <kvin:index> ?s ] . }\n" +
+			"    { ?part esw:Channel6.Angle [ <kvin:value> ?a6 ; <kvin:time> ?t6 ; <kvin:index> ?s ] ; esw:Channel6.Force [ <kvin:value> ?f6 ; <kvin:time> ?t6 ; <kvin:index> ?s ] . }\n" +
+			"   }\n" +
+			"} order by ?part ?s";
 
-    public KvinParquetBenchmark() {
-        try {
-            processUseCaseLevelDbStoreDir = Files.createTempDirectory("temp_levelDb_process").toFile();
-            machineUseCaseLevelDbStoreDir = Files.createTempDirectory("temp_levelDb_machine").toFile();
+	public KvinParquetBenchmark() {
+		try {
+			processUseCaseLevelDbStoreDir = Files.createTempDirectory("temp_levelDb_process").toFile();
+			machineUseCaseLevelDbStoreDir = Files.createTempDirectory("temp_levelDb_machine").toFile();
 
-            processUseCaseParquetStoreDir = Files.createTempDirectory("temp_parquet_process").toFile();
-            machineUseCaseParquetStoreDir = Files.createTempDirectory("temp_parquet_machine").toFile();
+			processUseCaseParquetStoreDir = Files.createTempDirectory("temp_parquet_process").toFile();
+			machineUseCaseParquetStoreDir = Files.createTempDirectory("temp_parquet_machine").toFile();
 
-            processUseCaseLevelDbStore = new KvinLevelDb(processUseCaseLevelDbStoreDir);
-            machineUseCaseLevelDbStore = new KvinLevelDb(machineUseCaseLevelDbStoreDir);
+			processUseCaseLevelDbStore = new KvinLevelDb(processUseCaseLevelDbStoreDir);
+			machineUseCaseLevelDbStore = new KvinLevelDb(machineUseCaseLevelDbStoreDir);
 
-            processUseCaseParquetStore = new KvinParquet(processUseCaseParquetStoreDir.getAbsolutePath() + "/");
-            machineUseCaseParquetStore = new KvinParquet(machineUseCaseParquetStoreDir.getAbsolutePath() + "/");
+			processUseCaseParquetStore = new KvinParquet(processUseCaseParquetStoreDir.getAbsolutePath() + "/");
+			machineUseCaseParquetStore = new KvinParquet(machineUseCaseParquetStoreDir.getAbsolutePath() + "/");
 
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+	}
 
-    public static void main(String[] args) throws RunnerException {
-        Options opt = new OptionsBuilder()
-                .include(KvinParquetBenchmark.class.getSimpleName()) // adapt to control which benchmark tests to run
-                .forks(1)
-                .build();
+	public static void main(String[] args) throws RunnerException {
+		Options opt = new OptionsBuilder()
+				.include(KvinParquetBenchmark.class.getSimpleName()) // adapt to control which benchmark tests to run
+				.forks(1)
+				.build();
 
-        new Runner(opt).run();
-    }
+		new Runner(opt).run();
+	}
 
-    @Benchmark
-    public void testKvinLevelDbReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        try (TupleQueryResult result = readFromStore(processUseCaseLevelDbStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/")) {
-            while (result.hasNext()) {
-                blackhole.consume(result.next());
-            }
-        }
-    }
+	@Benchmark
+	public void levelDbReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
+		int count = readFromStore(processUseCaseLevelDbStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
+		System.out.println("count: " + count);
+	}
 
-    @Benchmark
-    public void testKvinLevelDbReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        try (TupleQueryResult result = readFromStore(machineUseCaseLevelDbStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.")) {
-            while (result.hasNext()) {
-                blackhole.consume(result.next());
-            }
-        }
-    }
+	@Benchmark
+	public void levelDbReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
+		readFromStore(machineUseCaseLevelDbStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
+	}
 
-    @Benchmark
-    public void testKvinParquetReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        try (TupleQueryResult result = readFromStore(processUseCaseParquetStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/")) {
-            while (result.hasNext()) {
-                blackhole.consume(result.next());
-            }
-        }
-    }
+	@Benchmark
+	public void parquetReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
+		int count = readFromStore(processUseCaseParquetStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
+		System.out.println("count: " + count);
+	}
 
-    @Benchmark
-    public void testKvinParquetReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        try (TupleQueryResult result = readFromStore(machineUseCaseParquetStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.")) {
-            while (result.hasNext()) {
-                blackhole.consume(result.next());
-            }
-        }
-    }
+	@Benchmark
+	public void parquetReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
+		readFromStore(machineUseCaseParquetStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
+	}
 
-    @Benchmark
-    public void testSingleItemReadPerformanceForProcessUseCaseParquetStore(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-        URI item = URIs.createURI("http://dm.adaproq.de/vocab/wp1995");
-        IExtendedIterator<KvinTuple> tuples = processUseCaseParquetStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0);
-        while (tuples.hasNext()) {
-            KvinTuple tuple = tuples.next();
-            blackhole.consume(tuple);
-        }
-    }
+	@Benchmark
+	public void parquetSingleItemReadPerformance(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
+		URI item = URIs.createURI("http://dm.adaproq.de/vocab/wp1995");
+		IExtendedIterator<KvinTuple> tuples = processUseCaseParquetStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0);
+		while (tuples.hasNext()) {
+			KvinTuple tuple = tuples.next();
+			blackhole.consume(tuple);
+		}
+	}
 
-    private TupleQueryResult readFromStore(Kvin store, String query, String baseURI) {
-        MemoryStore memoryStore = new MemoryStore();
-        SailRepository repository = new SailRepository(memoryStore);
-        var resolver = new BaseFederatedServiceResolver() {
-            @Override
-            protected FederatedService createService(String s) throws QueryEvaluationException {
-                return new KvinFederatedService(store, this::getExecutorService, null, false);
-            }
-        };
-        repository.setFederatedServiceResolver(resolver);
+	@Benchmark
+	public void levelDbSingleItemReadPerformance(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
+		URI item = URIs.createURI("http://dm.adaproq.de/vocab/wp1995");
+		IExtendedIterator<KvinTuple> tuples = processUseCaseLevelDbStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0);
+		while (tuples.hasNext()) {
+			KvinTuple tuple = tuples.next();
+			blackhole.consume(tuple);
+		}
+	}
 
-        repository.init();
-        SailRepositoryConnection conn = repository.getConnection();
+	private int readFromStore(Kvin store, String query, String baseURI) {
+		MemoryStore memoryStore = new MemoryStore();
+		SailRepository repository = new SailRepository(memoryStore);
+		var resolver = new BaseFederatedServiceResolver() {
+			@Override
+			protected FederatedService createService(String s) throws QueryEvaluationException {
+				return new KvinFederatedService(store, this::getExecutorService, null, false);
+			}
+		};
+		repository.setFederatedServiceResolver(resolver);
 
-        SailTupleQuery tupleQuery = conn.prepareTupleQuery(QueryLanguage.SPARQL, query, baseURI);
-        TupleQueryResult result = tupleQuery.evaluate();
-        while (result.hasNext()) {
-            result.next();
-        }
-        result.close();
-        conn.close();
-        repository.shutDown();
-        resolver.shutDown();
+		repository.init();
+		SailRepositoryConnection conn = repository.getConnection();
 
-        return result;
-    }
+		SailTupleQuery tupleQuery = conn.prepareTupleQuery(QueryLanguage.SPARQL, query, baseURI);
+		int count = 0;
+		TupleQueryResult result = tupleQuery.evaluate();
+		while (result.hasNext()) {
+			result.next();
+			count++;
+		}
+		result.close();
+		conn.close();
+		repository.shutDown();
+		resolver.shutDown();
 
-    @State(Scope.Benchmark)
-    public static class KvinParquetBenchmarkBase {
-        public static NiceIterator<KvinTuple> LevelDBProcessUseCaseDataIterator, parquetProcessUseCaseDataIterator, LevelDBMachineUseCaseDataIterator, parquetMachineUseCaseDataIterator;
+		return count;
+	}
 
-        @Setup(Level.Trial)
-        public void setup() {
-            ingestProcessUseCaseDataForLevelDbStore();
-            ingestProcessUseCaseDataForParquetStore();
-            ingestMachineUseCaseDataForLevelDbStore();
-            ingestMachineUseCaseDataForParquetStore();
-        }
+	@State(Scope.Benchmark)
+	public static class KvinParquetBenchmarkBase {
+		public static NiceIterator<KvinTuple> LevelDBProcessUseCaseDataIterator, parquetProcessUseCaseDataIterator, LevelDBMachineUseCaseDataIterator, parquetMachineUseCaseDataIterator;
 
-        private void ingestProcessUseCaseDataForLevelDbStore() {
-            LevelDBProcessUseCaseDataIterator = generateProcessUseCaseData("http://dm.adaproq.de/vocab/", 2000); // 102000 tuples
-            while (LevelDBProcessUseCaseDataIterator.hasNext()) {
-                KvinTuple tuple = LevelDBProcessUseCaseDataIterator.next();
-                processUseCaseLevelDbStore.put(Collections.singletonList(tuple));
-            }
-            LevelDBProcessUseCaseDataIterator.close();
-        }
+		@Setup(Level.Trial)
+		public void setup() {
+			ingestProcessUseCaseDataForLevelDbStore();
+			ingestProcessUseCaseDataForParquetStore();
+			ingestMachineUseCaseDataForLevelDbStore();
+			ingestMachineUseCaseDataForParquetStore();
+		}
 
-        private void ingestProcessUseCaseDataForParquetStore() {
-            parquetProcessUseCaseDataIterator = generateProcessUseCaseData("http://dm.adaproq.de/vocab/", 2000); // 102000 tuples
-            processUseCaseParquetStore.put(parquetProcessUseCaseDataIterator);
-            parquetProcessUseCaseDataIterator.close();
-        }
+		private void ingestProcessUseCaseDataForLevelDbStore() {
+			LevelDBProcessUseCaseDataIterator = generateProcessUseCaseData("http://dm.adaproq.de/vocab/", 2000); // 102000 tuples
+			while (LevelDBProcessUseCaseDataIterator.hasNext()) {
+				KvinTuple tuple = LevelDBProcessUseCaseDataIterator.next();
+				processUseCaseLevelDbStore.put(Collections.singletonList(tuple));
+			}
+			LevelDBProcessUseCaseDataIterator.close();
+		}
 
-        private void ingestMachineUseCaseDataForLevelDbStore() {
-            LevelDBMachineUseCaseDataIterator = generateMachineUseCaseData("http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#", 34); // 102000 tuples
-            while (LevelDBMachineUseCaseDataIterator.hasNext()) {
-                KvinTuple tuple = LevelDBMachineUseCaseDataIterator.next();
-                machineUseCaseLevelDbStore.put(Collections.singletonList(tuple));
-            }
-            LevelDBMachineUseCaseDataIterator.close();
-        }
+		private void ingestProcessUseCaseDataForParquetStore() {
+			parquetProcessUseCaseDataIterator = generateProcessUseCaseData("http://dm.adaproq.de/vocab/", 2000); // 102000 tuples
+			processUseCaseParquetStore.put(parquetProcessUseCaseDataIterator);
+			parquetProcessUseCaseDataIterator.close();
+		}
 
-        private void ingestMachineUseCaseDataForParquetStore() {
-            parquetMachineUseCaseDataIterator = generateMachineUseCaseData("http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#", 34); // 102000 tuples
-            machineUseCaseParquetStore.put(parquetMachineUseCaseDataIterator);
-            parquetMachineUseCaseDataIterator.close();
-        }
+		private void ingestMachineUseCaseDataForLevelDbStore() {
+			LevelDBMachineUseCaseDataIterator = generateMachineUseCaseData("http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#", 34); // 102000 tuples
+			while (LevelDBMachineUseCaseDataIterator.hasNext()) {
+				KvinTuple tuple = LevelDBMachineUseCaseDataIterator.next();
+				machineUseCaseLevelDbStore.put(Collections.singletonList(tuple));
+			}
+			LevelDBMachineUseCaseDataIterator.close();
+		}
 
-        @TearDown(Level.Trial)
-        public void tearDown() {
-            try {
-                processUseCaseLevelDbStore.close();
-                processUseCaseParquetStore.close();
-                machineUseCaseLevelDbStore.close();
-                machineUseCaseParquetStore.close();
-                FileUtils.deleteDirectory(new File(processUseCaseLevelDbStoreDir.getAbsolutePath()));
-                FileUtils.deleteDirectory(new File(processUseCaseParquetStoreDir.getAbsolutePath()));
-                FileUtils.deleteDirectory(new File(machineUseCaseLevelDbStoreDir.getAbsolutePath()));
-                FileUtils.deleteDirectory(new File(machineUseCaseParquetStoreDir.getAbsolutePath()));
+		private void ingestMachineUseCaseDataForParquetStore() {
+			parquetMachineUseCaseDataIterator = generateMachineUseCaseData("http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#", 34); // 102000 tuples
+			machineUseCaseParquetStore.put(parquetMachineUseCaseDataIterator);
+			parquetMachineUseCaseDataIterator.close();
+		}
 
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
+		@TearDown(Level.Trial)
+		public void tearDown() {
+			try {
+				processUseCaseLevelDbStore.close();
+				processUseCaseParquetStore.close();
+				machineUseCaseLevelDbStore.close();
+				machineUseCaseParquetStore.close();
+				FileUtils.deleteDirectory(new File(processUseCaseLevelDbStoreDir.getAbsolutePath()));
+				FileUtils.deleteDirectory(new File(processUseCaseParquetStoreDir.getAbsolutePath()));
+				FileUtils.deleteDirectory(new File(machineUseCaseLevelDbStoreDir.getAbsolutePath()));
+				FileUtils.deleteDirectory(new File(machineUseCaseParquetStoreDir.getAbsolutePath()));
 
-        public NiceIterator<KvinTuple> generateProcessUseCaseData(String context, int workPieceCount) {
-            return new NiceIterator<>() {
-                int currentWorkPieceCount = 0;
-                Long currentTimestamp = 1653335520L;
-                int currentSeqNr = 0;
-                boolean isGeneratingInitialGTCWorkPieceTuples = true;
-                boolean isGeneratingWorkPieceTuples = false;
-                int currentPropertyCount = 0;
-                int weekCount = 1;
-                String[] abschnittValues = {"anfang", "mitte", "end"};
-                Random random = new Random(200);
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
 
-                @Override
-                public boolean hasNext() {
-                    return currentWorkPieceCount <= workPieceCount;
-                }
+		public NiceIterator<KvinTuple> generateProcessUseCaseData(String context, int workPieceCount) {
+			return new NiceIterator<>() {
+				int currentWorkPieceCount = 0;
+				Long currentTimestamp = 1653335520L;
+				int currentSeqNr = 0;
+				boolean isGeneratingInitialGTCWorkPieceTuples = true;
+				boolean isGeneratingWorkPieceTuples = false;
+				int currentPropertyCount = 0;
+				int weekCount = 1;
+				String[] abschnittValues = {"anfang", "mitte", "end"};
+				Random random = new Random(200);
 
-                @Override
-                public KvinTuple next() {
-                    KvinTuple tuple;
-                    if (isGeneratingInitialGTCWorkPieceTuples) {
-                        tuple = generateGtcWorkPieceTuple();
-                    } else {
-                        isGeneratingWorkPieceTuples = true;
-                        tuple = generateIndividualWorkPieceTuple();
-                    }
-                    return tuple;
-                }
+				@Override
+				public boolean hasNext() {
+					return currentWorkPieceCount <= workPieceCount;
+				}
 
-                private KvinTuple generateGtcWorkPieceTuple() {
-                    isGeneratingInitialGTCWorkPieceTuples = true;
-                    KvinTuple generatedTuple;
-                    URI item = URIs.createURI(context + "gtc");
-                    URI property = URIs.createURI(context + "workpiece");
-                    URI kvinContext = Kvin.DEFAULT_CONTEXT;
-                    URI value = URIs.createURI(context + "wp" + currentWorkPieceCount);
+				@Override
+				public KvinTuple next() {
+					KvinTuple tuple;
+					if (isGeneratingInitialGTCWorkPieceTuples) {
+						tuple = generateGtcWorkPieceTuple();
+					} else {
+						isGeneratingWorkPieceTuples = true;
+						tuple = generateIndividualWorkPieceTuple();
+					}
+					return tuple;
+				}
 
-                    if (currentWorkPieceCount < workPieceCount) {
-                        generatedTuple = new KvinTuple(item, property, kvinContext, currentTimestamp, currentSeqNr, value);
-                        //currentTimestamp = currentTimestamp + 3600;
-                        currentSeqNr++;
-                        currentWorkPieceCount++;
-                    } else {
-                        isGeneratingInitialGTCWorkPieceTuples = false;
-                        currentWorkPieceCount = 0;
-                        currentSeqNr = 1;
-                        generatedTuple = generateIndividualWorkPieceTuple();
-                    }
-                    return generatedTuple;
-                }
+				private KvinTuple generateGtcWorkPieceTuple() {
+					isGeneratingInitialGTCWorkPieceTuples = true;
+					KvinTuple generatedTuple;
+					URI item = URIs.createURI(context + "gtc");
+					URI property = URIs.createURI(context + "workpiece");
+					URI kvinContext = Kvin.DEFAULT_CONTEXT;
+					URI value = URIs.createURI(context + "wp" + currentWorkPieceCount);
 
-                private KvinTuple generateIndividualWorkPieceTuple() {
-                    KvinTuple tuple;
-                    if (currentPropertyCount < 50) {
-                        if (currentPropertyCount == 0) {
-                            tuple = getAbschnittTuple();
-                        } else {
-                            tuple = new KvinTuple(
-                                    URIs.createURI(context + "wp" + currentWorkPieceCount),
-                                    URIs.createURI(context + "property" + currentPropertyCount),
-                                    Kvin.DEFAULT_CONTEXT,
-                                    currentTimestamp,
-                                    0,
-                                    random.nextFloat());
-                        }
-                    } else {
-                        currentPropertyCount = 0;
-                        currentWorkPieceCount++;
-                        if (currentWorkPieceCount % 100 == 0) {
-                            currentTimestamp = currentTimestamp + (604800 * weekCount);
-                            weekCount++;
-                        }
-                        tuple = getAbschnittTuple();
-                    }
-                    currentPropertyCount++;
-                    return tuple;
-                }
+					if (currentWorkPieceCount < workPieceCount) {
+						generatedTuple = new KvinTuple(item, property, kvinContext, currentTimestamp, currentSeqNr, value);
+						//currentTimestamp = currentTimestamp + 3600;
+						currentSeqNr++;
+						currentWorkPieceCount++;
+					} else {
+						isGeneratingInitialGTCWorkPieceTuples = false;
+						currentWorkPieceCount = 0;
+						currentSeqNr = 1;
+						generatedTuple = generateIndividualWorkPieceTuple();
+					}
+					return generatedTuple;
+				}
 
-                private KvinTuple getAbschnittTuple() {
-                    return new KvinTuple(
-                            URIs.createURI(context + "wp" + currentWorkPieceCount),
-                            URIs.createURI(context + "abschnitt"),
-                            Kvin.DEFAULT_CONTEXT,
-                            currentTimestamp,
-                            0,
-                            abschnittValues[random.nextInt(abschnittValues.length)]);
-                }
+				private KvinTuple generateIndividualWorkPieceTuple() {
+					KvinTuple tuple;
+					if (currentPropertyCount < 50) {
+						if (currentPropertyCount == 0) {
+							tuple = getAbschnittTuple();
+						} else {
+							tuple = new KvinTuple(
+									URIs.createURI(context + "wp" + currentWorkPieceCount),
+									URIs.createURI(context + "property" + currentPropertyCount),
+									Kvin.DEFAULT_CONTEXT,
+									currentTimestamp,
+									0,
+									random.nextFloat());
+						}
+					} else {
+						currentPropertyCount = 0;
+						currentWorkPieceCount++;
+						if (currentWorkPieceCount % 100 == 0) {
+							currentTimestamp = currentTimestamp + (604800 * weekCount);
+							weekCount++;
+						}
+						tuple = getAbschnittTuple();
+					}
+					currentPropertyCount++;
+					return tuple;
+				}
 
-                @Override
-                public void close() {
-                    super.close();
-                }
-            };
-        }
+				private KvinTuple getAbschnittTuple() {
+					return new KvinTuple(
+							URIs.createURI(context + "wp" + currentWorkPieceCount),
+							URIs.createURI(context + "abschnitt"),
+							Kvin.DEFAULT_CONTEXT,
+							currentTimestamp,
+							0,
+							abschnittValues[random.nextInt(abschnittValues.length)]);
+				}
 
-        public NiceIterator<KvinTuple> generateMachineUseCaseData(String context, int partCount) {
-            return new NiceIterator<>() {
-                int currentPartCount = 0;
-                Long currentTimestamp = 1653335520L;
-                int currentSeqNr = 0;
-                int currentPropertyCount = 0;
-                int weekCount = 1, channelCount = 0;
-                String currentChannelType = ".Angle";
-                Random random = new Random(200);
+				@Override
+				public void close() {
+					super.close();
+				}
+			};
+		}
 
-                @Override
-                public boolean hasNext() {
-                    return currentPartCount < partCount;
-                }
+		public NiceIterator<KvinTuple> generateMachineUseCaseData(String context, int partCount) {
+			return new NiceIterator<>() {
+				int currentPartCount = 0;
+				Long currentTimestamp = 1653335520L;
+				int currentSeqNr = 0;
+				int currentPropertyCount = 0;
+				int weekCount = 1, channelCount = 0;
+				String currentChannelType = ".Angle";
+				Random random = new Random(200);
 
-                @Override
-                public KvinTuple next() {
-                    return generatePartTuple();
-                }
+				@Override
+				public boolean hasNext() {
+					return currentPartCount < partCount;
+				}
 
-                private KvinTuple generatePartTuple() {
-                    KvinTuple tuple;
-                    if (currentPropertyCount > 3000) {
-                        currentPropertyCount = 0;
-                        channelCount = 0;
-                        currentPartCount++;
-                        if (currentPartCount % 5 == 0) {
-                            currentTimestamp = currentTimestamp + (604800 * weekCount);
-                            weekCount++;
-                        }
-                    }
-                    tuple = generateTuple();
-                    currentPropertyCount++;
-                    return tuple;
-                }
+				@Override
+				public KvinTuple next() {
+					return generatePartTuple();
+				}
 
-                private KvinTuple generateTuple() {
-                    String property;
-                    if (currentPropertyCount % 500 == 0) {
-                        channelCount++;
-                    }
+				private KvinTuple generatePartTuple() {
+					KvinTuple tuple;
+					if (currentPropertyCount > 3000) {
+						currentPropertyCount = 0;
+						channelCount = 0;
+						currentPartCount++;
+						if (currentPartCount % 5 == 0) {
+							currentTimestamp = currentTimestamp + (604800 * weekCount);
+							weekCount++;
+						}
+					}
+					tuple = generateTuple();
+					currentPropertyCount++;
+					return tuple;
+				}
 
-                    if (currentPropertyCount % 250 == 0) {
-                        if (currentChannelType.equals(".Angle")) {
-                            currentChannelType = ".Force";
-                        } else {
-                            currentChannelType = ".Angle";
-                        }
-                    }
+				private KvinTuple generateTuple() {
+					String property;
+					if (currentPropertyCount % 500 == 0) {
+						channelCount++;
+					}
 
-                    property = context + "ESW-M-Presskraefte_1.Channel" + channelCount + currentChannelType;
+					if (currentPropertyCount % 250 == 0) {
+						if (currentChannelType.equals(".Angle")) {
+							currentChannelType = ".Force";
+						} else {
+							currentChannelType = ".Angle";
+						}
+					}
 
-                    return new KvinTuple(
-                            URIs.createURI("part:" + currentPartCount),
-                            URIs.createURI(property),
-                            Kvin.DEFAULT_CONTEXT,
-                            currentTimestamp,
-                            currentPropertyCount,
-                            random.nextFloat());
-                }
+					property = context + "ESW-M-Presskraefte_1.Channel" + channelCount + currentChannelType;
 
-                @Override
-                public void close() {
-                    super.close();
-                }
-            };
-        }
-    }
+					return new KvinTuple(
+							URIs.createURI("part:" + currentPartCount),
+							URIs.createURI(property),
+							Kvin.DEFAULT_CONTEXT,
+							currentTimestamp,
+							currentPropertyCount,
+							random.nextFloat());
+				}
+
+				@Override
+				public void close() {
+					super.close();
+				}
+			};
+		}
+	}
 
 }
 
