@@ -16,6 +16,7 @@
 package io.github.linkedfactory.core.kvin;
 
 import java.io.Closeable;
+import java.util.Arrays;
 import java.util.List;
 
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -36,6 +37,8 @@ public interface Kvin extends Closeable {
 	 * The default context that is used for <code>null</code> values.
 	 */
 	URI DEFAULT_CONTEXT = URIs.createURI(DEFAULT_CONTEXT_VALUE);
+
+	List<URI> NULL_PROPERTY = Arrays.asList((URI) null);
 
 	/**
 	 * Add a listener to be notified of changes.
@@ -112,6 +115,9 @@ public interface Kvin extends Closeable {
 	default IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end, long begin,
 	                                           long limit, long interval, String op) {
 		IExtendedIterator<KvinTuple> it = NiceIterator.emptyIterator();
+		if (properties.isEmpty()) {
+			properties = NULL_PROPERTY;
+		}
 		for (URI item : items) {
 			for (URI property : properties) {
 				// use lazy initialization for further iterators
