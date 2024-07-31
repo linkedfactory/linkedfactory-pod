@@ -192,7 +192,24 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
     @Override
     protected QueryEvaluationStep prepare(LeftJoin join, QueryEvaluationContext context) throws QueryEvaluationException {
         if (useHashJoin(join.getLeftArg(), join.getRightArg())) {
-            return bindingSet -> new HashJoinIteration(KvinEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, true);
+            QueryEvaluationStep leftPrepared = precompile(join.getLeftArg(), context);
+            QueryEvaluationStep rightPrepared = precompile(join.getRightArg(), context);
+            String[] joinAttributes = HashJoinIteration.hashJoinAttributeNames(join);
+            return new BatchQueryEvaluationStep() {
+                @Override
+                public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
+                    return new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, true, joinAttributes, context);
+                }
+
+                @Override
+                public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
+                    return new HashJoinIteration(
+                            BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets),
+                            join.getLeftArg().getBindingNames(),
+                            BatchQueryEvaluationStep.evaluate(rightPrepared, bindingSets),
+                            join.getRightArg().getBindingNames(), true);
+                }
+            };
         } else {
             return super.prepare(join, context);
         }
