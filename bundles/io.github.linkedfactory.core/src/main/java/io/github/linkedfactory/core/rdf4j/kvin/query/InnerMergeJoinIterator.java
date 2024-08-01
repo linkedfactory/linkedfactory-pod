@@ -62,19 +62,17 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 			QueryEvaluationStep leftPrepared,
 			QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp,
 			Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService) {
-
-		CloseableIteration<BindingSet, QueryEvaluationException> leftIter = leftPrepared.evaluate(bindings);
-		if (leftIter == QueryEvaluationStep.EMPTY_ITERATION) {
-			return leftIter;
-		}
-
-		CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
+		CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
 		if (InnerJoinIterator.isAsync.get() != Boolean.TRUE) {
-			rightIter = new AsyncIterator<>(() -> preparedRight.evaluate(bindings), executorService);
+			leftIter = new AsyncIterator<>(() -> leftPrepared.evaluate(bindings), executorService);
 		} else {
-			rightIter = preparedRight.evaluate(bindings);
+			leftIter = leftPrepared.evaluate(bindings);
+			if (leftIter == QueryEvaluationStep.EMPTY_ITERATION) {
+				return leftIter;
+			}
 		}
 
+		CloseableIteration<BindingSet, QueryEvaluationException> rightIter = preparedRight.evaluate(bindings);
 		if (rightIter == QueryEvaluationStep.EMPTY_ITERATION) {
 			leftIter.close();
 			return rightIter;
