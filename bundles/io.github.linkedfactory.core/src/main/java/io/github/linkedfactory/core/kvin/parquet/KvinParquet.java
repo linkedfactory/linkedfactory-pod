@@ -305,8 +305,8 @@ public class KvinParquet implements Kvin {
 					internalTuple.setFirst(true);
 				}
 				writerState.writer.write(internalTuple);
-				writerState.minMax[0] = Math.min(writerState.minMax[0], writeContext.itemIdCounter);
-				writerState.minMax[1] = Math.max(writerState.minMax[1], writeContext.itemIdCounter);
+				writerState.minMax[0] = Math.min(writerState.minMax[0], writeContext.lastItemId);
+				writerState.minMax[1] = Math.max(writerState.minMax[1], writeContext.lastItemId);
 				prevTuple = internalTuple;
 			}
 
@@ -548,10 +548,12 @@ public class KvinParquet implements Kvin {
 			if (writeContext.hasExistingData) {
 				long id = getId(tuple.item, IdType.ITEM_ID);
 				if (id != 0L) {
+					writeContext.lastItemId = id;
 					return id;
 				}
 			}
 			long newId = ++writeContext.itemIdCounter;
+			writeContext.lastItemId = newId;
 			IdMapping mapping = new SimpleMapping();
 			mapping.setId(newId);
 			mapping.setValue(key);
@@ -1232,6 +1234,7 @@ public class KvinParquet implements Kvin {
 	class WriteContext {
 		boolean hasExistingData;
 		long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0;
+		long lastItemId = 0;
 		Map<String, Long> itemMap = new HashMap<>();
 		Map<String, Long> propertyMap = new HashMap<>();
 		Map<String, Long> contextMap = new HashMap<>();
