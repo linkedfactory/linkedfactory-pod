@@ -28,7 +28,7 @@ import java.io.{ByteArrayOutputStream, File, IOException, UncheckedIOException}
 import java.nio.{ByteBuffer, ByteOrder}
 import java.{io, util}
 import java.util.concurrent.{CopyOnWriteArraySet, Executors, Future}
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import java.util.concurrent.locks.{ReadWriteLock, ReentrantReadWriteLock}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
@@ -37,36 +37,36 @@ sealed trait EntryType {
   def id: Int
 
   def reverse: Int = id + 1
+
+  def index: Int
 }
 
 object EntryType {
   object SubjectToId extends EntryType {
+    val index = 0
     val id = 1
   }
 
   object PropertyToId extends EntryType {
+    val index = 1
     val id = 3
   }
 
   object ResourceToId extends EntryType {
+    val index = 2
     val id = 5
   }
 
   object ContextToId extends EntryType {
+    val index = 3
     val id = 7
   }
-}
-
-object SCPtoId extends EntryType {
-  val id = 9
 }
 
 /**
  * Indirect mapping of (item, property) -> ID and (ID, time, sequence-nr) -> value.
  */
 class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
-  val idKey: Array[Byte] = bytes("__NEXT_ID\u0000")
-
   val locks: Striped[ReadWriteLock] = Striped.readWriteLock(64)
 
   val activeWrites: AtomicInteger = new AtomicInteger(0)
@@ -114,13 +114,32 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     listeners.remove(listener)
   }
 
-  var id: Long = readLong(ids, idKey)
-  if (id <= 0) id = 1L
+  val nextIds: Array[AtomicLong] = readNextIds(List(EntryType.SubjectToId, EntryType.PropertyToId,
+    EntryType.ContextToId, EntryType.ResourceToId)).map(id => new AtomicLong(id))
 
-  private def nextId = {
-    val result = id
-    id += 1
-    putLong(ids, idKey, id)
+  private def nextId(entryType : EntryType): Long = {
+    nextIds(entryType.index).getAndIncrement()
+  }
+
+  def readNextIds(entryTypes : List[EntryType]): Array[Long] = {
+    val result = new Array[Long](entryTypes.length)
+    val it = ids.iterator()
+    try {
+      val idPrefix = new Array[Byte](2)
+      idPrefix(1) = 0xFF.toByte
+      entryTypes.foreach{t =>
+        idPrefix(0) = t.reverse.toByte
+        it.seek(idPrefix)
+        if (it.hasPrev) {
+          val pref = it.peekPrev()
+          if (pref.getKey()(0) == t.reverse.toByte) {
+            result(t.index) = Varint.readUnsigned(ByteBuffer.wrap(pref.getKey), 1) + 1L
+          }
+        }
+      }
+    } finally {
+      it.close()
+    }
     result
   }
 
@@ -154,7 +173,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
             idBytes = uriToIdCacheWrite.getIfPresent(cacheKey)
           }
           if (idBytes == null) {
-            val id = nextId
+            val id = nextId(entryType)
             idBytes = new Array[Byte](Varint.calcLengthUnsigned(id))
             Varint.writeUnsigned(idBytes, 0, id)
 
@@ -211,7 +230,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   def contextOrDefault(context: URI): URI = if (context == null) Kvin.DEFAULT_CONTEXT else context
 
   def toId(item: URI, property: URI, context: URI, generate: Boolean, writeBatch: WriteBatch): Array[Byte] = {
-    val cacheKey = (item.toString, context.toString, property.toString)
+    val cacheKey = (item.toString, if (context == null) Kvin.DEFAULT_CONTEXT.toString else context.toString, property.toString)
     var id = scpToIdCache.getIfPresent(cacheKey)
     if (id == null) {
       val itemId = toId(item, EntryType.SubjectToId, generate, writeBatch)
@@ -824,6 +843,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     } catch {
       case e: IOException => errors ::= e
     }
+    executor.shutdown()
     errors.headOption.foreach(e => throw new UncheckedIOException(e))
   }
 }

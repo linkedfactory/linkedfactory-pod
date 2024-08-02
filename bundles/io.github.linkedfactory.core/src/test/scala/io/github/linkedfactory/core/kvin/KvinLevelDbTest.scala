@@ -86,4 +86,31 @@ class KvinLevelDbTest extends KvinTestBase {
         }
     }
   }
+
+  @Test
+  def testIds: Unit = {
+    val points = 100
+    val pointDistance: Long = 100
+    val startTime: Long = pointDistance * points
+    val items = 50
+    (1 to items).foreach((nr: Int) => {
+      val uri = itemUri(nr)
+      for (i <- 0 until points) {
+        val time = startTime - i * pointDistance
+        val value = new Record(URIs.createURI("prop:itemNr"), nr)
+          .append(new Record(URIs.createURI("prop:pointNr"), i))
+          .append(new Record(URIs.createURI("prop:value"), URIs.createURI("some:value#" + time)))
+        // println("ADD: " + new KvinTuple(uri, valueProperty, ctx, time, value))
+        store.put(new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, value))
+      }
+    })
+
+    val nextIds = store.asInstanceOf[KvinLevelDb].nextIds.map(_.get()).toList
+
+    // close and re-open store
+    recreateStore
+
+    val nextIdsLoaded = store.asInstanceOf[KvinLevelDb].nextIds.map(_.get()).toList
+    assertEquals(nextIds, nextIdsLoaded)
+  }
 }
