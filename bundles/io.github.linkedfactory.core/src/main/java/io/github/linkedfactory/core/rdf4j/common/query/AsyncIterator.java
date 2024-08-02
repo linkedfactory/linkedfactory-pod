@@ -18,8 +18,9 @@ public class AsyncIterator<T> implements CloseableIteration<T, QueryEvaluationEx
 
 	public AsyncIterator(Supplier<CloseableIteration<T, QueryEvaluationException>> base, Supplier<ExecutorService> executorService) {
 		nextElements = new ArrayBlockingQueue<>(100);
+		var currentAsync = InnerJoinIterator.asyncDepth.get();
 		executorService.get().submit(() -> {
-			InnerJoinIterator.isAsync.set(true);
+			InnerJoinIterator.asyncDepth.set(currentAsync != null ? currentAsync + 1 : 1);
 			var baseIt = base.get();
 			try {
 				while (baseIt.hasNext()) {
@@ -40,7 +41,7 @@ public class AsyncIterator<T> implements CloseableIteration<T, QueryEvaluationEx
 				// just return
 			} finally {
 				baseIt.close();
-				InnerJoinIterator.isAsync.remove();
+				InnerJoinIterator.asyncDepth.remove();
 			}
 		});
 	}

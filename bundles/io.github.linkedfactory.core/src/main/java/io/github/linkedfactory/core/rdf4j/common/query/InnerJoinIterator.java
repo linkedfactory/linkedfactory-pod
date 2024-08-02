@@ -21,7 +21,8 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	 * Variables *
 	 *-----------*/
 
-	public static final ThreadLocal<Boolean> isAsync = new ThreadLocal<>();
+	public static final ThreadLocal<Integer> asyncDepth = new ThreadLocal<>();
+	public static final int MAX_ASYNC_DEPTH = 3;
 	private static final BindingSet NULL_BINDINGS = new EmptyBindingSet();
 	private static final int BATCH_SIZE = 200;
 	private final EvaluationStrategy strategy;
@@ -51,7 +52,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 		rightIter = new EmptyIteration<>();
 		leftIter = leftIt;
 
-		if (async && isAsync.get() == Boolean.TRUE) {
+		if (async && (asyncDepth.get() != null && asyncDepth.get() > InnerJoinIterator.MAX_ASYNC_DEPTH)) {
 			async = false;
 		}
 		joined = async ? new ArrayList<>() : null;
@@ -140,8 +141,9 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 					nextLefts.add(leftIter.next());
 				}
 			}
+			var currentAsync = asyncDepth.get();
 			executorService.get().submit(() -> {
-				isAsync.set(true);
+				asyncDepth.set(currentAsync != null ? currentAsync + 1 : 1);;
 				var rightIt = useBatch ?
 						((BatchQueryEvaluationStep) preparedJoinArg).evaluate(nextLefts) :
 						preparedJoinArg.evaluate(nextLefts.get(0));
@@ -164,7 +166,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 					// just return
 				} finally {
 					rightIt.close();
-					isAsync.remove();
+					asyncDepth.remove();
 				}
 			});
 		}

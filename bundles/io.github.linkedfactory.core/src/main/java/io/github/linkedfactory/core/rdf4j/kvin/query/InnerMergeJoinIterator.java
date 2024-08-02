@@ -62,20 +62,19 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 			QueryEvaluationStep leftPrepared,
 			QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp,
 			Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService) {
-		CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
-		if (InnerJoinIterator.isAsync.get() != Boolean.TRUE) {
-			leftIter = new AsyncIterator<>(() -> leftPrepared.evaluate(bindings), executorService);
-		} else {
-			leftIter = leftPrepared.evaluate(bindings);
-			if (leftIter == QueryEvaluationStep.EMPTY_ITERATION) {
-				return leftIter;
-			}
+		CloseableIteration<BindingSet, QueryEvaluationException> leftIter = leftPrepared.evaluate(bindings);
+		if (leftIter == QueryEvaluationStep.EMPTY_ITERATION) {
+			return leftIter;
 		}
 
-		CloseableIteration<BindingSet, QueryEvaluationException> rightIter = preparedRight.evaluate(bindings);
-		if (rightIter == QueryEvaluationStep.EMPTY_ITERATION) {
-			leftIter.close();
-			return rightIter;
+		CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
+		if (InnerJoinIterator.asyncDepth.get() == null || InnerJoinIterator.asyncDepth.get() < InnerJoinIterator.MAX_ASYNC_DEPTH) {
+			rightIter = new AsyncIterator<>(() -> preparedRight.evaluate(bindings), executorService);
+		} else {
+			rightIter = preparedRight.evaluate(bindings);
+			if (rightIter == QueryEvaluationStep.EMPTY_ITERATION) {
+				return rightIter;
+			}
 		}
 
 		return new InnerMergeJoinIterator<>(new PeekMarkIterator<>(leftIter), new PeekMarkIterator<>(rightIter), cmp, value, context);
