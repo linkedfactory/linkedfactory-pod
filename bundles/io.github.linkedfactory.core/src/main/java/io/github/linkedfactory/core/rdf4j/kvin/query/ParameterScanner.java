@@ -1,29 +1,23 @@
 package io.github.linkedfactory.core.rdf4j.kvin.query;
 
 import io.github.linkedfactory.core.rdf4j.kvin.KVIN;
+import net.enilink.commons.util.Pair;
 import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.model.Value;
-import org.eclipse.rdf4j.query.algebra.SingletonSet;
-import org.eclipse.rdf4j.query.algebra.StatementPattern;
-import org.eclipse.rdf4j.query.algebra.TupleExpr;
-import org.eclipse.rdf4j.query.algebra.Var;
+import org.eclipse.rdf4j.query.algebra.*;
 import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
 
-	public final Map<Var, Parameters> parameterIndex = new HashMap<>();
-	public final Map<Var, List<StatementPattern>> referencedBy = new HashMap<>();
+	protected final Map<VariableScopeChange, Map<Var, Parameters>> parameterIndex = new IdentityHashMap<>();
+	protected final Map<Var, List<StatementPattern>> referencedBy = new HashMap<>();
 
 	/**
 	 * Extracts the parameters from the given <code>expr</code>.
 	 *
-	 * @param expr
-	 *            The expression with parameter statements.
+	 * @param expr The expression with parameter statements.
 	 */
 	public void process(TupleExpr expr) throws RDF4JException {
 		expr.visit(this);
@@ -35,12 +29,37 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 	}
 
 	public Parameters getParameters(Var subject) {
-		return parameterIndex.get(subject);
+		return indexFor(subject, false).get(subject);
+	}
+
+	/**
+	 * Find closest parent (e.g., a sub-select) that indicates a scope change of the given variable.
+	 *
+	 * @param var The variable
+	 * @return closest scope changing node or <code>null</code>
+	 */
+	protected VariableScopeChange getContext(Var var) {
+		QueryModelNode parent = var.getParentNode();
+		while (parent != null) {
+			if (parent instanceof VariableScopeChange && ((VariableScopeChange) parent).isVariableScopeChange()) {
+				return (VariableScopeChange) parent;
+			}
+			parent = parent.getParentNode();
+		}
+		return null;
+	}
+
+	protected Map<Var, Parameters> indexFor(Var var, boolean create) {
+		var context = getContext(var);
+		if (create) {
+			return parameterIndex.computeIfAbsent(context, c -> new HashMap<>());
+		}
+		return parameterIndex.getOrDefault(context, Collections.emptyMap());
 	}
 
 	public Parameters getParameters(StatementPattern pattern) {
-		Parameters subjectParams = parameterIndex.get(pattern.getSubjectVar());
-		Parameters objectParams = parameterIndex.get(pattern.getObjectVar());
+		Parameters subjectParams = indexFor(pattern.getSubjectVar(), false).get(pattern.getSubjectVar());
+		Parameters objectParams = indexFor(pattern.getObjectVar(), false).get(pattern.getObjectVar());
 		if (subjectParams == null) {
 			return objectParams;
 		} else if (objectParams == null) {
@@ -51,10 +70,11 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 	}
 
 	protected Parameters createParameters(Var subject) {
-		Parameters params = parameterIndex.get(subject);
+		var index = indexFor(subject, true);
+		Parameters params = index.get(subject);
 		if (params == null) {
 			params = new Parameters();
-			parameterIndex.put(subject, params);
+			index.put(subject, params);
 		}
 		return params;
 	}
@@ -64,10 +84,10 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 		Value pValue = p.getValue();
 		final Var o = sp.getObjectVar();
 		boolean remove = true;
-		if (KVIN.FROM.equals(pValue) ) {
+		if (KVIN.FROM.equals(pValue)) {
 			// <> kvin:from 213123123 .
-			createParameters(sp.getSubjectVar()).from =o;
-		} else if (KVIN.TO.equals(pValue) ) {
+			createParameters(sp.getSubjectVar()).from = o;
+		} else if (KVIN.TO.equals(pValue)) {
 			// <> kvin:to 213123123
 			createParameters(sp.getSubjectVar()).to = o;
 		} else if (KVIN.LIMIT.equals(pValue)) {
@@ -92,7 +112,8 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 			// can be used to specify default parameters on an item
 			// <> kvin:params [ <kvin:limit> 1 ; <kvin:op> "avg" ; ...]
 			Parameters params = createParameters(sp.getObjectVar());
-			parameterIndex.put(sp.getSubjectVar(), params);
+			var index = indexFor(sp.getSubjectVar(), true);
+			index.put(sp.getSubjectVar(), params);
 		} else {
 			if (KVIN.VALUE.equals(pValue)) {
 				// ensure that parameters are created if only kvin:value is present
