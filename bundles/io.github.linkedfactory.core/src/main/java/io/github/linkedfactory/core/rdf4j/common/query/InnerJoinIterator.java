@@ -131,7 +131,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	}
 
 	private void enqueueNext() {
-		while (joined.size() < 5 && leftIter.hasNext()) {
+		while (joined.size() < 2 && leftIter.hasNext()) {
 			BlockingQueue<BindingSet> queue = new ArrayBlockingQueue<>(50);
 			joined.add(queue);
 			boolean useBatch = preparedJoinArg instanceof BatchQueryEvaluationStep;
@@ -144,7 +144,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 			var currentAsync = asyncDepth.get();
 			executorService.get().submit(() -> {
 				asyncDepth.set(currentAsync != null ? currentAsync + 1 : 1);;
-				var rightIt = useBatch ?
+				var rightIt = useBatch && nextLefts.size() > 1 ?
 						((BatchQueryEvaluationStep) preparedJoinArg).evaluate(nextLefts) :
 						preparedJoinArg.evaluate(nextLefts.get(0));
 				try {

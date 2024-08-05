@@ -3,6 +3,7 @@ package io.github.linkedfactory.core.rdf4j.kvin;
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.rdf4j.common.BNodeWithValue;
+import io.github.linkedfactory.core.rdf4j.common.query.AsyncIterator;
 import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.core.rdf4j.kvin.query.Parameters;
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -25,6 +26,8 @@ import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 
 import java.lang.reflect.Parameter;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 import static io.github.linkedfactory.core.rdf4j.common.Conversions.getLongValue;
 import static io.github.linkedfactory.core.rdf4j.common.Conversions.toRdfValue;
@@ -33,9 +36,11 @@ import static io.github.linkedfactory.core.rdf4j.kvin.KvinEvaluationStrategy.get
 public class KvinEvaluationUtil {
 
 	private final Kvin kvin;
+	private final Supplier<ExecutorService> executorService;
 
-	public KvinEvaluationUtil(Kvin kvin) {
+	public KvinEvaluationUtil(Kvin kvin, Supplier<ExecutorService> executorService) {
 		this.kvin = kvin;
+		this.executorService = executorService;
 	}
 
 	public static net.enilink.komma.core.URI toKommaUri(Value value) {
@@ -271,77 +276,96 @@ public class KvinEvaluationUtil {
 		final Var predVar = stmt.getPredicateVar();
 		final Iterator<BindingSet> bindingSetIterator = bindingSets.iterator();
 		return new AbstractCloseableIteration<>() {
-			Map<Value, Set<Value>> currentItems = new LinkedHashMap<>();
 			ParameterValues pv;
 			Value contextValue;
+			List<CloseableIteration<BindingSet, QueryEvaluationException>> iterators = new ArrayList<>(5);
 			CloseableIteration<BindingSet, QueryEvaluationException> it;
 			BindingSet last, savedNext;
+			Map<Value, Set<Value>> currentItems = new LinkedHashMap<>();
 
 			@Override
 			public boolean hasNext() throws QueryEvaluationException {
 				if (it == null || !it.hasNext()) {
 					if (it != null) {
 						it.close();
+						it = null;
 					}
-					if (currentItems.isEmpty()) {
-						while (savedNext != null || bindingSetIterator.hasNext()) {
-							BindingSet bs = savedNext != null ? savedNext : bindingSetIterator.next();
-							savedNext = null;
+					if (! iterators.isEmpty()) {
+						it = iterators.remove(0);
+					}
+					while (iterators.size() < 5) {
+						if (currentItems.isEmpty()) {
+							pv = null;
+							contextValue = null;
+							while (savedNext != null || bindingSetIterator.hasNext()) {
+								BindingSet bs = savedNext != null ? savedNext : bindingSetIterator.next();
+								savedNext = null;
 
-							var itemValue = getVarValue(subjectVar, bs);
-							if (itemValue == null) {
-								it = new EmptyIteration<>();
+								var itemValue = getVarValue(subjectVar, bs);
+								if (itemValue == null) {
+									it = new EmptyIteration<>();
+								}
+
+								final Value predValue = getVarValue(predVar, bs);
+
+								ParameterValues currentPv = new ParameterValues(params, bs);
+								Value currentContext = getVarValue(stmt.getContextVar(), bs);
+								if ((pv == null || currentPv.equals(pv)) && (contextValue == null || contextValue.equals(currentContext))) {
+									var itemProperties = currentItems.computeIfAbsent(itemValue, v -> new LinkedHashSet<>());
+									if (predValue != null) {
+										itemProperties.add(predValue);
+									}
+									if (pv == null) {
+										pv = currentPv;
+									}
+									if (contextValue == null) {
+										contextValue = currentContext;
+									}
+									last = bs;
+								} else {
+									savedNext = bs;
+									break;
+								}
+							}
+						}
+
+						while (!currentItems.isEmpty() && iterators.size() < 5) {
+							List<URI> items = new ArrayList<>();
+							List<URI> properties = new ArrayList<>();
+							Set<Value> propertyValues = null;
+							for (var itemsIt = currentItems.entrySet().iterator(); itemsIt.hasNext(); ) {
+								var entry = itemsIt.next();
+								if (propertyValues != null && !entry.getValue().equals(propertyValues)) {
+									break;
+								}
+								itemsIt.remove();
+								propertyValues = entry.getValue();
+								items.add(toKommaUri(entry.getKey()));
+							}
+							for (Value propertyValue : propertyValues) {
+								properties.add(toKommaUri(propertyValue));
 							}
 
-							final Value predValue = getVarValue(predVar, bs);
+							QueryBindingSet baseBindings = new QueryBindingSet(last);
+							if (!subjectVar.isConstant()) {
+								baseBindings.removeBinding(subjectVar.getName());
+							}
+							if (!predVar.isConstant()) {
+								baseBindings.removeBinding(predVar.getName());
+							}
 
-							ParameterValues currentPv = new ParameterValues(params, bs);
-							Value currentContext = getVarValue(stmt.getContextVar(), bs);
-							if ((pv == null || currentPv.equals(pv)) && (contextValue == null || contextValue.equals(currentContext))) {
-								var itemProperties = currentItems.computeIfAbsent(itemValue, v -> new LinkedHashSet<>());
-								if (predValue != null) {
-									itemProperties.add(predValue);
-								}
-								if (pv == null) {
-									pv = currentPv;
-								}
-								if (contextValue == null) {
-									contextValue = currentContext;
-								}
-								last = bs;
+							if (it == null) {
+								it = evaluate(vf, items, properties,
+										toKommaUri(contextValue), pv, params, baseBindings, stmt, dataset);
 							} else {
-								savedNext = bs;
-								break;
+								iterators.add(new AsyncIterator<>(() -> evaluate(vf, items, properties,
+										toKommaUri(contextValue), pv, params, baseBindings, stmt, dataset),
+										executorService));
 							}
 						}
-					}
-					if (!currentItems.isEmpty()) {
-						List<URI> items = new ArrayList<>();
-						List<URI> properties = new ArrayList<>();
-						Set<Value> propertyValues = null;
-						for (var it = currentItems.entrySet().iterator(); it.hasNext(); ) {
-							var entry = it.next();
-							if (propertyValues != null && !entry.getValue().equals(propertyValues)) {
-								break;
-							}
-							it.remove();
-							propertyValues = entry.getValue();
-							items.add(toKommaUri(entry.getKey()));
+						if (currentItems.isEmpty()) {
+							break;
 						}
-						for (Value propertyValue : propertyValues) {
-							properties.add(toKommaUri(propertyValue));
-						}
-
-						QueryBindingSet baseBindings = new QueryBindingSet(last);
-						if (!subjectVar.isConstant()) {
-							baseBindings.removeBinding(subjectVar.getName());
-						}
-						if (!predVar.isConstant()) {
-							baseBindings.removeBinding(predVar.getName());
-						}
-						it = evaluate(vf, items, properties, toKommaUri(contextValue), pv, params, baseBindings, stmt, dataset);
-						pv = null;
-						contextValue = null;
 					}
 				}
 				return it != null && it.hasNext();

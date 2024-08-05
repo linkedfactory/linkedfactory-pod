@@ -183,7 +183,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
             if (subjectValue != null && subjectValue.isIRI()) {
                 Parameters params = scanner.getParameters(stmt.getObjectVar());
-                return new KvinEvaluationUtil(kvin).evaluate(vf, bs, params == null ? new Parameters() : params, stmt, dataset);
+                return new KvinEvaluationUtil(kvin, executorService).evaluate(vf, bs, params == null ? new Parameters() : params, stmt, dataset);
             }
         }
         return new EmptyIteration<>();
@@ -365,5 +365,9 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
     public ValueFactory getValueFactory() {
         return vf;
+    }
+
+    public Supplier<ExecutorService> getExecutorService() {
+        return executorService;
     }
 }

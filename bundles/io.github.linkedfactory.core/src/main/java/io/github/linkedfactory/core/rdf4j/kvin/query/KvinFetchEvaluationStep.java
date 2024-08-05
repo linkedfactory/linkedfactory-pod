@@ -23,7 +23,7 @@ public class KvinFetchEvaluationStep implements QueryEvaluationStep, BatchQueryE
 		this.strategy = strategy;
 		this.fetch = fetch;
 		this.context = context;
-		this.evalUtil = new KvinEvaluationUtil(strategy.getKvin());
+		this.evalUtil = new KvinEvaluationUtil(strategy.getKvin(), strategy.getExecutorService());
 	}
 
 	@Override
