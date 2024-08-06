@@ -123,6 +123,9 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
   def readNextIds(entryTypes : List[EntryType]): Array[Long] = {
     val result = new Array[Long](entryTypes.length)
+    // default id is 1
+    util.Arrays.fill(result, 1)
+
     val it = ids.iterator()
     try {
       val idPrefix = new Array[Byte](2)
