@@ -15,8 +15,9 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.core.kvin.util.CsvFormatParser
+import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser}
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
+import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
 import io.github.linkedfactory.service.util.{JsonFormatParser, LineProtocolParser}
 import net.enilink.commons.iterator.IExtendedIterator
 import net.enilink.komma.core.{URI, URIs}
@@ -29,6 +30,7 @@ import net.liftweb.json.Extraction.decompose
 import net.liftweb.json.JsonAST._
 import net.liftweb.json.JsonDSL._
 import net.liftweb.util.Helpers._
+import net.liftweb.util.Schedule
 import org.apache.commons.csv.{CSVFormat, CSVPrinter}
 
 import java.io.{InputStream, OutputStream, OutputStreamWriter}
@@ -295,6 +297,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     val interval = S.param("interval") flatMap (v => tryo(v.toDouble.longValue)) openOr 0L
     val op = S.param("op") map (_.trim)
 
+    val executorService = FederatedServiceComponent.getExecutorService()
+    val modelUri = contextModelUri
     val results = items map { item =>
       val itemData = for (
         property <- {
@@ -305,9 +309,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       ) yield {
         val propertyData = (interval, op) match {
           case (_, Full(op)) if interval > 0 =>
-            store.fetch(item, property, contextModelUri, end, begin, limit, interval, op)
+            new AsyncExtendedIterator(() => store.fetch(item, property, modelUri, end, begin, limit, interval, op), () => executorService)
           case _ =>
-            store.fetch(item, property, contextModelUri, end, begin, limit, 0, null)
+            new AsyncExtendedIterator(() => store.fetch(item, property, modelUri, end, begin, limit, 0, null), () => executorService)
         }
         property.toString -> propertyData
       }

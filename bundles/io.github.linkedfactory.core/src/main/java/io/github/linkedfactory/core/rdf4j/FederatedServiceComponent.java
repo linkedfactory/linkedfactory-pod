@@ -18,14 +18,29 @@ import org.eclipse.rdf4j.repository.Repository;
 import org.osgi.service.component.annotations.*;
 
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Component
 public class FederatedServiceComponent {
+	private static ExecutorService executorService;
 	IModelSet ms;
 	Kvin kvin;
 	AbstractFederatedServiceResolver serviceResolver;
 	@Reference(cardinality = ReferenceCardinality.OPTIONAL)
 	volatile ContextProvider contextProvider;
+
+	public static synchronized ExecutorService getExecutorService() {
+		if (executorService == null) {
+			executorService = Executors.newCachedThreadPool();
+			Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+				if (executorService != null) {
+					executorService.shutdown();
+				}
+			}));
+		}
+		return executorService;
+	}
 
 	@Activate
 	void activate() {
@@ -42,15 +57,15 @@ public class FederatedServiceComponent {
 					protected FederatedService createService(String serviceUrl)
 							throws QueryEvaluationException {
 						if (serviceUrl.startsWith("aas-api:")) {
-							return new AasFederatedService(serviceUrl.replaceFirst("^aas-api:", ""), this::getExecutorService);
+							return new AasFederatedService(serviceUrl.replaceFirst("^aas-api:", ""), () -> getExecutorService());
 						} else if (serviceUrl.equals("kvin:")) {
 							return new KvinFederatedService(kvin,
-									this::getExecutorService,
+									() -> getExecutorService(),
 									() -> contextProvider == null ? Kvin.DEFAULT_CONTEXT : contextProvider.getContext(),
 									false);
 						} else if (getKvinServiceUrl(serviceUrl).isPresent()) {
 							String url = getKvinServiceUrl(serviceUrl).get();
-							return new KvinFederatedService(new KvinHttp(url), this::getExecutorService,
+							return new KvinFederatedService(new KvinHttp(url), () -> getExecutorService(),
 									() -> contextProvider == null ? Kvin.DEFAULT_CONTEXT : contextProvider.getContext(),
 									true);
 						}
