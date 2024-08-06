@@ -883,7 +883,7 @@ public class KvinParquet implements Kvin {
 				filter = and(filter, gtEq(FilterApi.longColumn("time"), begin));
 			}
 			if (end != null) {
-				filter = and(filter, lt(FilterApi.longColumn("time"), end));
+				filter = and(filter, ltEq(FilterApi.longColumn("time"), end));
 			}
 
 			final FilterPredicate filterFinal = filter;
