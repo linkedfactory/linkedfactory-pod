@@ -20,9 +20,7 @@ public class AsyncExtendedIterator<T> extends NiceIterator<T> {
 
 	public AsyncExtendedIterator(Supplier<IExtendedIterator<T>> base, Supplier<ExecutorService> executorService) {
 		nextElements = new ArrayBlockingQueue<>(100);
-		var currentAsync = InnerJoinIterator.asyncDepth.get();
 		executorService.get().submit(() -> {
-			InnerJoinIterator.asyncDepth.set(currentAsync != null ? currentAsync + 1 : 1);
 			var baseIt = base.get();
 			try {
 				while (baseIt.hasNext()) {
@@ -33,27 +31,34 @@ public class AsyncExtendedIterator<T> extends NiceIterator<T> {
 						}
 					}
 				}
-				baseIt.close();
-				while (!nextElements.offer((T) NULL_ELEMENT, 10, TimeUnit.MILLISECONDS)) {
-					if (closed) {
-						return;
-					}
-				}
 			} catch (InterruptedException e) {
 				// just return
 			} finally {
-				baseIt.close();
-				InnerJoinIterator.asyncDepth.remove();
+				try {
+					baseIt.close();
+				} finally {
+					try {
+						while (!nextElements.offer((T) NULL_ELEMENT, 10, TimeUnit.MILLISECONDS)) {
+							if (closed) {
+								return;
+							}
+						}
+					} catch (InterruptedException e) {
+						// just return
+					}
+				}
 			}
 		});
 	}
 
 	@Override
 	public boolean hasNext() {
-		if (next == null) {
+		if (next == null && !closed) {
 			try {
 				T nextElement = nextElements.take();
-				if (nextElement != NULL_ELEMENT) {
+				if (nextElement == NULL_ELEMENT) {
+					close();
+				}  else {
 					next = nextElement;
 				}
 			} catch (InterruptedException e) {

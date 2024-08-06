@@ -48,10 +48,12 @@ public class AsyncIterator<T> implements CloseableIteration<T, QueryEvaluationEx
 
 	@Override
 	public boolean hasNext() {
-		if (next == null) {
+		if (next == null && !closed) {
 			try {
 				T nextElement = nextElements.take();
-				if (nextElement != NULL_ELEMENT) {
+				if (nextElement == NULL_ELEMENT) {
+					close();
+				} else {
 					next = nextElement;
 				}
 			} catch (InterruptedException e) {
