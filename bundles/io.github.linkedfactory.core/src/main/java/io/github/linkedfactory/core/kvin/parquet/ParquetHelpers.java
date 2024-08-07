@@ -5,7 +5,6 @@ import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
-import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.reflect.ReflectData;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -13,11 +12,11 @@ import org.apache.parquet.avro.AvroParquetWriter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.apache.parquet.io.api.Binary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -138,16 +137,16 @@ public class ParquetHelpers {
 		}
 	}
 
-	public static KvinTuple recordToTuple(URI item, URI property, URI context, GenericRecord record) throws IOException {
+	public static KvinTuple recordToTuple(URI item, URI property, URI context, KvinParquet.GroupRecord record) throws IOException {
 		long time = (Long) record.get(1);
 		int seqNr = (Integer) record.get(2);
-		int fields = record.getSchema().getFields().size();
+		var fields = record.group.getType().getFields();
 		Object value = null;
-		for (int i = kvinTupleFirstField; i < fields; i++) {
+		for (int i = kvinTupleFirstField; i < fields.size(); i++) {
 			value = record.get(i);
 			if (value != null) {
-				if (i == fields - 1) {
-					value = decodeRecord((ByteBuffer) value);
+				if (value instanceof Binary) {
+					value = decodeRecord(((Binary) value).toByteBuffer());
 				}
 				break;
 			}
