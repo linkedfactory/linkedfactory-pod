@@ -995,7 +995,8 @@ public class KvinParquet implements Kvin {
 
 				KvinTuple selectNextTuple() throws IOException {
 					boolean skipAfterLimit = limit != 0 && propertyValueCount >= limit;
-					if (skipAfterLimit && propertyIds.length == 1) {
+					if (skipAfterLimit && itemIds.length == 1 && propertyIds.length == 1) {
+						// we are finished, if only one item and one property is requested
 						return null;
 					}
 
