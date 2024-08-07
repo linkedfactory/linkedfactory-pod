@@ -934,6 +934,49 @@ public class KvinParquet implements Kvin {
 	}
 
 	private IExtendedIterator<KvinTuple> fetchInternal(List<URI> items, List<URI> properties, URI context, Long end, Long begin, Long limit) throws IOException {
+		if (items.size() == 1 && limit != null && limit > 0L) {
+			// this optimizes the case where data needs to be skipped due to a limit as this is currently not
+			// achievable with filters
+			if (properties.isEmpty()) {
+				properties = properties(items.get(0), context).toList();
+			}
+			IExtendedIterator<KvinTuple> it = NiceIterator.emptyIterator();
+			for (URI property : properties) {
+				// use lazy initialization for further iterators
+				it = it.andThen(new NiceIterator<>() {
+					IExtendedIterator<KvinTuple> base;
+
+					@Override
+					public boolean hasNext() {
+						if (base == null) {
+							try {
+								base = doFetch(items, Collections.singletonList(property), context, end, begin, limit);
+							} catch (IOException e) {
+								throw new UncheckedIOException(e);
+							}
+						}
+						return base.hasNext();
+					}
+
+					@Override
+					public KvinTuple next() {
+						ensureHasNext();
+						return base.next();
+					}
+
+					@Override
+					public void close() {
+						base.close();
+					}
+				});
+			}
+			return it;
+		} else {
+			return doFetch(items, properties, context, end, begin, limit);
+		}
+	}
+
+	private IExtendedIterator<KvinTuple> doFetch(List<URI> items, List<URI> properties, URI context, Long end, Long begin, Long limit) throws IOException {
 		Lock readLock = readLock();
 		try {
 			URI contextFinal = context != null ? context : Kvin.DEFAULT_CONTEXT;
@@ -995,7 +1038,7 @@ public class KvinParquet implements Kvin {
 
 				KvinTuple selectNextTuple() throws IOException {
 					boolean skipAfterLimit = limit != 0 && propertyValueCount >= limit;
-					if (skipAfterLimit && itemIds.length == 1 && propertyIds.length == 1) {
+					if (skipAfterLimit && itemIds.length == 1 && propertyIds != EMPTY_IDS && propertyIds.length == 1) {
 						// we are finished, if only one item and one property is requested
 						return null;
 					}
