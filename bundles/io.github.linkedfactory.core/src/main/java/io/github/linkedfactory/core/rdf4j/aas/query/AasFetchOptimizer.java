@@ -80,15 +80,16 @@ public class AasFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException>
                 root = new Join(fetches.get(i--), root);
             }
 
-            Join newLeft = new Join();
-            newLeft.setLeftArg(root);
-            newLeft.setRightArg(node.getLeftArg());
+            Join newJoin = new Join();
+            newJoin.setLeftArg(root);
 
-            Join newNode = new Join();
-            newNode.setLeftArg(newLeft);
-            newNode.setRightArg(node.getRightArg());
+            Join newRight = new Join();
+            newRight.setLeftArg(node.getLeftArg());
+            newRight.setRightArg(node.getRightArg());
 
-            node.replaceWith(newNode);
+            newJoin.setRightArg(newRight);
+
+            node.replaceWith(newJoin);
         }
 
         // inspect further nodes
