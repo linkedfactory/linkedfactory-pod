@@ -140,15 +140,10 @@ public class ParquetHelpers {
 	public static KvinTuple recordToTuple(URI item, URI property, URI context, KvinParquet.GroupRecord record) throws IOException {
 		long time = (Long) record.get(1);
 		int seqNr = (Integer) record.get(2);
-		var fields = record.group.getType().getFields();
-		Object value = null;
-		for (int i = kvinTupleFirstField; i < fields.size(); i++) {
-			value = record.get(i);
-			if (value != null) {
-				if (value instanceof Binary) {
-					value = decodeRecord(((Binary) value).toByteBuffer());
-				}
-				break;
+		Object value = record.getFirstNonNull(kvinTupleFirstField);
+		if (value != null) {
+			if (value instanceof Binary) {
+				value = decodeRecord(((Binary) value).toByteBuffer());
 			}
 		}
 		return new KvinTuple(item, property, context, time, seqNr, value);

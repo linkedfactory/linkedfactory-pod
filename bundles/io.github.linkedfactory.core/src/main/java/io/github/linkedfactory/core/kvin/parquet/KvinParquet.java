@@ -793,7 +793,7 @@ public class KvinParquet implements Kvin {
 		try {
 			IExtendedIterator<KvinTuple> internalResult = fetchInternal(items, properties, context, end, begin, limit);
 			if (op != null) {
-				internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
+				internalResult = new AggregatingIterator<>(internalResult, interval == 0 ? end - begin : interval, op.trim().toLowerCase(), limit) {
 					@Override
 					protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
 						return new KvinTuple(item, property, context, time, seqNr, value);
@@ -1338,6 +1338,22 @@ public class KvinParquet implements Kvin {
 		public Object get(int i) {
 			var value = ((SimpleGroupExt) group).getObject(i, row);
 			var type = group.getType().getType(i);
+			if (value instanceof Binary) {
+				var annotation = type.getLogicalTypeAnnotation();
+				if (annotation != null && "STRING".equals(annotation.toString())) {
+					return new String(((Binary) value).getBytes(), StandardCharsets.UTF_8);
+				}
+			}
+			return value;
+		}
+
+		public Object getFirstNonNull(int startIndex) {
+			var index = ((SimpleGroupExt) group).getLastNonNull();
+			if (index < startIndex) {
+				return null;
+			}
+			var value = ((SimpleGroupExt) group).getObject(index, row);
+			var type = group.getType().getType(index);
 			if (value instanceof Binary) {
 				var annotation = type.getLogicalTypeAnnotation();
 				if (annotation != null && "STRING".equals(annotation.toString())) {

@@ -11,11 +11,15 @@ import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.common.iteration.LookAheadIteration;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
+import org.eclipse.rdf4j.query.algebra.In;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 import org.eclipse.rdf4j.query.impl.EmptyBindingSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvaluationException> {
+	private static final Logger log = LoggerFactory.getLogger(InnerJoinIterator.class);
 
 	/*-----------*
 	 * Variables *
@@ -143,11 +147,13 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 			}
 			var currentAsync = asyncDepth.get();
 			executorService.get().submit(() -> {
-				asyncDepth.set(currentAsync != null ? currentAsync + 1 : 1);;
-				var rightIt = useBatch && nextLefts.size() > 1 ?
-						((BatchQueryEvaluationStep) preparedJoinArg).evaluate(nextLefts) :
-						preparedJoinArg.evaluate(nextLefts.get(0));
+				asyncDepth.set(currentAsync != null ? currentAsync + 1 : 1);
+				CloseableIteration<BindingSet, QueryEvaluationException> rightIt = null;
 				try {
+					rightIt = useBatch && nextLefts.size() > 1 ?
+							((BatchQueryEvaluationStep) preparedJoinArg).evaluate(nextLefts) :
+							preparedJoinArg.evaluate(nextLefts.get(0));
+
 					while (rightIt.hasNext()) {
 						BindingSet bindings = rightIt.next();
 						while (!queue.offer(bindings, 100, TimeUnit.MILLISECONDS)) {
@@ -157,16 +163,23 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 						}
 					}
 					rightIt.close();
-					while (!queue.offer(NULL_BINDINGS, 100, TimeUnit.MILLISECONDS)) {
-						if (isClosed()) {
-							return;
-						}
-					}
-				} catch (InterruptedException e) {
-					// just return
+				} catch (Exception e) {
+					log.error("Exception in async iterator", e);
 				} finally {
-					rightIt.close();
-					asyncDepth.remove();
+					if (rightIt != null) {
+						rightIt.close();
+					}
+					try {
+						while (!queue.offer(NULL_BINDINGS, 100, TimeUnit.MILLISECONDS)) {
+							if (isClosed()) {
+								return;
+							}
+						}
+					} catch (InterruptedException e) {
+						// ignore
+					} finally {
+						asyncDepth.remove();
+					}
 				}
 			});
 		}

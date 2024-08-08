@@ -33,6 +33,7 @@ public class SimpleGroupExt extends Group {
 
 	private final GroupType schema;
 	private final Object[] data;
+	private int lastNonNull = -1;
 
 	@SuppressWarnings("unchecked")
 	public SimpleGroupExt(GroupType schema) {
@@ -149,6 +150,9 @@ public class SimpleGroupExt extends Group {
 				list.add(value);
 				data[fieldIndex] = list;
 			}
+		}
+		if (fieldIndex > lastNonNull) {
+			lastNonNull = fieldIndex;
 		}
 	}
 
@@ -274,6 +278,9 @@ public class SimpleGroupExt extends Group {
 			list.add(value);
 			data[fieldIndex] = list;
 		}
+		if (fieldIndex > lastNonNull) {
+			lastNonNull = fieldIndex;
+		}
 	}
 
 	@Override
@@ -284,5 +291,9 @@ public class SimpleGroupExt extends Group {
 	@Override
 	public void writeValue(int field, int index, RecordConsumer recordConsumer) {
 		((Primitive) getValue(field, index)).writeValue(recordConsumer);
+	}
+
+	public int getLastNonNull() {
+		return lastNonNull;
 	}
 }
