@@ -1,4 +1,5 @@
 package io.github.linkedfactory.core.kvin.http;
+
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
@@ -31,11 +32,13 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.message.BasicNameValuePair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
 import java.util.stream.Collectors;
+
 public class KvinHttp implements Kvin {
     private static Logger logger = LoggerFactory.getLogger(KvinHttp.class);
     private static int MAX_GET_URL_LENGTH = 6000; // the absolute maximum should be 8192 (8kb)
@@ -44,13 +47,16 @@ public class KvinHttp implements Kvin {
     ObjectMapper mapper = new ObjectMapper();
     CloseableHttpClient httpClient;
     JsonFactory jsonFactory = new JsonFactory();
+
     public KvinHttp(String hostEndpoint) {
         this.hostEndpoint = hostEndpoint.endsWith("/") ? hostEndpoint.substring(0, hostEndpoint.length() - 1) : hostEndpoint;
         this.httpClient = getHttpClient();
     }
+
     public CloseableHttpClient getHttpClient() {
         return HttpClients.createDefault();
     }
+
     @Override
     public boolean addListener(KvinListener listener) {
         try {
@@ -60,6 +66,7 @@ public class KvinHttp implements Kvin {
             throw new RuntimeException(e);
         }
     }
+
     @Override
     public boolean removeListener(KvinListener listener) {
         try {
@@ -69,6 +76,7 @@ public class KvinHttp implements Kvin {
             throw new RuntimeException(e);
         }
     }
+
     @Override
     public void put(KvinTuple... tuples) {
         try {
@@ -77,6 +85,7 @@ public class KvinHttp implements Kvin {
             throw new RuntimeException(e);
         }
     }
+
     @Override
     public void put(Iterable<KvinTuple> tuples) {
         try {
@@ -118,6 +127,7 @@ public class KvinHttp implements Kvin {
             throw new RuntimeException(e);
         }
     }
+
     // The method will return the passed object converted to jackson JsonNode
     private JsonNode objectToJson(Object object) {
         JsonNode rootNode;
@@ -136,24 +146,28 @@ public class KvinHttp implements Kvin {
         }
         return rootNode;
     }
+
     @Override
     public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
         return fetchInternal(List.of(item), property == null ? Collections.emptyList() : List.of(property),
                 context, null, null, limit, null, null);
     }
+
     @Override
     public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
         return fetchInternal(List.of(item), property == null ? Collections.emptyList() : List.of(property),
                 context, end != KvinTuple.TIME_MAX_VALUE ? end : null,
                 begin != 0 ? begin : null, limit != 0 ? limit : null, interval != 0 ? interval : null, op);
     }
+
     @Override
     public IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end, long begin, long limit, long interval, String op) {
         return fetchInternal(items, properties,
                 context, end != KvinTuple.TIME_MAX_VALUE ? end : null,
                 begin != 0 ? begin : null, limit != 0 ? limit : null, interval != 0 ? interval : null, op);
     }
-    private IExtendedIterator<KvinTuple> fetchInternal(List<URI> items, List<URI> properties, URI context, Long end, Long begin, Long limit, Long interval, String op) {
+
+    protected IExtendedIterator<KvinTuple> fetchInternal(List<URI> items, List<URI> properties, URI context, Long end, Long begin, Long limit, Long interval, String op) {
         CloseableHttpResponse response = null;
         InputStream content = null;
         try {
@@ -175,7 +189,7 @@ public class KvinHttp implements Kvin {
                 approximateSize += pair.getName().length() + pair.getValue().length();
             }
             // add some overhead for encoding
-            approximateSize = (int)(approximateSize * 1.3);
+            approximateSize = (int) (approximateSize * 1.3);
             HttpUriRequest request;
             // decide if GET or POST should be used to send query
             if (approximateSize > MAX_GET_URL_LENGTH) {
@@ -217,22 +231,27 @@ public class KvinHttp implements Kvin {
             }
         }
     }
+
     @Override
     public long delete(URI item, URI property, URI context, long end, long begin) {
         return 0;
     }
+
     @Override
     public boolean delete(URI item, URI context) {
         return false;
     }
+
     @Override
     public IExtendedIterator<URI> descendants(URI item, URI context) {
         return descendantsInternal(item, context, null);
     }
+
     @Override
     public IExtendedIterator<URI> descendants(URI item, URI context, long limit) {
         return descendantsInternal(item, context, limit);
     }
+
     private IExtendedIterator<URI> descendantsInternal(URI item, URI context, Long limit) {
         try {
             // building url
@@ -251,6 +270,7 @@ public class KvinHttp implements Kvin {
             // converting json to URI
             return new NiceIterator<>() {
                 JsonParser jsonParser = jsonFactory.createParser(new ByteArrayInputStream(ByteStreams.toByteArray(entity.getContent())));
+
                 @Override
                 public boolean hasNext() {
                     try {
@@ -259,6 +279,7 @@ public class KvinHttp implements Kvin {
                         throw new RuntimeException(e);
                     }
                 }
+
                 @Override
                 public URI next() {
                     URI descendant = null;
@@ -275,9 +296,11 @@ public class KvinHttp implements Kvin {
                     }
                     return descendant;
                 }
+
                 private boolean isLoopingArray() throws IOException {
                     return jsonParser.nextToken() != JsonToken.END_ARRAY;
                 }
+
                 @Override
                 public void close() {
                     try {
@@ -295,6 +318,7 @@ public class KvinHttp implements Kvin {
             throw new RuntimeException(e);
         }
     }
+
     @Override
     public IExtendedIterator<URI> properties(URI item, URI context) {
         try {
@@ -313,6 +337,7 @@ public class KvinHttp implements Kvin {
             // converting json to URI
             return new NiceIterator<>() {
                 JsonParser jsonParser = jsonFactory.createParser(new ByteArrayInputStream(ByteStreams.toByteArray(entity.getContent())));
+
                 @Override
                 public boolean hasNext() {
                     try {
@@ -321,6 +346,7 @@ public class KvinHttp implements Kvin {
                         throw new RuntimeException(e);
                     }
                 }
+
                 @Override
                 public URI next() {
                     URI property = null;
@@ -337,9 +363,11 @@ public class KvinHttp implements Kvin {
                     }
                     return property;
                 }
+
                 private boolean isLoopingArray() throws IOException {
                     return jsonParser.nextToken() != JsonToken.END_ARRAY;
                 }
+
                 @Override
                 public void close() {
                     try {
@@ -357,6 +385,7 @@ public class KvinHttp implements Kvin {
             throw new RuntimeException(e);
         }
     }
+
     @Override
     public void close() {
         try {
@@ -365,9 +394,11 @@ public class KvinHttp implements Kvin {
             throw new RuntimeException(e);
         }
     }
+
     public HttpPost createHttpPost(String endpoint) {
         return new HttpPost(endpoint);
     }
+
     public HttpGet createHttpGet(String endpoint) {
         return new HttpGet(endpoint);
     }

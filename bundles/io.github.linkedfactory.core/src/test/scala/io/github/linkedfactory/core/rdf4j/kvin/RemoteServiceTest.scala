@@ -31,6 +31,7 @@ import org.junit.{After, Assert, Before, Test}
 
 import java.io.{ByteArrayInputStream, File}
 import java.nio.charset.StandardCharsets
+import java.{lang, util}
 import scala.util.Random
 
 class RemoteServiceTest {
@@ -99,12 +100,14 @@ class RemoteServiceTest {
         if (getKvinServiceUrl(url).isDefined) {
           val endpoint = getKvinServiceUrl(url).get
           val service = new KvinFederatedService(new KvinHttp(endpoint) {
-            override def fetch(item: URI, property: URI, context: URI, end: Long, begin: Long, limit: Long, interval: Long, op: String): IExtendedIterator[KvinTuple] = {
+            override protected def fetchInternal(items: util.List[URI], properties: util.List[URI], context: URI,
+                                                 end: lang.Long, begin: lang.Long, limit: lang.Long,
+                                                 interval: lang.Long, op: String): IExtendedIterator[KvinTuple] = {
               kvinHttpInstance.fetchCall = kvinHttpInstance.fetchCall + 1
               var response = ""
-              if (item.toString.endsWith("item1")) {
+              if (items.get(0).toString.endsWith("item1")) {
                 response = mockData.item1
-              } else if (item.toString.endsWith("item2")) {
+              } else if (items.get(0).toString.endsWith("item2")) {
                 response = mockData.item2
               }
               val jsonParser = new JsonFormatParser(new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8)))
