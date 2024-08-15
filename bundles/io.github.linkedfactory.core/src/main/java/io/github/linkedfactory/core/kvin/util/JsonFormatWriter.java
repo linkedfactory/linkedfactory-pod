@@ -19,11 +19,11 @@ public class JsonFormatWriter implements AutoCloseable {
 	boolean endObject = false;
 
 	public JsonFormatWriter(OutputStream outputStream, boolean prettyPrint) throws IOException {
-		generator = JsonFormatParser.jsonFactory.createGenerator(outputStream, JsonEncoding.UTF8);
+		this.generator = JsonFormatParser.jsonFactory.createGenerator(outputStream, JsonEncoding.UTF8);
 		if (prettyPrint) {
-			generator.useDefaultPrettyPrinter();
+			this.generator.useDefaultPrettyPrinter();
 		}
-		generator.writeStartObject();
+		this.generator.writeStartObject();
 	}
 
 	public JsonFormatWriter(OutputStream outputStream) throws IOException {
@@ -95,6 +95,12 @@ public class JsonFormatWriter implements AutoCloseable {
 			generator.writeStartObject();
 			generator.writeStringField("@id", value.toString());
 			generator.writeEndObject();
+		} else if (value instanceof Object[]) {
+			generator.writeStartArray();
+			for (Object element : (Object[]) value) {
+				writeValue(element);
+			}
+			generator.writeEndArray();
 		} else {
 			generator.writeObject(value);
 		}

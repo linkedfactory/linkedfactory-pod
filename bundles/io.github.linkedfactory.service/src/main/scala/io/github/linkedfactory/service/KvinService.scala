@@ -152,8 +152,15 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             val writer = new JsonFormatWriter(os, false)
             try {
               values.forEach(writer.writeTuple(_))
+            } catch {
+              case e : Exception => logger.error("Error while writing JSON data", e)
             } finally {
-              writer.close()
+              try {
+                values.close()
+              } finally {
+                writer.close()
+                os.close()
+              }
             }
           }
           OutputStreamResponse(streamer, -1, ("Content-Type", "application/json; charset=utf-8") ::
