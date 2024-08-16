@@ -327,7 +327,9 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
             }
             if (rightFetch != null) {
                 // do not use hash join if required bindings are provided by left join argument
-                Set<String> leftAssured = leftArg.getAssuredBindingNames();
+                // in case of projections with aggregates we just use the projected binding names
+                Set<String> leftAssured = leftArg instanceof Projection ? leftArg.getBindingNames() :
+                        leftArg.getAssuredBindingNames();
                 return ! rightFetch.getRequiredBindings().stream().anyMatch(required -> leftAssured.contains(required));
             }
         }
