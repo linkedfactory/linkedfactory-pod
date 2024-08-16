@@ -6,7 +6,8 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
-import io.github.linkedfactory.core.kvin.parquet.records.GroupRecordConverterExt;
+import io.github.linkedfactory.core.kvin.parquet.records.KvinRecordConverter;
+import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
 import io.github.linkedfactory.core.kvin.parquet.records.SimpleGroupExt;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -73,17 +74,21 @@ import static org.apache.parquet.filter2.predicate.FilterApi.*;
 public class KvinParquet implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinParquet.class);
 	static final long[] EMPTY_IDS = {0};
-	static Comparator<GroupRecord> GROUP_RECORD_COMPARATOR = (a, b) -> {
-		int diff = a.id.compareTo(b.id);
+	static Comparator<KvinRecord> KVIN_RECORD_COMPARATOR = (a, b) -> {
+		int diff = (int)(a.itemId - b.itemId);
 		if (diff != 0) {
 			return diff;
 		}
-		diff = ((Comparable<Long>) a.get(1)).compareTo((Long) b.get(1));
+		diff = (int)(a.propertyId - b.propertyId);
+		if (diff != 0) {
+			return diff;
+		}
+		diff = (int)(a.time - b.time);
 		if (diff != 0) {
 			// time is reverse
 			return -diff;
 		}
-		diff = ((Comparable<Integer>) a.get(2)).compareTo((Integer) b.get(2));
+		diff = a.seqNr - b.seqNr;
 		if (diff != 0) {
 			// seqNr is reverse
 			return -diff;
@@ -863,7 +868,7 @@ public class KvinParquet implements Kvin {
 				.build();
 	}
 
-	private IExtendedIterator<GroupRecord> createGroupReader(InputFileInfo fileInfo, FilterCompat.Filter filter) {
+	private IExtendedIterator<KvinRecord> createKvinRecordReader(InputFileInfo fileInfo, FilterCompat.Filter filter) {
 		try {
 			ParquetReadOptions.Builder optionsBuilder = HadoopReadOptions.builder(configuration, fileInfo.path);
 			optionsBuilder.withAllocator(new HeapByteBufferAllocator());
@@ -918,7 +923,7 @@ public class KvinParquet implements Kvin {
 			};
 			return new NiceIterator<>() {
 				RecordReader recordReader;
-				Group next;
+				KvinRecord next;
 				PageReadStore pages;
 				long readRows;
 
@@ -936,12 +941,12 @@ public class KvinParquet implements Kvin {
 									pages = r.readNextFilteredRowGroup();
 									if (pages != null && pages.getRowCount() > 0) {
 										recordReader = fileInfo.columnIO.getRecordReader(pages,
-												new GroupRecordConverterExt(fileInfo.metadata.getFileMetaData().getSchema()), filter);
+												new KvinRecordConverter(), filter);
 									}
 								}
 								if (recordReader != null) {
 									while (readRows < pages.getRowCount()) {
-										next = (Group) recordReader.read();
+										next = (KvinRecord) recordReader.read();
 										readRows++;
 										if (!recordReader.shouldSkipCurrentRecord()) {
 											break;
@@ -960,11 +965,11 @@ public class KvinParquet implements Kvin {
 				}
 
 				@Override
-				public GroupRecord next() {
+				public KvinRecord next() {
 					if (!hasNext()) {
 						throw new NoSuchElementException();
 					}
-					GroupRecord result = new GroupRecord(next, 0);
+					KvinRecord result = next;
 					next = null;
 					return result;
 				}
@@ -1066,13 +1071,15 @@ public class KvinParquet implements Kvin {
 				return NiceIterator.emptyIterator();
 			}
 			return new NiceIterator<KvinTuple>() {
-				final PriorityQueue<Pair<GroupRecord, IExtendedIterator<GroupRecord>>> nextTuples =
-						new PriorityQueue<>(Comparator.comparing(Pair::getFirst, GROUP_RECORD_COMPARATOR));
-				GroupRecord prevRecord;
+				final PriorityQueue<Pair<KvinRecord, IExtendedIterator<KvinRecord>>> nextTuples =
+						new PriorityQueue<>(Comparator.comparing(Pair::getFirst, KVIN_RECORD_COMPARATOR));
+				KvinRecord prevRecord;
 				KvinTuple nextTuple;
 				long propertyValueCount;
 				int folderIndex = -1;
 				boolean closed;
+				URI lastItem, lastProperty;
+				long lastItemId, lastPropertyId;
 
 				{
 					try {
@@ -1104,11 +1111,12 @@ public class KvinParquet implements Kvin {
 						var min = nextTuples.isEmpty() ? null : nextTuples.poll();
 						if (min != null) {
 							// omit duplicates in terms of id, time, and seqNr
-							boolean isDuplicate = prevRecord != null && GROUP_RECORD_COMPARATOR.compare(prevRecord, min.getFirst()) == 0;
+							boolean isDuplicate = prevRecord != null && KVIN_RECORD_COMPARATOR.compare(prevRecord, min.getFirst()) == 0;
 							if (!isDuplicate) {
 								if (skipAfterLimit) {
 									// reset value count if property changes
-									if (!min.getFirst().id.equals(prevRecord.id)) {
+									KvinRecord nextMin = min.getFirst();
+									if (nextMin.itemId != prevRecord.itemId || nextMin.propertyId != prevRecord.propertyId) {
 										skipAfterLimit = false;
 										propertyValueCount = 0;
 									}
@@ -1174,35 +1182,40 @@ public class KvinParquet implements Kvin {
 					}
 				}
 
-				KvinTuple convert(GroupRecord record) throws IOException {
-					var bb = record.id;
-					var itemId = bb.getLong(bb.position());
+				KvinTuple convert(KvinRecord record) throws IOException {
+					var itemId = record.itemId;
 					// skip item and context ids
-					var propertyId = bb.getLong(bb.position() + Long.BYTES * 2);
-					URI item = null;
-					URI property = null;
-					for (int i = 0; i < itemIds.length; i++) {
-						if (itemIds[i] == itemId) {
-							item = items.get(i);
-							break;
-						}
-					}
-					if (!properties.isEmpty()) {
-						for (int i = 0; i < propertyIds.length; i++) {
-							if (propertyIds[i] == propertyId) {
-								property = properties.get(i);
+					var propertyId = record.propertyId;
+					if (itemId != lastItemId) {
+						lastItemId = itemId;
+						for (int i = 0; i < itemIds.length; i++) {
+							if (itemIds[i] == itemId) {
+								lastItem = items.get(i);
 								break;
 							}
 						}
 					}
-					return recordToTuple(item, property != null ? property : getProperty(propertyId), contextFinal, record);
+					if (propertyId != lastPropertyId) {
+						lastPropertyId = propertyId;
+						if (!properties.isEmpty()) {
+							for (int i = 0; i < propertyIds.length; i++) {
+								if (propertyIds[i] == propertyId) {
+									lastProperty = properties.get(i);
+									break;
+								}
+							}
+						} else {
+							lastProperty = getProperty(propertyId);
+						}
+					}
+					return recordToTuple(lastItem, lastProperty, contextFinal, record);
 				}
 
 				void nextReaders() throws IOException {
 					folderIndex++;
 					List<Path> currentFiles = getDataFiles(dataFolders.get(folderIndex).toString());
 					for (Path file : currentFiles) {
-						IExtendedIterator<GroupRecord> reader = createGroupReader(getFile(file), FilterCompat.get(filterFinal));
+						IExtendedIterator<KvinRecord> reader = createKvinRecordReader(getFile(file), FilterCompat.get(filterFinal));
 						if (reader.hasNext()) {
 							nextTuples.add(new Pair<>(reader.next(), reader));
 						} else {
@@ -1318,15 +1331,10 @@ public class KvinParquet implements Kvin {
 
 			for (java.nio.file.Path dataFolder : dataFolders) {
 				for (Path dataFile : getDataFiles(dataFolder.toString())) {
-					var reader = createGroupReader(getFile(dataFile), FilterCompat.get(filter));
+					var reader = createKvinRecordReader(getFile(dataFile), FilterCompat.get(filter));
 					while (reader.hasNext()) {
 						var record = reader.next();
-						ByteBuffer idBb = ((Binary) record.get(0)).toByteBuffer();
-						// skip item id
-						idBb.getLong();
-						// skip context id
-						idBb.getLong();
-						long currentPropertyId = idBb.getLong();
+						long currentPropertyId = record.propertyId;
 						propertyIds.add(currentPropertyId);
 					}
 					reader.close();

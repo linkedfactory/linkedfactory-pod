@@ -1,6 +1,7 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
 import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
 import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import org.apache.avro.Schema;
@@ -137,15 +138,13 @@ public class ParquetHelpers {
 		}
 	}
 
-	public static KvinTuple recordToTuple(URI item, URI property, URI context, KvinParquet.GroupRecord record) throws IOException {
-		long time = (Long) record.get(1);
-		int seqNr = (Integer) record.get(2);
-		Object value = record.getFirstNonNull(kvinTupleFirstField);
+	public static KvinTuple recordToTuple(URI item, URI property, URI context, KvinRecord record) throws IOException {
+		Object value = record.value;
 		if (value != null) {
 			if (value instanceof Binary) {
 				value = decodeRecord(((Binary) value).toByteBuffer());
 			}
 		}
-		return new KvinTuple(item, property, context, time, seqNr, value);
+		return new KvinTuple(item, property, context, record.time, record.seqNr, value);
 	}
 }
