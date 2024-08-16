@@ -100,7 +100,7 @@ public class KvinParquet implements Kvin {
 	final Cache<URI, Long> itemIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final Cache<URI, Long> propertyIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final Cache<URI, Long> contextIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
-	final Cache<Pair<String, Integer>, ColumnIndexStore> indexCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	final Cache<Pair<Path, Integer>, ColumnIndexStore> indexCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 
 	// Lock
 	Map<Path, InputFileInfo> inputFileCache = new HashMap<>(); // hadoop input file cache
@@ -891,7 +891,7 @@ public class KvinParquet implements Kvin {
 					if (blocksField != null) {
 						try {
 							BlockMetaData block = (BlockMetaData) ((List<?>) blocksField.get(this)).get(blockIndex);
-							return indexCache.get(new Pair<>(block.getPath(), block.getOrdinal()), () -> {
+							return indexCache.get(new Pair<>(fileInfo.path, block.getOrdinal()), () -> {
 								Map<ColumnPath, ColumnIndex> columnIndexes = new HashMap<>();
 								Map<ColumnPath, OffsetIndex> offsetIndexes = new HashMap<>();
 								int i = 0;
@@ -959,6 +959,10 @@ public class KvinParquet implements Kvin {
 							}
 						} catch (IOException e) {
 							throw new UncheckedIOException(e);
+						} catch (Exception e) {
+							log.error("Error while reading next element", e);
+							close();
+							return false;
 						}
 					}
 					return next != null;
