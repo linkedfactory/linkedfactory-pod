@@ -30,7 +30,7 @@ public class ParquetHelpers {
 
 	// parquet file writer config
 	static final long ROW_GROUP_SIZE_MAPPINGS = 1048576L;  // 1 MB
-	static final long ROW_GROUP_SIZE_DATA = 5 * 1048576L; // 5MB - 134217728L is Parquet Java default
+	static final long ROW_GROUP_SIZE_DATA = 1 * 1048576L; // 1 MB - 134217728L is Parquet Java default
 	static final int PAGE_SIZE = 8192; // 8 KB
 	static final int DICT_PAGE_SIZE = 1048576; // 1 MB
 	static final int ZSTD_COMPRESSION_LEVEL = 12; // 1 - 22
@@ -75,7 +75,7 @@ public class ParquetHelpers {
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
 				.withDataModel(reflectData)
-				//.withBloomFilterEnabled("id", true)
+				.withBloomFilterEnabled("id", true)
 				.build();
 	}
 
