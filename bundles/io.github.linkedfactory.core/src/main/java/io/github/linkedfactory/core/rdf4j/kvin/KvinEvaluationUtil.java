@@ -75,7 +75,7 @@ public class KvinEvaluationUtil {
 		final Value predValue = getVarValue(predVar, bs);
 		final Var contextVar = stmt.getContextVar();
 		final Value contextValue = contextVar != null ? getVarValue(contextVar, bs) : null;
-		return evaluate(vf, List.of(item), List.of(toKommaUri(predValue)),
+		return evaluate(vf, List.of(item), predValue == null ? Collections.emptyList() : List.of(toKommaUri(predValue)),
 				toKommaUri(contextValue), pv, params, bs, stmt, dataset);
 	}
 

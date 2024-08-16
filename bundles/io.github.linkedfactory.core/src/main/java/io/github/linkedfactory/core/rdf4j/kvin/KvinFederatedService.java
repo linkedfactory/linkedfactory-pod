@@ -2,9 +2,7 @@ package io.github.linkedfactory.core.rdf4j.kvin;
 
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.rdf4j.ContextProvider;
-import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
-import io.github.linkedfactory.core.rdf4j.common.query.QueryJoinOptimizer;
-import io.github.linkedfactory.core.rdf4j.common.query.QueryModelPruner;
+import io.github.linkedfactory.core.rdf4j.common.query.*;
 import io.github.linkedfactory.core.rdf4j.kvin.query.KvinFetchOptimizer;
 import io.github.linkedfactory.core.rdf4j.kvin.query.ParameterScanner;
 import org.eclipse.rdf4j.common.exception.RDF4JException;
@@ -45,7 +43,7 @@ public class KvinFederatedService implements FederatedService {
     @Override
     public boolean ask(Service service, BindingSet bindings, String baseUri) throws QueryEvaluationException {
         final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
-            new SingletonIteration<>(bindings), baseUri);
+                new SingletonIteration<>(bindings), baseUri);
         try {
             while (iter.hasNext()) {
                 BindingSet bs = iter.next();
@@ -59,9 +57,10 @@ public class KvinFederatedService implements FederatedService {
     }
 
     @Override
-    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(Service service,
-        CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri)
-        throws QueryEvaluationException {
+    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
+            Service service,
+            CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri)
+            throws QueryEvaluationException {
         if (!bindings.hasNext()) {
             return new EmptyIteration<>();
         }
@@ -102,11 +101,23 @@ public class KvinFederatedService implements FederatedService {
             dataset.addDefaultGraph(vf.createIRI(this.contextProvider.getContext().toString()));
         }
         EvaluationStrategy strategy = new KvinEvaluationStrategy(kvin, executorService, scanner, vf, dataset, null, valueToData);
-
         List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
-        while (bindings.hasNext()) {
-            BindingSet bs = bindings.next();
-            resultIters.add(strategy.evaluate(service.getArg(), bs));
+
+        var precompiled = strategy.precompile(service.getArg());
+        if (precompiled instanceof BatchQueryEvaluationStep) {
+            while (bindings.hasNext()) {
+                List<BindingSet> bindingSetList = new ArrayList<>();
+                while (bindings.hasNext() && bindingSetList.size() < InnerJoinIterator.BATCH_SIZE) {
+                    bindingSetList.add(bindings.next());
+                }
+                resultIters.add(new AsyncIterator<>(() -> ((BatchQueryEvaluationStep) precompiled)
+                        .evaluate(bindingSetList), executorService));
+            }
+        } else {
+            while (bindings.hasNext()) {
+                BindingSet bs = bindings.next();
+                resultIters.add(new AsyncIterator<>(() -> precompiled.evaluate(bs), executorService));
+            }
         }
 
         return resultIters.size() > 1 ? new DistinctIteration<>(new UnionIteration<>(resultIters)) : resultIters.get(0);
@@ -123,10 +134,11 @@ public class KvinFederatedService implements FederatedService {
     }
 
     @Override
-    public CloseableIteration<BindingSet, QueryEvaluationException> select(Service service,
-        final Set<String> projectionVars, BindingSet bindings, String baseUri) throws QueryEvaluationException {
+    public CloseableIteration<BindingSet, QueryEvaluationException> select(
+            Service service,
+            final Set<String> projectionVars, BindingSet bindings, String baseUri) throws QueryEvaluationException {
         final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
-            new SingletonIteration<>(bindings), baseUri);
+                new SingletonIteration<>(bindings), baseUri);
         if (service.getBindingNames().equals(projectionVars)) {
             return iter;
         }

@@ -34,6 +34,9 @@ import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
+import org.apache.parquet.internal.column.columnindex.ColumnIndex;
+import org.apache.parquet.internal.column.columnindex.OffsetIndex;
+import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore;
 import org.apache.parquet.io.ColumnIOFactory;
 import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.MessageColumnIO;
@@ -49,6 +52,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -91,6 +95,8 @@ public class KvinParquet implements Kvin {
 	final Cache<URI, Long> itemIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final Cache<URI, Long> propertyIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final Cache<URI, Long> contextIdCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	final Cache<Pair<String, Integer>, ColumnIndexStore> indexCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+
 	// Lock
 	Map<Path, InputFileInfo> inputFileCache = new HashMap<>(); // hadoop input file cache
 	Cache<Long, URI> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
@@ -527,7 +533,8 @@ public class KvinParquet implements Kvin {
 	}
 
 	public void clearCaches() {
-		// clear cache with meta data
+		// clear caches with meta data
+		indexCache.invalidateAll();
 		metaCache.invalidateAll();
 		filesCache.invalidateAll();
 		inputFileCache.clear();
@@ -862,7 +869,53 @@ public class KvinParquet implements Kvin {
 			optionsBuilder.withAllocator(new HeapByteBufferAllocator());
 			optionsBuilder.withRecordFilter(filter);
 			ParquetReadOptions options = optionsBuilder.build();
-			ParquetFileReader r = new ParquetFileReader(configuration, fileInfo.path, fileInfo.metadata, options);
+			ParquetFileReader r = new ParquetFileReader(configuration, fileInfo.path, fileInfo.metadata, options) {
+				static Field blocksField;
+				static {
+					try {
+						blocksField = ParquetFileReader.class.getDeclaredField("blocks");
+						// make it accessible
+						blocksField.setAccessible(true);
+					} catch (NoSuchFieldException e) {
+						// ignore
+					}
+				}
+
+				@Override
+				public ColumnIndexStore getColumnIndexStore(int blockIndex) {
+					if (blocksField != null) {
+						try {
+							BlockMetaData block = (BlockMetaData) ((List<?>) blocksField.get(this)).get(blockIndex);
+							return indexCache.get(new Pair<>(block.getPath(), block.getOrdinal()), () -> {
+								Map<ColumnPath, ColumnIndex> columnIndexes = new HashMap<>();
+								Map<ColumnPath, OffsetIndex> offsetIndexes = new HashMap<>();
+								int i = 0;
+								for (ColumnChunkMetaData columnChunkMetaData : block.getColumns()) {
+									if (i++ < kvinTupleFirstField) {
+										// do not load indexes for value fields
+										columnIndexes.put(columnChunkMetaData.getPath(), readColumnIndex(columnChunkMetaData));
+									}
+									offsetIndexes.put(columnChunkMetaData.getPath(), readOffsetIndex(columnChunkMetaData));
+								}
+								return new ColumnIndexStore() {
+									@Override
+									public ColumnIndex getColumnIndex(ColumnPath column) {
+										return columnIndexes.get(column);
+									}
+
+									@Override
+									public OffsetIndex getOffsetIndex(ColumnPath column) throws MissingOffsetIndexException {
+										return offsetIndexes.get(column);
+									}
+								};
+							});
+						} catch (IllegalAccessException | ExecutionException e) {
+							log.error("Error while creating index store", e);
+						}
+					}
+					return super.getColumnIndexStore(blockIndex);
+				}
+			};
 			return new NiceIterator<>() {
 				RecordReader recordReader;
 				Group next;
@@ -999,10 +1052,10 @@ public class KvinParquet implements Kvin {
 				return NiceIterator.emptyIterator();
 			}
 			if (begin != null) {
-				filter = and(filter, gtEq(FilterApi.longColumn("time"), begin));
+				filter = and(gtEq(FilterApi.longColumn("time"), begin), filter);
 			}
 			if (end != null) {
-				filter = and(filter, ltEq(FilterApi.longColumn("time"), end));
+				filter = and(ltEq(FilterApi.longColumn("time"), end), filter);
 			}
 
 			final FilterPredicate filterFinal = filter;

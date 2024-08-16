@@ -28,7 +28,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	public static final ThreadLocal<Integer> asyncDepth = new ThreadLocal<>();
 	public static final int MAX_ASYNC_DEPTH = 3;
 	private static final BindingSet NULL_BINDINGS = new EmptyBindingSet();
-	private static final int BATCH_SIZE = 200;
+	public static final int BATCH_SIZE = 200;
 	private final EvaluationStrategy strategy;
 	private final Supplier<ExecutorService> executorService;
 	private final CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
