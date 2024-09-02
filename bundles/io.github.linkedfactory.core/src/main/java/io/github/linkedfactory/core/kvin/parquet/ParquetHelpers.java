@@ -10,6 +10,7 @@ import org.apache.avro.reflect.ReflectData;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetWriter;
+import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
@@ -67,21 +68,25 @@ public class ParquetHelpers {
 
 	static ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
 		return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, configuration))
+				.withWriterVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
 				.withSchema(kvinTupleSchema)
 				.withConf(configuration)
 				.withDictionaryEncoding(true)
+				.withDictionaryEncoding("id", false)
+				.withDictionaryEncoding("valueObject", false)
 				//.withCompressionCodec(CompressionCodecName.ZSTD)
 				.withCompressionCodec(CompressionCodecName.SNAPPY)
 				.withRowGroupSize(ROW_GROUP_SIZE_DATA)
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
 				.withDataModel(reflectData)
-				.withBloomFilterEnabled("id", true)
+				//.withBloomFilterEnabled("id", true)
 				.build();
 	}
 
 	static ParquetWriter<Object> getParquetMappingWriter(Path dataFile) throws IOException {
 		return AvroParquetWriter.builder(HadoopOutputFile.fromPath(dataFile, configuration))
+				.withWriterVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
 				.withSchema(idMappingSchema)
 				.withConf(configuration)
 				.withDictionaryEncoding(true)
