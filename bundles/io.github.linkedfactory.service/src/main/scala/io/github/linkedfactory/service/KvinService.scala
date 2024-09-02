@@ -19,9 +19,8 @@ import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatP
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
 import io.github.linkedfactory.service.util.{JsonFormatParser, LineProtocolParser}
-import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator, WrappedIterator}
+import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator}
 import net.enilink.komma.core.{URI, URIs}
-import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.Box.box2Iterable
 import net.liftweb.common._
 import net.liftweb.http.rest.RestHelper
@@ -30,14 +29,12 @@ import net.liftweb.json.Extraction.decompose
 import net.liftweb.json.JsonAST._
 import net.liftweb.json.JsonDSL._
 import net.liftweb.util.Helpers._
-import net.liftweb.util.Schedule
 import org.apache.commons.csv.{CSVFormat, CSVPrinter}
 
 import java.io.{InputStream, OutputStream, OutputStreamWriter}
 import java.text.SimpleDateFormat
 import java.util
-import java.util.{Collections, Date}
-import scala.collection.mutable
+import java.util.Date
 import scala.jdk.CollectionConverters._
 
 class KvinService(path: List[String], store: Kvin) extends RestHelper with Loggable {
@@ -133,13 +130,14 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       }.toList)
 
       // fast path to avoid value->JSON->string conversion for simple types
-      def value2Str(value: Any, quoteStrings: Boolean = true) = value match {
+      def value2Str(value: Any, quoteStrings: Boolean = true): String = value match {
         case null => "null"
         case b: Boolean => b.toString
         case n: Number => n.toString
         case uri: URI => compactRender(JObject(JField("@id", uri.toString)))
         case x: JValue => compactRender(x)
         case e: Record => compactRender(recordToJson(e))
+        case a: Array[_] => a.view.map(value2Str(_, quoteStrings)).mkString("[", ",", "]")
         case other if quoteStrings => compactRender(JString(other.toString))
         case other => other.toString
       }
@@ -167,10 +165,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             ("Content-Disposition", s"""inline; filename=${filename("json")}""") :: responseHeaders, S.responseCookies, 200)
         case "text/csv" =>
           // { "item" : { "property1" : [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "seqNr" : 5, "value" : 3.2 } ] } }
+          // TODO find solution to not materialize everything as map
+          val valuesMap = getValuesMap(path ++ path.dropRight(1), limit)
           val streamer = (os: OutputStream) => {
-            // TODO find solution to not materialize everything as map
-            val valuesMap = getValuesMap(path ++ path.dropRight(1), limit)
-
             val streamWriter = new OutputStreamWriter(os)
             val csvFormat = CSVFormat.EXCEL
             val csvPrinter = new CSVPrinter(streamWriter, csvFormat)
