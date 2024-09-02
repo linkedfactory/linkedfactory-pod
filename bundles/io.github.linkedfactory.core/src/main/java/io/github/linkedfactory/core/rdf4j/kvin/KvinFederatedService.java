@@ -110,13 +110,21 @@ public class KvinFederatedService implements FederatedService {
                 while (bindings.hasNext() && bindingSetList.size() < InnerJoinIterator.BATCH_SIZE) {
                     bindingSetList.add(bindings.next());
                 }
-                resultIters.add(new AsyncIterator<>(() -> ((BatchQueryEvaluationStep) precompiled)
-                        .evaluate(bindingSetList), executorService));
+                if (! bindings.hasNext()) {
+                    resultIters.add(((BatchQueryEvaluationStep) precompiled).evaluate(bindingSetList));
+                } else {
+                    resultIters.add(new AsyncIterator<>(() -> ((BatchQueryEvaluationStep) precompiled)
+                            .evaluate(bindingSetList), executorService));
+                }
             }
         } else {
             while (bindings.hasNext()) {
                 BindingSet bs = bindings.next();
-                resultIters.add(new AsyncIterator<>(() -> precompiled.evaluate(bs), executorService));
+                if (! bindings.hasNext()) {
+                    resultIters.add(precompiled.evaluate(bs));
+                } else {
+                    resultIters.add(new AsyncIterator<>(() -> precompiled.evaluate(bs), executorService));
+                }
             }
         }
 
