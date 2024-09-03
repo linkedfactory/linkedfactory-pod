@@ -2,7 +2,7 @@ package io.github.linkedfactory.core.kvin.parquet;
 
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinParquetWriter;
-import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinRecordConverter;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
@@ -243,12 +243,12 @@ public class ParquetHelpers {
 	}
 
 	public static KvinTuple recordToTuple(URI item, URI property, URI context, KvinRecord record) throws IOException {
-		Object value = record.value;
+		Object value = record.value();
 		if (value != null) {
 			if (value instanceof ByteBuffer) {
 				value = decodeRecord((ByteBuffer) value);
 			}
 		}
-		return new KvinTuple(item, property, context, record.time, record.seqNr, value);
+		return new KvinTuple(item, property, context, record.time(), record.seqNr(), value);
 	}
 }

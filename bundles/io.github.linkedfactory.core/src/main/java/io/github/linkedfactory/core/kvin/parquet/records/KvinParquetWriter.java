@@ -1,6 +1,7 @@
 package io.github.linkedfactory.core.kvin.parquet.records;
 
 import io.github.linkedfactory.core.kvin.parquet.ParquetHelpers;
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.conf.ParquetConfiguration;

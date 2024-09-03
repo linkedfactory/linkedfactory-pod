@@ -1,12 +1,9 @@
-package io.github.linkedfactory.core.kvin.parquet.records;
+package io.github.linkedfactory.core.kvin.records;
 
-public class KvinRecord implements Comparable<KvinRecord> {
-	public long itemId;
-	public long contextId;
-	public long propertyId;
-	public long time;
-	public int seqNr;
-	public Object value;
+public record KvinRecord(long itemId, long contextId, long propertyId, long time, int seqNr, Object value) implements Comparable<KvinRecord> {
+	public KvinRecord() {
+		this(-1, -1, -1, 0, 0, null);
+	}
 
 	@Override
 	public int compareTo(KvinRecord o) {
