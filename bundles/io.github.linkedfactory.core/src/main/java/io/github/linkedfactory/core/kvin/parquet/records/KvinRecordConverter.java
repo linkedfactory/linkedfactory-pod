@@ -1,11 +1,18 @@
 package io.github.linkedfactory.core.kvin.parquet.records;
 
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import org.apache.parquet.io.api.*;
 
 import java.nio.charset.StandardCharsets;
 
 public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
-	private KvinRecord currentRecord;
+	private KvinRecord record;
+	private long itemId;
+	private long propertyId;
+	private long contextId;
+	private long time;
+	private int seqNr;
+	private Object recordValue;
 
 	private final GroupConverter root = new GroupConverter() {
 		@Override
@@ -24,11 +31,12 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 
 		@Override
 		public void start() {
-			currentRecord = new KvinRecord();
+			seqNr = 0;
 		}
 
 		@Override
 		public void end() {
+			record = new KvinRecord(itemId, contextId, propertyId, time, seqNr, recordValue);
 		}
 	};
 
@@ -42,48 +50,48 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 	private final PrimitiveConverter timeConverter = new PrimitiveConverter() {
 		@Override
 		public void addLong(long value) {
-			currentRecord.time = value;
+			time = value;
 		}
 	};
 
 	private final PrimitiveConverter seqNrConverter = new PrimitiveConverter() {
 		@Override
 		public void addInt(int value) {
-			currentRecord.seqNr = value;
+			seqNr = value;
 		}
 	};
 
 	private final PrimitiveConverter itemIdConverter = new PrimitiveConverter() {
 		@Override
 		public void addLong(long value) {
-			currentRecord.itemId = value;
+			itemId = value;
 		}
 	};
 
 	private final PrimitiveConverter contextIdConverter = new PrimitiveConverter() {
 		@Override
 		public void addLong(long value) {
-			currentRecord.contextId = value;
+			contextId = value;
 		}
 	};
 
 	private final PrimitiveConverter propertyIdConverter = new PrimitiveConverter() {
 		@Override
 		public void addLong(long value) {
-			currentRecord.propertyId = value;
+			propertyId = value;
 		}
 	};
 
 	private final PrimitiveConverter stringValueConverter = new PrimitiveConverter() {
 		@Override
 		public void addBinary(Binary value) {
-			currentRecord.value = new String(value.getBytes(), StandardCharsets.UTF_8);
+			recordValue = new String(value.getBytes(), StandardCharsets.UTF_8);
 		}
 	};
 
 	private final PrimitiveConverter valueConverter = new PrimitiveConverter() {
 		void addObject(Object value) {
-			currentRecord.value = value;
+			recordValue = value;
 		}
 
 		@Override
@@ -119,7 +127,7 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 
 	@Override
 	public KvinRecord getCurrentRecord() {
-		return currentRecord;
+		return record;
 	}
 
 	@Override

@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.kvin.parquet.records;
 
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.conf.HadoopParquetConfiguration;
 import org.apache.parquet.conf.ParquetConfiguration;
@@ -39,32 +40,32 @@ public class KvinRecordWriteSupport extends WriteSupport<KvinRecord> {
 	public void write(KvinRecord r) {
 		rc.startMessage();
 		rc.startField("itemId", 0);
-		rc.addLong(r.itemId);
+		rc.addLong(r.itemId());
 		rc.endField("itemId", 0);
 
 		rc.startField("contextId", 1);
-		rc.addLong(r.contextId);
+		rc.addLong(r.contextId());
 		rc.endField("contextId", 1);
 
 		rc.startField("propertyId", 2);
-		rc.addLong(r.propertyId);
+		rc.addLong(r.propertyId());
 		rc.endField("propertyId", 2);
 
 		rc.startField("time", 3);
-		rc.addLong(r.time);
+		rc.addLong(r.time());
 		rc.endField("time", 3);
 
 		rc.startField("seqNr", 4);
-		rc.addInteger(r.seqNr);
+		rc.addInteger(r.seqNr());
 		rc.endField("seqNr", 4);
 
-		boolean first = prevRecord == null || prevRecord.itemId != r.itemId || prevRecord.contextId != r.contextId ||
-				prevRecord.propertyId != r.propertyId;
+		boolean first = prevRecord == null || prevRecord.itemId() != r.itemId() || prevRecord.contextId() != r.contextId() ||
+				prevRecord.propertyId() != r.propertyId();
 		rc.startField("first", 5);
 		rc.addBoolean(first);
 		rc.endField("first", 5);
 
-		Object value = r.value;
+		Object value = r.value();
 		if (value instanceof Integer) {
 			rc.startField("valueInt", 6);
 			rc.addInteger((Integer) value);

@@ -1,7 +1,7 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
 import io.github.linkedfactory.core.kvin.KvinException;
-import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import net.enilink.commons.iterator.IExtendedIterator;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.hadoop.ParquetWriter;
@@ -30,13 +30,7 @@ public class ParquetHelpersTest {
 		File file = new File(tempFolder.getRoot(), "data__1.parquet");
 		try (ParquetWriter<KvinRecord> writer = ParquetHelpers.getKvinRecordWriter(new Path(file.getAbsolutePath()))) {
 			for (int i = 0; i < RECORDS; i++) {
-				KvinRecord record = new KvinRecord();
-				record.itemId = 1;
-				record.contextId = 1;
-				record.propertyId = 1;
-				record.time = RECORDS - i;
-				record.value = "value-" + i;
-				writer.write(record);
+				writer.write(new KvinRecord(1, 1, 1, RECORDS - i, 0, "value-" + i));
 			}
 		}
 		return file;
