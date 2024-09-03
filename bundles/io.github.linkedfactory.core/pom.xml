@@ -13,6 +13,7 @@
 	<properties>
 		<parquet.version>1.14.1</parquet.version>
 		<hadoop.version>3.3.5</hadoop.version>
+		<lwjgl.version>3.3.3</lwjgl.version>
 	</properties>
 
 	<dependencies>
@@ -195,6 +196,88 @@
 			<groupId>info.picocli</groupId>
 			<artifactId>picocli</artifactId>
 			<version>4.7.5</version>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl-lmdb</artifactId>
+			<version>${lwjgl.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl-lmdb</artifactId>
+			<classifier>natives-linux</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl-lmdb</artifactId>
+			<classifier>natives-linux-arm64</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl-lmdb</artifactId>
+			<classifier>natives-macos</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl-lmdb</artifactId>
+			<classifier>natives-macos-arm64</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl-lmdb</artifactId>
+			<classifier>natives-windows</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl-lmdb</artifactId>
+			<classifier>natives-windows-arm64</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl</artifactId>
+			<classifier>natives-linux</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl</artifactId>
+			<classifier>natives-linux-arm64</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl</artifactId>
+			<classifier>natives-macos</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl</artifactId>
+			<classifier>natives-macos-arm64</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.lwjgl</groupId>
+			<artifactId>lwjgl</artifactId>
+			<classifier>natives-windows</classifier>
+			<version>${lwjgl.version}</version>
+			<scope>runtime</scope>
 		</dependency>
 	</dependencies>
 
