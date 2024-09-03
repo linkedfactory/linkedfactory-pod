@@ -1,6 +1,6 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
-import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.util.Pair;
 import org.apache.commons.io.FileUtils;
@@ -18,7 +18,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static io.github.linkedfactory.core.kvin.parquet.ParquetHelpers.*;
 

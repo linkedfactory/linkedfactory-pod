@@ -6,7 +6,7 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
-import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinRecordConverter;
 import io.github.linkedfactory.core.kvin.parquet.records.SimpleGroupExt;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
@@ -79,20 +79,20 @@ public class KvinParquet implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinParquet.class);
 	static final long[] EMPTY_IDS = {0};
 	static Comparator<KvinRecord> KVIN_RECORD_COMPARATOR = (a, b) -> {
-		int diff = (int) (a.itemId - b.itemId);
+		int diff = (int) (a.itemId() - b.itemId());
 		if (diff != 0) {
 			return diff;
 		}
-		diff = (int) (a.propertyId - b.propertyId);
+		diff = (int) (a.propertyId() - b.propertyId());
 		if (diff != 0) {
 			return diff;
 		}
-		diff = (int) (a.time - b.time);
+		diff = (int) (a.time() - b.time());
 		if (diff != 0) {
 			// time is reverse
 			return -diff;
 		}
-		diff = a.seqNr - b.seqNr;
+		diff = (int) (a.seqNr() - b.seqNr());
 		if (diff != 0) {
 			// seqNr is reverse
 			return -diff;
@@ -282,8 +282,6 @@ public class KvinParquet implements Kvin {
 			WriterState writerState = null;
 			String prevKey = null;
 			for (KvinTuple tuple : tuples) {
-				KvinRecord record = new KvinRecord();
-
 				var tupleDate = getZonedDateTime(tuple.time);
 				int year = tupleDate.getYear();
 				int week = tupleDate.get(ChronoField.ALIGNED_WEEK_OF_YEAR);
@@ -308,18 +306,21 @@ public class KvinParquet implements Kvin {
 				// writing mappings and values
 				long[] id = generateIds(tuple, writeContext,
 						itemMappingWriter, propertyMappingWriter, contextMappingWriter);
-				record.itemId = id[0];
-				record.contextId = id[1];
-				record.propertyId = id[2];
-				record.time = tuple.time;
-				record.seqNr = tuple.seqNr;
 
 				Object value = tuple.value;
 				if (value instanceof Record || value instanceof URI || value instanceof BigInteger ||
 						value instanceof BigDecimal || value instanceof Short || value instanceof Object[]) {
 					value = ByteBuffer.wrap(encodeRecord(value));
 				}
-				record.value = value;
+
+				KvinRecord record = new KvinRecord(
+					id[0],
+					id[1],
+					id[2],
+					tuple.time,
+					tuple.seqNr,
+					value
+				);
 
 				writerState.writer.write(record);
 				writerState.minMax[0] = Math.min(writerState.minMax[0], writeContext.lastItemId);
@@ -1096,7 +1097,7 @@ public class KvinParquet implements Kvin {
 								if (skipAfterLimit) {
 									// reset value count if property changes
 									KvinRecord nextMin = min.getFirst();
-									if (nextMin.itemId != prevRecord.itemId || nextMin.propertyId != prevRecord.propertyId) {
+									if (nextMin.itemId() != prevRecord.itemId() || nextMin.propertyId() != prevRecord.propertyId()) {
 										skipAfterLimit = false;
 										propertyValueCount = 0;
 									}
@@ -1163,9 +1164,9 @@ public class KvinParquet implements Kvin {
 				}
 
 				KvinTuple convert(KvinRecord record) throws IOException {
-					var itemId = record.itemId;
+					var itemId = record.itemId();
 					// skip item and context ids
-					var propertyId = record.propertyId;
+					var propertyId = record.propertyId();
 					if (itemId != lastItemId) {
 						lastItemId = itemId;
 						for (int i = 0; i < itemIds.length; i++) {
@@ -1337,7 +1338,7 @@ public class KvinParquet implements Kvin {
 							var reader = createKvinRecordReader(getFile(dataFile), FilterCompat.get(filter));
 							while (reader.hasNext()) {
 								var record = reader.next();
-								long currentPropertyId = record.propertyId;
+								long currentPropertyId = record.propertyId();
 								propertyIds.add(currentPropertyId);
 							}
 							reader.close();

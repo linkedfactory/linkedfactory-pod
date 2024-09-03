@@ -13,6 +13,7 @@
 	<properties>
 		<parquet.version>1.17.1</parquet.version>
 		<hadoop.version>3.5.0</hadoop.version>
+		<lwjgl.version>3.3.3</lwjgl.version>
 	</properties>
 
 	<dependencies>
