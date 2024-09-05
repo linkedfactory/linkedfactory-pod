@@ -48,6 +48,8 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 		public void addBinary(Binary value) {
 			var bb = value.toByteBuffer();
 			currentRecord.itemId = bb.getLong(bb.position());
+			// skip item id
+			currentRecord.contextId = bb.getLong(bb.position() + Long.BYTES);
 			// skip item and context ids
 			currentRecord.propertyId = bb.getLong(bb.position() + Long.BYTES * 2);
 		}

@@ -1,5 +1,7 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
+import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
+import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.util.Pair;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -153,13 +155,6 @@ public class Compactor {
 				.build();
 	}
 
-	private ParquetReader<KvinTupleInternal> getParquetDataReader(HadoopInputFile file) throws IOException {
-		return AvroParquetReader.<KvinTupleInternal>builder(file)
-				.withDataModel(reflectData)
-				.useStatsFilter()
-				.build();
-	}
-
 	private void compactDataFiles(File weekFolder) throws IOException {
 		Lock readLock = kvinParquet.readLock();
 		try {
@@ -182,49 +177,34 @@ public class Compactor {
 					Paths.get(archiveLocation).relativize(weekFolder.toPath()));
 
 			Path compactionFile = new Path(targetFolder.toAbsolutePath().toString(), "data__1.parquet");
-			ParquetWriter<KvinTupleInternal> compactionFileWriter = getParquetDataWriter(compactionFile);
+			ParquetWriter<KvinRecord> compactionFileWriter = getKvinRecordWriter(compactionFile);
 
-			PriorityQueue<Pair<KvinTupleInternal, ParquetReader<KvinTupleInternal>>> nextTuples =
+			PriorityQueue<Pair<KvinRecord, IExtendedIterator<KvinRecord>>> nextRecords =
 					new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
 			for (java.nio.file.Path dataFile : dataFiles) {
-				ParquetReader<KvinTupleInternal> reader = getParquetDataReader(
-						HadoopInputFile.fromPath(new Path(dataFile.toString()), new Configuration()));
-				KvinTupleInternal tuple = reader.read();
-				if (tuple != null) {
-					nextTuples.add(new Pair<>(tuple, reader));
+				IExtendedIterator<KvinRecord> it = createKvinRecordReader(new Path(dataFile.toString()), null);
+				if (it.hasNext()) {
+					nextRecords.add(new Pair<>(it.next(), it));
 				} else {
-					try {
-						reader.close();
-					} catch (IOException e) {
-					}
+					it.close();
 				}
 			}
 
-			KvinTupleInternal prevTuple = null;
-			while (!nextTuples.isEmpty()) {
-				var pair = nextTuples.poll();
-				if (prevTuple == null || prevTuple.compareTo(pair.getFirst()) != 0) {
+			KvinRecord prevRecord = null;
+			while (!nextRecords.isEmpty()) {
+				var pair = nextRecords.poll();
+				if (prevRecord == null || prevRecord.compareTo(pair.getFirst()) != 0) {
 					var tuple = pair.getFirst();
-					// update the first flag
-					if (prevTuple == null || !Arrays.equals(prevTuple.id, tuple.id)) {
-						tuple.setFirst(true);
-					} else {
-						tuple.setFirst(null);
-					}
 					compactionFileWriter.write(tuple);
-					prevTuple = tuple;
-				} else if (prevTuple != null) {
+					prevRecord = tuple;
+				} else if (prevRecord != null) {
 					// omit tuple as it is duplicate in terms of id, time, and seqNr
 				}
 
-				KvinTupleInternal tuple = pair.getSecond().read();
-				if (tuple != null) {
-					nextTuples.add(new Pair<>(tuple, pair.getSecond()));
+				if (pair.getSecond().hasNext()) {
+					nextRecords.add(new Pair<>(pair.getSecond().next(), pair.getSecond()));
 				} else {
-					try {
-						pair.getSecond().close();
-					} catch (IOException e) {
-					}
+					pair.getSecond().close();
 				}
 			}
 

@@ -1,7 +1,11 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
 import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.parquet.records.KvinParquetWriter;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
+import io.github.linkedfactory.core.kvin.parquet.records.KvinRecordConverter;
+import net.enilink.commons.iterator.IExtendedIterator;
+import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.commons.util.Pair;
 import net.enilink.komma.core.URI;
 import org.apache.avro.Schema;
@@ -9,16 +13,30 @@ import org.apache.avro.SchemaBuilder;
 import org.apache.avro.reflect.ReflectData;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.parquet.HadoopReadOptions;
+import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.avro.AvroParquetWriter;
+import org.apache.parquet.bytes.HeapByteBufferAllocator;
 import org.apache.parquet.column.ParquetProperties;
+import org.apache.parquet.column.page.PageReadStore;
+import org.apache.parquet.filter2.compat.FilterCompat;
+import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
+import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.apache.parquet.io.ColumnIOFactory;
+import org.apache.parquet.io.MessageColumnIO;
+import org.apache.parquet.io.RecordReader;
 import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.PrimitiveType;
+import org.apache.parquet.schema.Type.Repetition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -42,21 +60,21 @@ public class ParquetHelpers {
 			.name("id").type().longType().noDefault()
 			.name("value").type().stringType().noDefault().endRecord();
 
-	// data file schema
-	static Schema kvinTupleSchema = SchemaBuilder.record("KvinTupleInternal").namespace(KvinTupleInternal.class.getPackageName()).fields()
-			.name("id").type().bytesType().noDefault()
-			.name("time").type().longType().noDefault()
-			.name("seqNr").type().intType().intDefault(0)
-			.name("first").type().nullable().booleanType().noDefault()
-			.name("valueInt").type().nullable().intType().noDefault()
-			.name("valueLong").type().nullable().longType().noDefault()
-			.name("valueFloat").type().nullable().floatType().noDefault()
-			.name("valueDouble").type().nullable().doubleType().noDefault()
-			.name("valueString").type().nullable().stringType().noDefault()
-			.name("valueBool").type().nullable().intType().noDefault()
-			.name("valueObject").type().nullable().bytesType().noDefault().endRecord();
+	public static MessageType kvinTupleType = new MessageType("KvinTupleInternal",
+			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.BINARY, "id"),
+			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.INT64, "time"),
+			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.INT32, "seqNr"),
+			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.BOOLEAN, "first"),
+			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.INT32, "valueInt"),
+			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.INT64, "valueLong"),
+			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.FLOAT, "valueFloat"),
+			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.DOUBLE, "valueDouble"),
+			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.BINARY, "valueString"),
+			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.BOOLEAN, "valueBool"),
+			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.BINARY, "valueObject")
+	);
 
-	static int kvinTupleFirstField = kvinTupleSchema.getField("valueInt").pos();
+	static int kvinTupleFirstField = 4;
 
 	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
 	static Pattern fileOrDotFileWithSeqNr = Pattern.compile("^\\.?([^.].*)__([0-9]+)\\..*$");
@@ -66,10 +84,9 @@ public class ParquetHelpers {
 		configuration.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
 	}
 
-	static ParquetWriter<KvinTupleInternal> getParquetDataWriter(Path dataFile) throws IOException {
-		return AvroParquetWriter.<KvinTupleInternal>builder(HadoopOutputFile.fromPath(dataFile, configuration))
+	static ParquetWriter<KvinRecord> getKvinRecordWriter(Path dataFile) throws IOException {
+		return KvinParquetWriter.builder(HadoopOutputFile.fromPath(dataFile, configuration))
 				.withWriterVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
-				.withSchema(kvinTupleSchema)
 				.withConf(configuration)
 				.withDictionaryEncoding(true)
 				.withDictionaryEncoding("id", false)
@@ -79,9 +96,92 @@ public class ParquetHelpers {
 				.withRowGroupSize(ROW_GROUP_SIZE_DATA)
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
-				.withDataModel(reflectData)
 				//.withBloomFilterEnabled("id", true)
 				.build();
+	}
+
+	static IExtendedIterator<KvinRecord> createKvinRecordReader(Path path, FilterCompat.Filter filter) {
+		try {
+			ParquetReadOptions.Builder optionsBuilder = HadoopReadOptions.builder(configuration, path);
+			optionsBuilder.withAllocator(new HeapByteBufferAllocator());
+			if (filter != null) {
+				optionsBuilder.withRecordFilter(filter);
+			}
+			ParquetReadOptions options = optionsBuilder.build();
+			ParquetFileReader r = new ParquetFileReader(HadoopInputFile.fromPath(path, configuration), options);
+			MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(r.getFileMetaData().getSchema());
+			return new NiceIterator<>() {
+				RecordReader recordReader;
+				KvinRecord next;
+				PageReadStore pages;
+				long readRows;
+
+				@Override
+				public boolean hasNext() {
+					if (next == null) {
+						try {
+							while (next == null) {
+								if (pages == null || readRows == pages.getRowCount()) {
+									readRows = 0;
+									recordReader = null;
+									if (pages != null) {
+										pages.close();
+									}
+									pages = r.readNextFilteredRowGroup();
+									if (pages != null && pages.getRowCount() > 0) {
+										recordReader = columnIO.getRecordReader(pages,
+												new KvinRecordConverter(), filter);
+									}
+								}
+								if (recordReader != null) {
+									while (readRows < pages.getRowCount()) {
+										next = (KvinRecord) recordReader.read();
+										readRows++;
+										if (!recordReader.shouldSkipCurrentRecord()) {
+											break;
+										}
+									}
+								} else {
+									r.close();
+									break;
+								}
+							}
+						} catch (IOException e) {
+							throw new UncheckedIOException(e);
+						} catch (Exception e) {
+							log.error("Error while reading next element", e);
+							close();
+							return false;
+						}
+					}
+					return next != null;
+				}
+
+				@Override
+				public KvinRecord next() {
+					if (!hasNext()) {
+						throw new NoSuchElementException();
+					}
+					KvinRecord result = next;
+					next = null;
+					return result;
+				}
+
+				@Override
+				public void close() {
+					if (pages != null) {
+						pages.close();
+					}
+					try {
+						r.close();
+					} catch (IOException e) {
+						throw new UncheckedIOException(e);
+					}
+				}
+			};
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 
 	static ParquetWriter<Object> getParquetMappingWriter(Path dataFile) throws IOException {

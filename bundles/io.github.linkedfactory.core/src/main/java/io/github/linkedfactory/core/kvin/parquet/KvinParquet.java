@@ -275,9 +275,8 @@ public class KvinParquet implements Kvin {
 
 			WriterState writerState = null;
 			String prevKey = null;
-			KvinTupleInternal prevTuple = null;
 			for (KvinTuple tuple : tuples) {
-				KvinTupleInternal internalTuple = new KvinTupleInternal();
+				KvinRecord record = new KvinRecord();
 
 				Calendar tupleDate = getDate(tuple.time);
 				int year = tupleDate.get(Calendar.YEAR);
@@ -293,7 +292,7 @@ public class KvinParquet implements Kvin {
 								.resolve(weekFolderName)
 								.resolve("data__1.parquet");
 						Files.createDirectories(file.getParent());
-						writerState = new WriterState(file, getParquetDataWriter(new Path(file.toString())),
+						writerState = new WriterState(file, getKvinRecordWriter(new Path(file.toString())),
 								year, week);
 						writers.put(key, writerState);
 					}
@@ -301,31 +300,24 @@ public class KvinParquet implements Kvin {
 				}
 
 				// writing mappings and values
-				internalTuple.setId(generateId(tuple, writeContext,
-						itemMappingWriter, propertyMappingWriter, contextMappingWriter));
-				internalTuple.setTime(tuple.time);
-				internalTuple.setSeqNr(tuple.seqNr);
+				long[] id = generateIds(tuple, writeContext,
+						itemMappingWriter, propertyMappingWriter, contextMappingWriter);
+				record.itemId = id[0];
+				record.contextId = id[1];
+				record.propertyId = id[2];
+				record.time = tuple.time;
+				record.seqNr = tuple.seqNr;
 
-				internalTuple.setValueInt(tuple.value instanceof Integer ? (int) tuple.value : null);
-				internalTuple.setValueLong(tuple.value instanceof Long ? (long) tuple.value : null);
-				internalTuple.setValueFloat(tuple.value instanceof Float ? (float) tuple.value : null);
-				internalTuple.setValueDouble(tuple.value instanceof Double ? (double) tuple.value : null);
-				internalTuple.setValueString(tuple.value instanceof String ? (String) tuple.value : null);
-				internalTuple.setValueBool(tuple.value instanceof Boolean ? (Boolean) tuple.value ? 1 : 0 : null);
-				if (tuple.value instanceof Record || tuple.value instanceof URI || tuple.value instanceof BigInteger ||
-						tuple.value instanceof BigDecimal || tuple.value instanceof Short || tuple.value instanceof Object[]) {
-					internalTuple.setValueObject(encodeRecord(tuple.value));
-				} else {
-					internalTuple.setValueObject(null);
+				Object value = tuple.value;
+				if (value instanceof Record || value instanceof URI || value instanceof BigInteger ||
+						value instanceof BigDecimal || value instanceof Short || value instanceof Object[]) {
+					value = ByteBuffer.wrap(encodeRecord(value));
 				}
-				// set first flag
-				if (prevTuple == null || !Arrays.equals(prevTuple.id, internalTuple.id)) {
-					internalTuple.setFirst(true);
-				}
-				writerState.writer.write(internalTuple);
+				record.value = value;
+
+				writerState.writer.write(record);
 				writerState.minMax[0] = Math.min(writerState.minMax[0], writeContext.lastItemId);
 				writerState.minMax[1] = Math.max(writerState.minMax[1], writeContext.lastItemId);
-				prevTuple = internalTuple;
 			}
 
 			for (WriterState state : writers.values()) {
@@ -558,7 +550,7 @@ public class KvinParquet implements Kvin {
 		return calendar;
 	}
 
-	private byte[] generateId(KvinTuple tuple,
+	private long[] generateIds(KvinTuple tuple,
 	                          WriteContext writeContext,
 	                          ParquetWriter itemMappingWriter,
 	                          ParquetWriter propertyMappingWriter,
@@ -620,12 +612,7 @@ public class KvinParquet implements Kvin {
 			}
 			return newId;
 		});
-
-		ByteBuffer idBuffer = ByteBuffer.allocate(Long.BYTES * 3);
-		idBuffer.putLong(itemId);
-		idBuffer.putLong(contextId);
-		idBuffer.putLong(propertyId);
-		return idBuffer.array();
+		return new long[] {itemId, contextId, propertyId};
 	}
 
 	private long getId(URI entity, IdType idType) {
@@ -1445,12 +1432,12 @@ public class KvinParquet implements Kvin {
 
 	static class WriterState {
 		java.nio.file.Path file;
-		ParquetWriter<KvinTupleInternal> writer;
+		ParquetWriter<KvinRecord> writer;
 		int year;
 		int week;
 		long[] minMax = {Long.MAX_VALUE, Long.MIN_VALUE};
 
-		WriterState(java.nio.file.Path file, ParquetWriter<KvinTupleInternal> writer, int year, int week) {
+		WriterState(java.nio.file.Path file, ParquetWriter<KvinRecord> writer, int year, int week) {
 			this.file = file;
 			this.writer = writer;
 			this.year = year;
