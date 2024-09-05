@@ -764,26 +764,14 @@ public class KvinParquet implements Kvin {
 
 	private FilterPredicate createIdFilter(long itemId, long propertyId, long contextId) {
 		if (itemId != 0L && propertyId != 0L && contextId != 0L) {
-			ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * 3);
-			keyBuffer.putLong(itemId);
-			keyBuffer.putLong(contextId);
-			keyBuffer.putLong(propertyId);
-			return eq(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array()));
+			return and(eq(FilterApi.longColumn("propertyId"), propertyId),
+					and(eq(FilterApi.longColumn("itemId"), itemId),
+					eq(FilterApi.longColumn("contextId"), contextId)));
 		} else if (contextId != 0L) {
-			ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES * 2);
-			keyBuffer.putLong(itemId);
-			keyBuffer.putLong(contextId);
-			return and(gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array())),
-					lt(FilterApi.binaryColumn("id"),
-							Binary.fromConstantByteArray(ByteBuffer.allocate(Long.BYTES * 2)
-									.putLong(itemId).putLong(contextId + 1).array())));
+			return and(eq(FilterApi.longColumn("itemId"), itemId),
+					eq(FilterApi.longColumn("contextId"), contextId));
 		} else {
-			ByteBuffer keyBuffer = ByteBuffer.allocate(Long.BYTES);
-			keyBuffer.putLong(itemId);
-			return and(gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(keyBuffer.array())),
-					lt(FilterApi.binaryColumn("id"),
-							Binary.fromConstantByteArray(ByteBuffer.allocate(Long.BYTES)
-									.putLong(itemId + 1).array())));
+			return eq(FilterApi.longColumn("itemId"), itemId);
 		}
 	}
 
@@ -881,12 +869,8 @@ public class KvinParquet implements Kvin {
 							return indexCache.get(new Pair<>(fileInfo.path, block.getOrdinal()), () -> {
 								Map<ColumnPath, ColumnIndex> columnIndexes = new HashMap<>();
 								Map<ColumnPath, OffsetIndex> offsetIndexes = new HashMap<>();
-								int i = 0;
 								for (ColumnChunkMetaData columnChunkMetaData : block.getColumns()) {
-									if (i++ < kvinTupleFirstField) {
-										// do not load indexes for value fields
-										columnIndexes.put(columnChunkMetaData.getPath(), readColumnIndex(columnChunkMetaData));
-									}
+									columnIndexes.put(columnChunkMetaData.getPath(), readColumnIndex(columnChunkMetaData));
 									offsetIndexes.put(columnChunkMetaData.getPath(), readOffsetIndex(columnChunkMetaData));
 								}
 								return new ColumnIndexStore() {
@@ -1306,16 +1290,8 @@ public class KvinParquet implements Kvin {
 
 	private List<URI> getProperties(long itemId, long contextId) {
 		try {
-			ByteBuffer lowKey = ByteBuffer.allocate(Long.BYTES * 2);
-			lowKey.putLong(itemId);
-			lowKey.putLong(contextId);
-			ByteBuffer highKey = ByteBuffer.allocate(Long.BYTES * 3);
-			highKey.putLong(itemId);
-			highKey.putLong(contextId);
-			highKey.putLong(Long.MAX_VALUE);
-			FilterPredicate filter = and(eq(FilterApi.booleanColumn("first"), true), and(
-					gt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(lowKey.array())),
-					lt(FilterApi.binaryColumn("id"), Binary.fromConstantByteArray(highKey.array()))));
+			FilterPredicate filter = and(eq(FilterApi.booleanColumn("first"), true),
+					createIdFilter(itemId, 0L, contextId));
 
 			List<java.nio.file.Path> dataFolders = getDataFolders(new long[]{itemId});
 			Set<Long> propertyIds = new LinkedHashSet<>();

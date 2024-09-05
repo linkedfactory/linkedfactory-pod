@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -54,17 +55,17 @@ public class ParquetHelpers {
 	static final int PAGE_SIZE = 8192; // 8 KB
 	static final int DICT_PAGE_SIZE = 1048576; // 1 MB
 	static final int ZSTD_COMPRESSION_LEVEL = 12; // 1 - 22
-
-	// mapping file schema
-	static Schema idMappingSchema = SchemaBuilder.record("SimpleMapping").namespace(IdMapping.class.getPackageName()).fields()
-			.name("id").type().longType().noDefault()
-			.name("value").type().stringType().noDefault().endRecord();
-
 	public static MessageType kvinTupleType = new MessageType("KvinTupleInternal",
-			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.BINARY, "id"),
+			// new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.BINARY, "id"),
+
+			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.INT64, "itemId"),
+			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.INT64, "contextId"),
+			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.INT64, "propertyId"),
 			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.INT64, "time"),
 			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.INT32, "seqNr"),
-			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.BOOLEAN, "first"),
+
+			new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.BOOLEAN, "first"),
+
 			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.INT32, "valueInt"),
 			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.INT64, "valueLong"),
 			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.FLOAT, "valueFloat"),
@@ -73,8 +74,10 @@ public class ParquetHelpers {
 			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.BOOLEAN, "valueBool"),
 			new PrimitiveType(Repetition.OPTIONAL, PrimitiveType.PrimitiveTypeName.BINARY, "valueObject")
 	);
-
-	static int kvinTupleFirstField = 4;
+	// mapping file schema
+	static Schema idMappingSchema = SchemaBuilder.record("SimpleMapping").namespace(IdMapping.class.getPackageName()).fields()
+			.name("id").type().longType().noDefault()
+			.name("value").type().stringType().noDefault().endRecord();
 
 	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
 	static Pattern fileOrDotFileWithSeqNr = Pattern.compile("^\\.?([^.].*)__([0-9]+)\\..*$");
@@ -89,7 +92,6 @@ public class ParquetHelpers {
 				.withWriterVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
 				.withConf(configuration)
 				.withDictionaryEncoding(true)
-				.withDictionaryEncoding("id", false)
 				.withDictionaryEncoding("valueObject", false)
 				//.withCompressionCodec(CompressionCodecName.ZSTD)
 				.withCompressionCodec(CompressionCodecName.SNAPPY)
@@ -129,8 +131,9 @@ public class ParquetHelpers {
 									}
 									pages = r.readNextFilteredRowGroup();
 									if (pages != null && pages.getRowCount() > 0) {
-										recordReader = columnIO.getRecordReader(pages,
-												new KvinRecordConverter(), filter);
+										recordReader = filter == null ? columnIO.getRecordReader(pages,
+												new KvinRecordConverter()) : columnIO.getRecordReader(pages,
+												new KvinRecordConverter());
 									}
 								}
 								if (recordReader != null) {
@@ -246,8 +249,8 @@ public class ParquetHelpers {
 	public static KvinTuple recordToTuple(URI item, URI property, URI context, KvinRecord record) throws IOException {
 		Object value = record.value;
 		if (value != null) {
-			if (value instanceof Binary) {
-				value = decodeRecord(((Binary) value).toByteBuffer());
+			if (value instanceof ByteBuffer) {
+				value = decodeRecord((ByteBuffer) value);
 			}
 		}
 		return new KvinTuple(item, property, context, record.time, record.seqNr, value);

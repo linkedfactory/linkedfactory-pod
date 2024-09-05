@@ -26,7 +26,7 @@ public class Compactor {
 	final KvinParquet kvinParquet;
 	final File compactionFolder;
 	String archiveLocation;
-	int dataFileCompactionTrigger = 2, mappingFileCompactionTrigger = 3;
+	int dataFileCompactionTrigger = 3, mappingFileCompactionTrigger = 3;
 
 	public Compactor(KvinParquet kvinParquet) {
 		this.archiveLocation = kvinParquet.archiveLocation;

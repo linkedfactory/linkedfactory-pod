@@ -11,10 +11,13 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 		@Override
 		public Converter getConverter(int fieldIndex) {
 			switch (fieldIndex) {
-				case 0: return idConverter;
-				case 1: return timeConverter;
-				case 2: return seqNrConverter;
-				case 8: return stringValueConverter;
+				case 0: return itemIdConverter;
+				case 1: return contextIdConverter;
+				case 2: return propertyIdConverter;
+				case 3: return timeConverter;
+				case 4: return seqNrConverter;
+				case 5: return firstConverter;
+				case 10: return stringValueConverter;
 				default: return valueConverter;
 			}
 		}
@@ -26,6 +29,13 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 
 		@Override
 		public void end() {
+		}
+	};
+
+	private final PrimitiveConverter firstConverter = new PrimitiveConverter() {
+		@Override
+		public void addBoolean(boolean value) {
+			// ignore first value
 		}
 	};
 
@@ -43,15 +53,24 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 		}
 	};
 
-	private final PrimitiveConverter idConverter = new PrimitiveConverter() {
+	private final PrimitiveConverter itemIdConverter = new PrimitiveConverter() {
 		@Override
-		public void addBinary(Binary value) {
-			var bb = value.toByteBuffer();
-			currentRecord.itemId = bb.getLong(bb.position());
-			// skip item id
-			currentRecord.contextId = bb.getLong(bb.position() + Long.BYTES);
-			// skip item and context ids
-			currentRecord.propertyId = bb.getLong(bb.position() + Long.BYTES * 2);
+		public void addLong(long value) {
+			currentRecord.itemId = value;
+		}
+	};
+
+	private final PrimitiveConverter contextIdConverter = new PrimitiveConverter() {
+		@Override
+		public void addLong(long value) {
+			currentRecord.contextId = value;
+		}
+	};
+
+	private final PrimitiveConverter propertyIdConverter = new PrimitiveConverter() {
+		@Override
+		public void addLong(long value) {
+			currentRecord.propertyId = value;
 		}
 	};
 
@@ -69,7 +88,7 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 
 		@Override
 		public void addBinary(Binary value) {
-			addObject(value);
+			addObject(value.toByteBuffer());
 		}
 
 		@Override
