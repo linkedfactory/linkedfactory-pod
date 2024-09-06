@@ -26,12 +26,18 @@ public class Compactor {
 	final KvinParquet kvinParquet;
 	final File compactionFolder;
 	String archiveLocation;
-	int dataFileCompactionTrigger = 3, mappingFileCompactionTrigger = 3;
+	int dataFileCompactionTrigger, mappingFileCompactionTrigger;
 
 	public Compactor(KvinParquet kvinParquet) {
+		this(kvinParquet, 3, 3);
+	}
+
+	public Compactor(KvinParquet kvinParquet, int dataFileCompactionTrigger, int mappingFileCompactionTrigger) {
 		this.archiveLocation = kvinParquet.archiveLocation;
 		this.compactionFolder = new File(archiveLocation, ".compaction");
 		this.kvinParquet = kvinParquet;
+		this.dataFileCompactionTrigger = dataFileCompactionTrigger;
+		this.mappingFileCompactionTrigger = mappingFileCompactionTrigger;
 	}
 
 	public void execute() throws IOException {
