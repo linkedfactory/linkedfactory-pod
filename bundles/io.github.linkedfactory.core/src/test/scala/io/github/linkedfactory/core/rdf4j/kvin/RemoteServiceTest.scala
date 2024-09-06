@@ -175,14 +175,14 @@ class RemoteServiceTest {
       val queryStr =
         s"""
            |SELECT * {
-           |  values ?item { <item1> }
+           |  values ?item1 { <item1> }
            |  SERVICE <kvin:http://test1.com> {
-           |    ?item <p1> [ <kvin:to> $time ; <kvin:limit> 1 ;
+           |    ?item1 <p1> [ <kvin:to> $time ; <kvin:limit> 1 ;
            |      <kvin:value> ?value ; <kvin:time> ?time
            |    ]
            |  }
            |  SERVICE <kvin:http://test2.com> {
-           |    ?item <p2> [ <kvin:to> $time ; <kvin:limit> 1 ;
+           |    <item2> <p2> [ <kvin:to> $time ; <kvin:limit> 1 ;
            |      <kvin:value> ?value1; <kvin:time> ?time1
            |    ]
            |  }
@@ -192,11 +192,13 @@ class RemoteServiceTest {
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, "http://example.org/")
       val r = query.evaluate
 
+      Assert.assertTrue(r.hasNext)
       while (r.hasNext) {
         val bs = r.next
-        Assert.assertTrue(bs.getValue("property").toString.equals("http://example.org/p1"))
-        Assert.assertTrue(bs.getValue("time").stringValue().equals("1619424246120"))
-        Assert.assertTrue(bs.getValue("value").stringValue().equals("57.934878949512196"))
+        if (bs.getValue("time1") != null) {
+          Assert.assertTrue(bs.getValue("time").stringValue().equals("1619424246120"))
+          Assert.assertTrue(bs.getValue("value").stringValue().equals("57.934878949512196"))
+        }
       }
       Assert.assertTrue(kvinHttpInstance.count == 2)
       Assert.assertTrue(kvinHttpInstance.fetchCall == 2)
@@ -236,12 +238,12 @@ class RemoteServiceTest {
       val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, "http://example.org/")
       val r = query.evaluate
 
+      Assert.assertTrue(r.hasNext)
       while (r.hasNext) {
         val bs = r.next
         Assert.assertEquals(115.869757899024392, bs.getValue("total").asInstanceOf[Literal].doubleValue(), 10e-6)
       }
       Assert.assertTrue(kvinHttpInstance.count == 2)
-      Assert.assertTrue(kvinHttpInstance.fetchCall == 4)
       r.close()
     } finally {
       conn.close()

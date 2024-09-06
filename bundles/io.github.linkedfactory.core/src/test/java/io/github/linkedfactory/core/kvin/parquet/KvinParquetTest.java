@@ -2,6 +2,7 @@ package io.github.linkedfactory.core.kvin.parquet;
 
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.kvin.util.KvinTupleGenerator;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
@@ -20,6 +21,7 @@ public class KvinParquetTest {
 	KvinParquet kvinParquet;
 	File tempDir;
 	KvinTupleGenerator tupleGenerator;
+	final long startTime = 1696197600000L;
 
 	@Before
 	public void setup() throws IOException {
@@ -27,7 +29,7 @@ public class KvinParquetTest {
 		tupleGenerator = new KvinTupleGenerator();
 		kvinParquet = new KvinParquet(tempDir.toString());
 		// 02.10.2023 0:00
-		kvinParquet.put(tupleGenerator.setStartTime(1696197600000L)
+		kvinParquet.put(tupleGenerator.setStartTime(startTime)
 				.setItems(500)
 				.setPropertiesPerItem(10)
 				.setValuesPerProperty(10)
@@ -145,4 +147,20 @@ public class KvinParquetTest {
 		assertEquals(10, properties.toList().size());
 		properties.close();
 	}
+
+	@Test
+	public void shouldFetchRecord() {
+		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/1");
+		URI property = URIs.createURI("some:property");
+
+		var record = new Record(URIs.createURI("property:p1"), true)
+				.append(new Record(URIs.createURI("property:p2"), "value2"));
+		kvinParquet.put(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, startTime, record));
+
+		IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 1);
+		List<KvinTuple> list = tuples.toList();
+		assertEquals(1, list.size());
+		assertEquals(record, list.get(0).value);
+	}
+
 }

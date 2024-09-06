@@ -26,12 +26,16 @@ public class CompositeBindingSet extends AbstractBindingSet {
     private final LinkedHashMap<String, Value> bindings;
 
     public CompositeBindingSet(BindingSet other) {
+        this(other, 2);
+    }
+
+    public CompositeBindingSet(BindingSet other, int capacity) {
         if (other instanceof CompositeBindingSet) {
             // this ensures that not multiple levels are nested and some kind of linked list is build
             this.bindings = (LinkedHashMap<String, Value>) ((CompositeBindingSet) other).bindings.clone();
             this.other = ((CompositeBindingSet) other).other;
         } else {
-            this.bindings = new LinkedHashMap<>(3);
+            this.bindings = new LinkedHashMap<>(capacity);
             this.other = other;
         }
     }

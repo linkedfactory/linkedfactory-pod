@@ -2,6 +2,8 @@ package io.github.linkedfactory.core.rdf4j.common.query;
 
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.NoSuchElementException;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -11,6 +13,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 public class AsyncIterator<T> implements CloseableIteration<T, QueryEvaluationException> {
+	static final Logger log = LoggerFactory.getLogger(AsyncIterator.class);
+
 	static final Object NULL_ELEMENT = new Object();
 	final BlockingQueue<T> nextElements;
 	volatile boolean closed = false;
@@ -21,27 +25,36 @@ public class AsyncIterator<T> implements CloseableIteration<T, QueryEvaluationEx
 		var currentAsync = InnerJoinIterator.asyncDepth.get();
 		executorService.get().submit(() -> {
 			InnerJoinIterator.asyncDepth.set(currentAsync != null ? currentAsync + 1 : 1);
-			var baseIt = base.get();
 			try {
-				while (baseIt.hasNext()) {
-					T element = baseIt.next();
-					while (!nextElements.offer(element, 10, TimeUnit.MILLISECONDS)) {
+				var baseIt = base.get();
+				try {
+					while (baseIt.hasNext()) {
+						T element = baseIt.next();
+						while (!nextElements.offer(element, 10, TimeUnit.MILLISECONDS)) {
+							if (closed) {
+								return;
+							}
+						}
+					}
+				} catch (InterruptedException e) {
+					// just return
+				} finally {
+					baseIt.close();
+				}
+			} catch (Exception e) {
+				log.error("Error while computing elements", e);
+			} finally {
+				try {
+					while (!nextElements.offer((T) NULL_ELEMENT, 10, TimeUnit.MILLISECONDS)) {
 						if (closed) {
 							return;
 						}
 					}
+				} catch (InterruptedException e) {
+					// just return
+				} finally {
+					InnerJoinIterator.asyncDepth.remove();
 				}
-				baseIt.close();
-				while (!nextElements.offer((T) NULL_ELEMENT, 10, TimeUnit.MILLISECONDS)) {
-					if (closed) {
-						return;
-					}
-				}
-			} catch (InterruptedException e) {
-				// just return
-			} finally {
-				baseIt.close();
-				InnerJoinIterator.asyncDepth.remove();
 			}
 		});
 	}

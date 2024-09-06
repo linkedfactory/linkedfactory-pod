@@ -46,7 +46,7 @@ abstract class KvinBenchmarkBase extends App {
     (0 to writeValues).foreach { i =>
       val randomNr = nrs(rand.nextInt(nrs.length))
       val uri = URIs.createURI("http://linkedfactory.github.io/" + randomNr + "/e3fabrik/rollex/" + randomNr + "/measured-point-1")
-      val ctx = URIs.createURI("ctx:" + randomNr)
+      val ctx = URIs.createURI("ctx:" + nrs(rand.nextInt(nrs.length)))
 
       val value = if (randomNr % 2 == 0) rand.nextGaussian else rand.nextLong(100000)
       batch.addOne(new KvinTuple(uri, valueProperty, ctx, currentTime, value))
@@ -70,7 +70,7 @@ abstract class KvinBenchmarkBase extends App {
     for (i <- 0 to readValues) {
       val randomNr = nrs(rand.nextInt(nrs.length))
       val uri = URIs.createURI("http://linkedfactory.github.io/" + randomNr + "/e3fabrik/rollex/" + randomNr + "/measured-point-1")
-      val ctx = URIs.createURI("ctx:" + randomNr)
+      val ctx = URIs.createURI("ctx:" + nrs(rand.nextInt(nrs.length)))
 
       val r = store.fetch(uri, valueProperty, ctx, startTimeFetch, startTimeValues, 2, 0, null).toList
       if (i % 1000 == 0) println(r)

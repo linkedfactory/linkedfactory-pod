@@ -15,6 +15,7 @@ import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
+import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryOptimizer;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
@@ -159,7 +160,10 @@ public class KvinFederatedService implements FederatedService {
 
             @Override
             public BindingSet next() throws QueryEvaluationException {
-                CompositeBindingSet projected = new CompositeBindingSet(bindings);
+                // it is important to keep incoming bindings as KvinService expects subject variables to be bound
+                // if only projected vars are returned, then nested joins of multiple service calls might fail
+                // as bindings are "lost"
+                CompositeBindingSet projected = new CompositeBindingSet(bindings, projectionVars.size());
                 BindingSet result = iter.next();
                 for (String var : projectionVars) {
                     Value v = result.getValue(var);

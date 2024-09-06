@@ -303,7 +303,7 @@ public class KvinEvaluationUtil {
 
 								var itemValue = getVarValue(subjectVar, bs);
 								if (itemValue == null) {
-									it = new EmptyIteration<>();
+									continue;
 								}
 
 								final Value predValue = getVarValue(predVar, bs);
@@ -358,8 +358,9 @@ public class KvinEvaluationUtil {
 								it = evaluate(vf, items, properties,
 										toKommaUri(contextValue), pv, params, baseBindings, stmt, dataset);
 							} else {
+								final ParameterValues finalPv = pv;
 								iterators.add(new AsyncIterator<>(() -> evaluate(vf, items, properties,
-										toKommaUri(contextValue), pv, params, baseBindings, stmt, dataset),
+										toKommaUri(contextValue), finalPv, params, baseBindings, stmt, dataset),
 										executorService));
 							}
 						}
