@@ -115,7 +115,7 @@ class StreamDataActor extends CometActor with KvinListener {
   }
 
   override def localSetup {
-    context = Globals.contextModel.vend.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT)
+    context = Data.currentModel.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT)
     limit = attributes.get("limit").map(_.toInt).getOrElse(DEFAULT_LIMIT)
     itemsOrPatterns = attributes.get("items").map(_.split("\\s+").filter(_.nonEmpty).map(URIs.createURI(_, true)))
       .filter(_.nonEmpty).map(_.toSet).getOrElse {
@@ -177,7 +177,7 @@ class StreamDataActor extends CometActor with KvinListener {
               val propInfo = propertyInfo(property, propInfos)
               var timestamp = propInfo.lastTimestamp
 
-              val propData = Data.kvin.map(_.fetch(item, property, Kvin.DEFAULT_CONTEXT, KvinTuple.TIME_MAX_VALUE, timestamp, 100, 0L, null)
+              val propData = Data.kvin.map(_.fetch(item, property, context, KvinTuple.TIME_MAX_VALUE, timestamp, 100, 0L, null)
                 .iterator.asScala.map { e =>
                 timestamp = timestamp.max(e.time)
                 ("time", e.time) ~ ("seqNr", decompose(e.seqNr)) ~ ("value", decompose(e.value))
