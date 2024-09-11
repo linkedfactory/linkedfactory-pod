@@ -128,7 +128,7 @@ public class KvinPartitioned implements Kvin {
 	public boolean addListener(KvinListener listener) {
 		try {
 			listeners.add(listener);
-			return true;
+			return hotStore.addListener(listener);
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
@@ -138,7 +138,7 @@ public class KvinPartitioned implements Kvin {
 	public boolean removeListener(KvinListener listener) {
 		try {
 			listeners.remove(listener);
-			return true;
+			return hotStore.removeListener(listener);
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
@@ -164,6 +164,10 @@ public class KvinPartitioned implements Kvin {
 		FileUtils.deleteDirectory(this.currentStoreArchivePath);
 		FileUtils.moveDirectory(this.currentStorePath, this.currentStoreArchivePath);
 		hotStore = new KvinLevelDb(currentStorePath);
+		for (KvinListener listener : listeners) {
+			// register listeners on new hot store
+			hotStore.addListener(listener);
+		}
 		hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
 	}
 

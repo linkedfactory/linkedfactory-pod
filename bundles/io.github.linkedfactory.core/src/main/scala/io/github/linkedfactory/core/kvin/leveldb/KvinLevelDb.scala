@@ -593,6 +593,11 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
   }
 
   override def put(entries: java.lang.Iterable[KvinTuple]): Unit = {
+    var notifyTuples = Option.empty[mutable.ArrayBuffer[KvinTuple]]
+    if (! this.listeners.isEmpty && entries.isInstanceOf[IExtendedIterator[_]]) {
+      notifyTuples = Some(new mutable.ArrayBuffer[KvinTuple]())
+    }
+
     val idsBatch = ids.createWriteBatch()
     val batch = values.createWriteBatch()
     activeWrites.incrementAndGet()
@@ -614,6 +619,8 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           // remove timed-out entries
           ttl(entry.item) map (asyncRemoveByTtl(values, prefix, _))
         }
+        // buffer tuples if entries are given via iterator
+        notifyTuples.foreach(_.addOne(entry))
       }
       var writeIds: Future[_] = null
       if (idsBatch.size() > 0) {
@@ -632,7 +639,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         uriToIdCacheWrite.invalidateAll()
       }
     }
-    entries.asScala.foreach { entry =>
+    notifyTuples.getOrElse(entries.asScala).foreach { entry =>
       for (l <- listeners.asScala) l.valueAdded(entry.item, entry.property, entry.context, entry.time, entry.seqNr, entry.value)
     }
   }
