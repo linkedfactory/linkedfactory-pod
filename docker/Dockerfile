@@ -1,4 +1,4 @@
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre-noble
 EXPOSE 8080
 
 # Add linkedfactory-pod server
