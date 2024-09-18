@@ -1,5 +1,10 @@
-FROM eclipse-temurin:17-jre-noble
+FROM eclipse-temurin:17-jre-alpine
 EXPOSE 8080
+
+
+#RUN apk update && apk add --no-cache libstdc++ bash
+RUN apk add gcompat
+
 
 # Add linkedfactory-pod server
 ADD ./server/target/assembly /opt/linkedfactory-pod
