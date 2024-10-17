@@ -227,7 +227,7 @@ public class KvinEvaluationUtil {
 						newBs.addBinding(subjectVar.getName(), subjectValue);
 					}
 					if (!objectVar.isConstant() && !baseBindings.hasBinding(objectVar.getName())) {
-						Value objectValue = BNodeWithValue.create(tuple);
+						Value objectValue = BNodeWithValue.create(tuple, false);
 						newBs.addBinding(objectVar.getName(), objectValue);
 					}
 					if (!predVar.isConstant()) {

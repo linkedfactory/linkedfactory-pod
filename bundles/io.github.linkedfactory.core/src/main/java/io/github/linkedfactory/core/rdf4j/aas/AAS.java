@@ -76,6 +76,6 @@ public interface AAS {
 				}
 			}
 		}
-		return Conversions.toRdfValue(value, vf);
+		return Conversions.toRdfValue(value, vf, true);
 	}
 }

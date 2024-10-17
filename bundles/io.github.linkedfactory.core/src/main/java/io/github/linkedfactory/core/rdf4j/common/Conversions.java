@@ -20,6 +20,10 @@ public class Conversions {
 	}
 
 	public static Value toRdfValue(Object value, ValueFactory vf) {
+		return toRdfValue(value, vf, false);
+	}
+
+	public static Value toRdfValue(Object value, ValueFactory vf, boolean useCache) {
 		Value rdfValue;
 		if (value instanceof URI) {
 			String valueStr = ((URI) value).isRelative() ? "r:" + value : value.toString();
@@ -37,9 +41,9 @@ public class Conversions {
 		} else if (value instanceof BigInteger) {
 			rdfValue = vf.createLiteral((BigInteger) value);
 		} else if (value instanceof Record) {
-			return BNodeWithValue.create(value);
+			return BNodeWithValue.create(value, useCache);
 		} else if (value instanceof Object[] || value instanceof List<?>) {
-			return BNodeWithValue.create(value);
+			return BNodeWithValue.create(value, useCache);
 		} else {
 			rdfValue = vf.createLiteral(value.toString());
 		}
