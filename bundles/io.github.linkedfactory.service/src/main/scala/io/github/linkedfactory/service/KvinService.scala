@@ -43,7 +43,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
   val CORS_HEADERS: List[(String, String)] = ("Access-Control-Allow-Origin", "*") :: ("Access-Control-Allow-Credentials", "true") :: //
     ("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS") :: //
-    ("Access-Control-Allow-Headers", "WWW-Authenticate,Keep-Alive,User-Agent,X-Requested-With,Cache-Control,Content-Type") :: Nil
+    ("Access-Control-Allow-Headers", "*") :: Nil
 
   def responseHeaders: List[(String, String)] = CORS_HEADERS ::: S.getResponseHeaders(Nil)
 
