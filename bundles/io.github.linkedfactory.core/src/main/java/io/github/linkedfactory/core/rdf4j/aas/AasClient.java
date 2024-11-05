@@ -50,6 +50,11 @@ public class AasClient implements Closeable {
 		return query(endpoint, "shells", null, null);
 	}
 
+	public IExtendedIterator<Record> shell(String id, boolean encodeBase64) throws URISyntaxException, IOException {
+		return query(endpoint, "shells/" + (encodeBase64 ?
+				Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)) : id), null, null);
+	}
+
 	public IExtendedIterator<Record> submodels() throws URISyntaxException, IOException {
 		return query(endpoint, "submodels", null, null);
 	}

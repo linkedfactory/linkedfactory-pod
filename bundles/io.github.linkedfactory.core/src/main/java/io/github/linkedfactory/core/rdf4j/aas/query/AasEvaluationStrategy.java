@@ -5,7 +5,6 @@ import io.github.linkedfactory.core.rdf4j.aas.AAS;
 import io.github.linkedfactory.core.rdf4j.aas.AasClient;
 import io.github.linkedfactory.core.rdf4j.common.HasValue;
 import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
-import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIterator;
 import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIteratorEvaluationStep;
 import io.github.linkedfactory.core.rdf4j.kvin.query.KvinFetch;
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -185,6 +184,22 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 			if (bs.hasBinding(stmt.getObjectVar().getName())) {
 				// bindings where already fully computed via scanner.referencedBy
 				return new SingletonIteration<>(bs);
+			}
+
+			// retrieve shell if IRI starts with urn:aas:AssetAdministrationShell:
+			if (subjectValue.isIRI() && subjectValue.stringValue().startsWith(AAS.ASSETADMINISTRATIONSHELL_PREFIX)) {
+				String shellId = subjectValue.stringValue().substring(AAS.ASSETADMINISTRATIONSHELL_PREFIX.length());
+				try (IExtendedIterator<Record> it = client.shell(shellId, false)) {
+					Record shell = it.next();
+					QueryBindingSet newBs = new QueryBindingSet(bs);
+					newBs.removeBinding(subjectVar.getName());
+					newBs.addBinding(subjectVar.getName(), toRdfValue(shell));
+					return evaluate(stmt, newBs);
+				} catch (URISyntaxException e) {
+					throw new QueryEvaluationException(e);
+				} catch (IOException e) {
+					throw new QueryEvaluationException(e);
+				}
 			}
 
 			// retrieve submodel if IRI starts with urn:aas:Submodel:
