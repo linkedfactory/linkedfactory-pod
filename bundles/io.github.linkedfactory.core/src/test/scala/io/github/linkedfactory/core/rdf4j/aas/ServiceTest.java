@@ -80,7 +80,7 @@ public class ServiceTest {
 					"select ?sm ?element ?p ?o { " +
 					"service <aas-api:https://v3.admin-shell-io.com> { " +
 					"{ select ?shell { <aas-api:endpoint> <aas-api:shells> ?shell } limit 2 } " +
-					"?shell aas:submodels ?sm . ?sm aas:semanticId ?semId . ?semId aas:keys [ !<:> ?key ] . " +
+					"?shell aas:submodels ?sm . ?sm aas:semanticId ?semId . ?semId aas:keys ?key . " +
 					"?key aas:value \"https://admin-shell.io/zvei/nameplate/1/0/Nameplate\" . " +
 					"?sm !<:> ?element . " +
 					"{ ?element a aas:Property } union { ?element a aas:MultiLanguageProperty } " +

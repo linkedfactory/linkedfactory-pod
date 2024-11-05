@@ -30,6 +30,9 @@ public class AasClient implements Closeable {
 	final String endpoint;
 	ObjectMapper mapper = new ObjectMapper();
 	CloseableHttpClient httpClient;
+	static URI AAS_INDEX_PROPERTY = URIs.createURI(AAS.AAS_NAMESPACE + "index");
+	static boolean USE_AAS_INDEX_PROPERTY = true;
+	static Set<String> orderedElements = Set.of("keys", "SubmodelElementList", "ValueList");
 
 	public AasClient(String endpoint) {
 		this.endpoint = endpoint;
@@ -125,12 +128,17 @@ public class AasClient implements Closeable {
 				}
 				URI property = URIs.createURI(AAS.AAS_NAMESPACE + recordNode.getKey());
 				JsonNode nodeValue = recordNode.getValue();
-				if (nodeValue.isArray() && !("keys".equals(recordNode.getKey())
-						|| "SubmodelElementList".equals(recordNode.getKey())
-						|| "ValueList".equals(recordNode.getKey()))) {
+
+				if (nodeValue.isArray() && (USE_AAS_INDEX_PROPERTY || !orderedElements.contains(recordNode.getKey()))) {
+					boolean addIndex = USE_AAS_INDEX_PROPERTY && orderedElements.contains(recordNode.getKey());
 					// each element of the array is added as (unordered) property value
+					int i = 0;
 					for (JsonNode element : nodeValue) {
-						value = value.append(new Record(property, nodeToValue(element)));
+						var converted = nodeToValue(element);
+						if (addIndex && converted instanceof Record) {
+							converted = ((Record)converted).append(new Record(AAS_INDEX_PROPERTY, BigInteger.valueOf(i++)));
+						}
+						value = value.append(new Record(property, converted));
 					}
 				} else {
 					// convert value as whole (object or ordered list/array)

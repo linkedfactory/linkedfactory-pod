@@ -3,6 +3,7 @@ package io.github.linkedfactory.core.rdf4j.aas;
 import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.rdf4j.common.Conversions;
 import io.github.linkedfactory.core.rdf4j.common.IRIWithValue;
+import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Value;
@@ -33,9 +34,16 @@ public interface AAS {
 				idStr = id.getValue() != null ? id.getValue().toString() : null;
 			}
 			if (idStr == null && "ModelReference".equals(r.first(URIs.createURI(AAS_NAMESPACE + "type")).getValue())) {
-				Object keys = r.first(URIs.createURI(AAS_NAMESPACE + "keys")).getValue();
-				if (keys instanceof List<?> && ((List<?>) keys).size() == 1) {
-					Record firstKey = (Record) ((List<?>) keys).get(0);
+				URI keysProperty = URIs.createURI(AAS_NAMESPACE + "keys");
+				Record keys = r.first(keysProperty);
+				Record firstKey = null;
+				// there is exactly one aas:keys element
+				if (keys.getValue() instanceof Record && keys.next().first(keysProperty).getValue() == null) {
+					firstKey = (Record) keys.getValue();
+				} else if (keys.getValue() instanceof List<?> && ((List<?>) keys.getValue()).size() == 1) {
+					firstKey = (Record) ((List<?>) keys.getValue()).get(0);
+				}
+				if (firstKey != null) {
 					Object typeValue = firstKey.first(URIs.createURI(AAS_NAMESPACE + "type")).getValue();
 					if (typeValue != null) {
 						type = typeValue.toString();
