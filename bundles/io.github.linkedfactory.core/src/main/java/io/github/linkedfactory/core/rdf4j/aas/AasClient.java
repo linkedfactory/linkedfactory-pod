@@ -10,11 +10,12 @@ import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import net.enilink.vocab.rdf.RDF;
 import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -27,6 +28,8 @@ import java.util.*;
 import java.util.function.Supplier;
 
 public class AasClient implements Closeable {
+	private static Logger logger = LoggerFactory.getLogger(AasClient.class);
+
 	final String endpoint;
 	ObjectMapper mapper = new ObjectMapper();
 	CloseableHttpClient httpClient;
@@ -73,7 +76,7 @@ public class AasClient implements Closeable {
 
 		// sending get request to the endpoint
 		HttpGet httpGet = createHttpGet(getRequestUri.toString());
-		HttpResponse response = this.httpClient.execute(httpGet);
+		var response = this.httpClient.execute(httpGet);
 		HttpEntity entity = response.getEntity();
 		try (InputStream content = entity.getContent()) {
 			if (response.getStatusLine().getStatusCode() != 200) {
@@ -102,6 +105,14 @@ public class AasClient implements Closeable {
 				return it;
 			} else {
 				return WrappedIterator.create(Collections.singleton((Record) nodeToValue(node)).iterator());
+			}
+		} finally {
+			if (response != null) {
+				try {
+					response.close();
+				} catch (IOException ioe) {
+					logger.error("Error while closing response", ioe);
+				}
 			}
 		}
 	}
