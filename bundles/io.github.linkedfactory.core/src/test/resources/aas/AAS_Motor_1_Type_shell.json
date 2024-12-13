@@ -1,0 +1,21 @@
+{
+  "idShort": "AAS_Motor_1_Type",
+  "id": "https://example.com/ids/sm/3441_2191_0132_9164",
+  "assetInformation": {
+    "assetKind": "Type",
+    "globalAssetId": "https://eplan.com/example/asset/type/Motor_1",
+    "assetType": ""
+  },
+  "submodels": [
+    {
+      "type": "ExternalReference",
+      "keys": [
+        {
+          "type": "Submodel",
+          "value": "https://eplan.com/example/sm/motor/technicaldata_4"
+        }
+      ]
+    }
+  ],
+  "modelType": "AssetAdministrationShell"
+}

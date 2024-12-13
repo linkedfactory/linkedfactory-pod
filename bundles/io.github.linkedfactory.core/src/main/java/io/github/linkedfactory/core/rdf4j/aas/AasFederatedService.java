@@ -23,7 +23,6 @@ import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 public class AasFederatedService implements FederatedService {
@@ -34,14 +33,18 @@ public class AasFederatedService implements FederatedService {
     Supplier<ExecutorService> executorService;
 
     public AasFederatedService(String endpoint, Supplier<ExecutorService> executorService) {
-        this.client = new AasClient(endpoint);
+        this(new AasClient(endpoint), executorService);
+    }
+
+    public AasFederatedService(AasClient client, Supplier<ExecutorService> executorService) {
+        this.client = client;
         this.executorService = executorService;
     }
 
     @Override
     public boolean ask(Service service, BindingSet bindings, String baseUri) throws QueryEvaluationException {
         final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
-            new SingletonIteration<>(bindings), baseUri);
+                new SingletonIteration<>(bindings), baseUri);
         try {
             while (iter.hasNext()) {
                 BindingSet bs = iter.next();
@@ -56,8 +59,8 @@ public class AasFederatedService implements FederatedService {
 
     @Override
     public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(Service service,
-        CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri)
-        throws QueryEvaluationException {
+                                                                             CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri)
+            throws QueryEvaluationException {
         if (!bindings.hasNext()) {
             return new EmptyIteration<>();
         }
@@ -116,9 +119,9 @@ public class AasFederatedService implements FederatedService {
 
     @Override
     public CloseableIteration<BindingSet, QueryEvaluationException> select(Service service,
-        final Set<String> projectionVars, BindingSet bindings, String baseUri) throws QueryEvaluationException {
+                                                                           final Set<String> projectionVars, BindingSet bindings, String baseUri) throws QueryEvaluationException {
         final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
-            new SingletonIteration<>(bindings), baseUri);
+                new SingletonIteration<>(bindings), baseUri);
         if (service.getBindingNames().equals(projectionVars)) {
             return iter;
         }

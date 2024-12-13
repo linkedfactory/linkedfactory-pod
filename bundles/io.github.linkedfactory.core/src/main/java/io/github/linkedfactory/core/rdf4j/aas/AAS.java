@@ -34,7 +34,7 @@ public interface AAS {
 			if (id != Record.NULL) {
 				idStr = id.getValue() != null ? id.getValue().toString() : null;
 			}
-			if (idStr == null && "ModelReference".equals(r.first(URIs.createURI(AAS_NAMESPACE + "type")).getValue())) {
+			if (idStr == null) {
 				URI keysProperty = URIs.createURI(AAS_NAMESPACE + "keys");
 				Record keys = r.first(keysProperty);
 				Record firstKey = null;
@@ -55,10 +55,14 @@ public interface AAS {
 					}
 				}
 
-				if (type != null && idStr != null) {
-					// System.out.println("ref: " + "urn:aas:" + type + ":" + idStr);
-					return vf.createIRI("urn:aas:" + type + ":" +
-							Base64.getEncoder().encodeToString(idStr.getBytes(StandardCharsets.UTF_8)));
+				if (idStr != null) {
+					switch (type) {
+						case "Submodel":
+							return vf.createIRI("urn:aas:" + type + ":" +
+									Base64.getEncoder().encodeToString(idStr.getBytes(StandardCharsets.UTF_8)));
+						default:
+							// do not convert the reference to an IRI
+					}
 				}
 			}
 
@@ -77,11 +81,13 @@ public interface AAS {
 					}
 				}
 
-				if (type != null) {
-					String iriStr = "urn:aas:" + type + ":" +
-							Base64.getEncoder().encodeToString(idStr.getBytes(StandardCharsets.UTF_8));
-					// System.out.println("with value: " + iriStr);
-					return IRIWithValue.create(iriStr, value);
+				switch (type) {
+					case "Submodel":
+						String iriStr = "urn:aas:" + type + ":" +
+								Base64.getEncoder().encodeToString(idStr.getBytes(StandardCharsets.UTF_8));
+						return IRIWithValue.create(iriStr, value);
+					default:
+						// do not convert the reference to an IRI
 				}
 			}
 		}
