@@ -400,11 +400,11 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         }
 
         override def computeNext: Option[URI] = {
-          val entry = it.next
-          val key = entry.getKey
           var done = false
           var result: Option[URI] = None
           while (it.hasNext && !done) {
+            val entry = it.next
+            val key = entry.getKey
             if (key.startsWith(prefix) && count < limit) {
               val itemId = entry.getValue
               System.arraycopy(itemId, 0, valuesPrefix, 0, itemId.length)
