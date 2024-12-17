@@ -62,6 +62,8 @@ public interface AAS {
 									Base64.getEncoder().encodeToString(idStr.getBytes(StandardCharsets.UTF_8)));
 						default:
 							// do not convert the reference to an IRI
+							// drop id string
+							idStr = null;
 					}
 				}
 			}

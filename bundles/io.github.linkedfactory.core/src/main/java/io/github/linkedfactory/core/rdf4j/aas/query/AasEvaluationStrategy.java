@@ -91,11 +91,12 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 
 				@Override
 				public boolean hasNext() throws QueryEvaluationException {
-					if (next == null && it.hasNext()) {
+					while (next == null && it.hasNext()) {
 						Record r = it.next();
 						Value newObjectValue = toRdfValue(r.getValue());
 						if (objectValue != null && !objectValue.equals(newObjectValue)) {
-							return false;
+							// try next value
+							continue;
 						}
 
 						CompositeBindingSet newBs = new CompositeBindingSet(bs);
