@@ -13,12 +13,15 @@ import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
+import org.eclipse.rdf4j.query.algebra.Projection;
+import org.eclipse.rdf4j.query.algebra.QueryRoot;
 import org.eclipse.rdf4j.query.algebra.Service;
 import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.evaluation.EvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryOptimizer;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.query.algebra.evaluation.util.QueryEvaluationUtil;
+import org.eclipse.rdf4j.query.parser.sparql.SPARQLParser;
 
 import java.io.IOException;
 import java.util.*;
@@ -28,6 +31,7 @@ import java.util.function.Supplier;
 public class AasFederatedService implements FederatedService {
 
     static final ValueFactory vf = SimpleValueFactory.getInstance();
+    protected final Map<Service, Service> parsedServices = new WeakHashMap<>();
     protected boolean initialized = false;
     AasClient client;
     Supplier<ExecutorService> executorService;
@@ -43,6 +47,9 @@ public class AasFederatedService implements FederatedService {
 
     @Override
     public boolean ask(Service service, BindingSet bindings, String baseUri) throws QueryEvaluationException {
+        // ensures that original expression string is used
+        service = parseExpression(service, baseUri);
+
         final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
                 new SingletonIteration<>(bindings), baseUri);
         try {
@@ -55,6 +62,27 @@ public class AasFederatedService implements FederatedService {
             iter.close();
         }
         return false;
+    }
+
+    Service parseExpression(Service service, String baseUri) {
+        Service replacement;
+        synchronized (parsedServices) {
+            replacement = parsedServices.get(service);
+        }
+        if (replacement == null) {
+            // instead of using the given tuple expr of service we parse the original expression string
+            // to preserve the order of its patterns
+            var parsed = new SPARQLParser()
+                    .parseQuery(service.getSelectQueryString(Collections.emptySet()), baseUri).getTupleExpr();
+            var newServiceExpr = ((Projection) ((QueryRoot) parsed).getArg()).getArg();
+            // replace the service with a new one based on the original expression string
+            replacement = new Service(service.getServiceRef().clone(), newServiceExpr, service.getServiceExpressionString(),
+                    service.getPrefixDeclarations(), service.getBaseURI(), service.isSilent());
+            synchronized (parsedServices) {
+                parsedServices.put(service, replacement);
+            }
+        }
+        return replacement;
     }
 
     @Override
@@ -120,6 +148,9 @@ public class AasFederatedService implements FederatedService {
     @Override
     public CloseableIteration<BindingSet, QueryEvaluationException> select(Service service,
                                                                            final Set<String> projectionVars, BindingSet bindings, String baseUri) throws QueryEvaluationException {
+        // ensures that original expression string is used
+        service = parseExpression(service, baseUri);
+
         final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
                 new SingletonIteration<>(bindings), baseUri);
         if (service.getBindingNames().equals(projectionVars)) {
