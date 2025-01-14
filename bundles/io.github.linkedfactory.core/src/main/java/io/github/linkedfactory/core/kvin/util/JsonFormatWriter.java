@@ -23,11 +23,15 @@ public class JsonFormatWriter implements AutoCloseable {
 		if (prettyPrint) {
 			this.generator.useDefaultPrettyPrinter();
 		}
-		this.generator.writeStartObject();
+		initialStartObject();
 	}
 
 	public JsonFormatWriter(OutputStream outputStream) throws IOException {
 		this(outputStream, false);
+	}
+
+	protected void initialStartObject()  throws IOException {
+		this.generator.writeStartObject();
 	}
 
 	public static String toJsonString(IExtendedIterator<KvinTuple> it) throws IOException {

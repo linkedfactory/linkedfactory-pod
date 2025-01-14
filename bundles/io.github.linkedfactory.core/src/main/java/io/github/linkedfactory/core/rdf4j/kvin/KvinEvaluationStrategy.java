@@ -3,12 +3,14 @@ package io.github.linkedfactory.core.rdf4j.kvin;
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
+import io.github.linkedfactory.core.kvin.util.JsonFormatWriter;
 import io.github.linkedfactory.core.rdf4j.common.Conversions;
 import io.github.linkedfactory.core.rdf4j.common.HasValue;
 import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIteratorEvaluationStep;
 import io.github.linkedfactory.core.rdf4j.common.query.BatchQueryEvaluationStep;
 import io.github.linkedfactory.core.rdf4j.kvin.query.*;
+import net.enilink.komma.core.URI;
 import net.enilink.vocab.rdf.RDF;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
@@ -30,6 +32,10 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext.Mi
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
@@ -40,6 +46,26 @@ import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.compareAnd
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.findFirstFetch;
 
 public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
+    static class InternalJsonFormatWriter extends JsonFormatWriter {
+        InternalJsonFormatWriter(OutputStream outputStream) throws IOException {
+            super(outputStream);
+        }
+
+        @Override
+        protected void initialStartObject() {
+            // do nothing
+        }
+
+        @Override
+        protected void writeValue(Object value) throws IOException {
+            super.writeValue(value);
+        }
+
+        @Override
+        public void end() throws IOException {
+            // do nothing
+        }
+    }
 
     final Kvin kvin;
     final ParameterScanner scanner;
@@ -78,6 +104,25 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                 if (KVIN.VALUE.equals(predValue)) {
                     Var valueVar = stmt.getObjectVar();
                     Value rdfValue = Conversions.toRdfValue(tuple.value, vf);
+                    return compareAndBind(bs, valueVar, rdfValue);
+                } else if (KVIN.VALUE_JSON.equals(predValue)) {
+                    Var valueVar = stmt.getObjectVar();
+                    Value rdfValue;
+                    if (tuple.value instanceof Record || tuple.value instanceof Object[] || tuple.value instanceof URI) {
+                        var baos = new ByteArrayOutputStream();
+                        try {
+                            var writer = new InternalJsonFormatWriter(baos);
+                            writer.writeValue(tuple.value);
+                            writer.close();
+                        } catch (IOException e) {
+                            throw new QueryEvaluationException(e);
+                        } catch (Exception e) {
+                            throw new QueryEvaluationException(e);
+                        }
+                        rdfValue = vf.createLiteral(baos.toString(StandardCharsets.UTF_8));
+                    } else {
+                        rdfValue = Conversions.toRdfValue(tuple.value, vf);
+                    }
                     return compareAndBind(bs, valueVar, rdfValue);
                 } else if (KVIN.TIME.equals(predValue)) {
                     Var timeVar = stmt.getObjectVar();
@@ -215,32 +260,6 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
         }
     }
 
-    static class LongArrayComparator implements Comparator<long[]> {
-        final int[] signs;
-
-        public LongArrayComparator(List<Integer> signs) {
-            this.signs = new int[signs.size()];
-            int i = 0;
-            for (Integer sign : signs) {
-                this.signs[i++] = sign;
-            }
-        }
-
-        @Override
-        public int compare(long[] a, long[] b) {
-            for (int i = 0; i < a.length; i++) {
-                if (i >= b.length) {
-                    return 1;
-                }
-                int diff = signs[i] * Long.compare(a[i], b[i]);
-                if (diff != 0) {
-                    return diff;
-                }
-            }
-            return 0;
-        }
-    }
-
     @Override
     protected QueryEvaluationStep prepare(Join join, QueryEvaluationContext context) throws QueryEvaluationException {
         QueryEvaluationStep leftPrepared = precompile(join.getLeftArg(), context);
@@ -275,21 +294,21 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                             return values;
                         }, context, executorService);
             } else {
-	            return new BatchQueryEvaluationStep() {
-		            @Override
-		            public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
-			            return new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
-		            }
+                return new BatchQueryEvaluationStep() {
+                    @Override
+                    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
+                        return new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
+                    }
 
-		            @Override
-		            public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
-			            return new HashJoinIteration(
-					            BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets),
-					            join.getLeftArg().getBindingNames(),
-					            BatchQueryEvaluationStep.evaluate(rightPrepared, bindingSets),
-					            join.getRightArg().getBindingNames(), false);
-		            }
-	            };
+                    @Override
+                    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
+                        return new HashJoinIteration(
+                                BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets),
+                                join.getLeftArg().getBindingNames(),
+                                BatchQueryEvaluationStep.evaluate(rightPrepared, bindingSets),
+                                join.getRightArg().getBindingNames(), false);
+                    }
+                };
             }
         } else {
             // strictly use lateral joins if left arg contains a KVIN fetch as right arg probably depends on the results
@@ -330,7 +349,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                 // in case of projections with aggregates we just use the projected binding names
                 Set<String> leftAssured = leftArg instanceof Projection ? leftArg.getBindingNames() :
                         leftArg.getAssuredBindingNames();
-                return ! rightFetch.getRequiredBindings().stream().anyMatch(required -> leftAssured.contains(required));
+                return !rightFetch.getRequiredBindings().stream().anyMatch(required -> leftAssured.contains(required));
             }
         }
         return false;
@@ -371,5 +390,31 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 
     public Supplier<ExecutorService> getExecutorService() {
         return executorService;
+    }
+
+    static class LongArrayComparator implements Comparator<long[]> {
+        final int[] signs;
+
+        public LongArrayComparator(List<Integer> signs) {
+            this.signs = new int[signs.size()];
+            int i = 0;
+            for (Integer sign : signs) {
+                this.signs[i++] = sign;
+            }
+        }
+
+        @Override
+        public int compare(long[] a, long[] b) {
+            for (int i = 0; i < a.length; i++) {
+                if (i >= b.length) {
+                    return 1;
+                }
+                int diff = signs[i] * Long.compare(a[i], b[i]);
+                if (diff != 0) {
+                    return diff;
+                }
+            }
+            return 0;
+        }
     }
 }

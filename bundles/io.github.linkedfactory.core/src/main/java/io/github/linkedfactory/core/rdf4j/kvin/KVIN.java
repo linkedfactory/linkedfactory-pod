@@ -13,6 +13,7 @@ public interface KVIN {
 	IRI OP = SimpleValueFactory.getInstance().createIRI(KVIN + "op");
 
 	IRI VALUE = SimpleValueFactory.getInstance().createIRI(KVIN + "value");
+	IRI VALUE_JSON = SimpleValueFactory.getInstance().createIRI(KVIN + "valueJson");
 	IRI TIME = SimpleValueFactory.getInstance().createIRI(KVIN + "time");
 	IRI SEQNR = SimpleValueFactory.getInstance().createIRI(KVIN + "seqNr");
 

@@ -27,7 +27,8 @@ import org.eclipse.rdf4j.repository.sail.SailRepository
 import org.eclipse.rdf4j.sail.memory.MemoryStore
 import org.junit.{After, Assert, Before, Test}
 
-import java.io.{File, IOException}
+import java.io.{ByteArrayOutputStream, File, IOException}
+import java.nio.charset.StandardCharsets
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 import java.util.concurrent.Executors
@@ -111,6 +112,48 @@ class ServiceTest {
           .first(URIs.createURI("p:3")).getValue.asInstanceOf[Record]
           .first(URIs.createURI("p:nested")).getValue.asInstanceOf[Double],
           bs.getValue("value").asInstanceOf[Literal].doubleValue, 0.001)
+      }
+      r.close
+    } finally {
+      conn.close
+    }
+  }
+
+  @Test
+  def jsonTest {
+    val data = addRecords(2, 10)
+
+    val conn = repository.getConnection
+    val vf = repository.getValueFactory
+    try {
+      val time = START_TIME + 20
+
+      val values = "values ?item { <item-1> <item-2> }"
+      val queryStr =
+        s"""select * where { $values service <kvin:> {
+           |?item <property:value> ?v . ?v <kvin:to> $time ; <kvin:limit> 1 .
+           |?v <kvin:valueJson> ?record ; <kvin:time> ?time .
+           |} }""".stripMargin
+      val query = conn.prepareTupleQuery(QueryLanguage.SPARQL, queryStr, "http://example.org/")
+
+      val dataByItemAndTime = data.filter(_.time <= time).groupBy(_.item)
+        .view.mapValues(_.groupBy(_.time))
+
+      val r = query.evaluate
+      while (r.hasNext) {
+        val bs = r.next
+        val item = URIs.createURI(bs.getValue("item").toString)
+        val time = bs.getValue("time").asInstanceOf[Literal].longValue()
+
+        val itemValue = dataByItemAndTime(item)(time).head.value
+
+        val baos = new ByteArrayOutputStream();
+        val writer = new KvinEvaluationStrategy.InternalJsonFormatWriter(baos);
+        writer.writeValue(itemValue)
+        writer.close()
+
+        Assert.assertEquals(baos.toString(StandardCharsets.UTF_8),
+          bs.getValue("record").asInstanceOf[Literal].getLabel())
       }
       r.close
     } finally {
