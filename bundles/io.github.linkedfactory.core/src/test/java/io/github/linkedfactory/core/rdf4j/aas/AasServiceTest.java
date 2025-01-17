@@ -64,12 +64,12 @@ public class AasServiceTest extends Mockito {
 						"service <aas-api:http://aasx-server:5001> {" +
 						"<aas-api:endpoint> <aas-api:shells> ?shell ." +
 						"    ?shell aas:idShort ?shellId ." +
-						"    ?shell aas:submodels ?sm." +
-						"    ?sm aas:semanticId/aas:keys/aas:value \"https://admin-shell.io/ZVEI/TechnicalData/Submodel/1/2\"." +
+						"    ?shell aas:submodels [ <aas-api:resolved> ?sm ] ." +
+						"    ?sm aas:semanticId/aas:keys/aas:value \"https://admin-shell.io/ZVEI/TechnicalData/Submodel/1/2\" ." +
 						"    ?sm (!<:>)+ ?element ." +
 						"    { ?element a aas:Property } union { ?element a aas:MultiLanguageProperty }\n" +
 						"    ?element aas:idShort \"ProductClassId\" ; " +
-						"        aas:valueId/aas:keys/aas:value ?productClassId." +
+						"        aas:valueId/aas:keys/aas:value ?productClassId ." +
 						"}" +
 						"}");
 				try (var result = query.evaluate()) {

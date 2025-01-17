@@ -3,6 +3,7 @@ package io.github.linkedfactory.core.rdf4j.aas.query;
 import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.rdf4j.aas.AAS;
 import io.github.linkedfactory.core.rdf4j.aas.AasClient;
+import io.github.linkedfactory.core.rdf4j.common.Conversions;
 import io.github.linkedfactory.core.rdf4j.common.HasValue;
 import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIteratorEvaluationStep;
@@ -25,9 +26,9 @@ import org.eclipse.rdf4j.query.algebra.*;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
+import org.eclipse.rdf4j.query.algebra.evaluation.impl.DefaultEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext.Minimal;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 
 import java.io.IOException;
@@ -39,7 +40,7 @@ import java.util.function.Supplier;
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.compareAndBind;
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.findFirstFetch;
 
-public class AasEvaluationStrategy extends StrictEvaluationStrategy {
+public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 
 	final AasClient client;
 	final ParameterScanner scanner;
@@ -61,7 +62,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 			throws QueryEvaluationException {
 		// System.out.println("Stmt: " + stmt);
 		final Var subjectVar = stmt.getSubjectVar();
-		final Value subjectValue = StrictEvaluationStrategy.getVarValue(subjectVar, bs);
+		final Value subjectValue = getVarValue(subjectVar, bs);
 
 		if (subjectValue == null) {
 			// this happens for patterns like (:subject :property [ <kvin:value> ?someValue ])
@@ -74,7 +75,22 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 
 		Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : valueCache.get(subjectValue);
 		if (data instanceof Record) {
-			Value predValue = StrictEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
+			Var objectVar = stmt.getObjectVar();
+			Value objectValue = getVarValue(objectVar, bs);
+
+			final Value predValue = getVarValue(stmt.getPredicateVar(), bs);
+			if (AAS.API_RESOLVED.equals(predValue)) {
+				Value resolved = AAS.resolveReference(data, vf);
+				if (resolved == null || objectValue != null && !objectValue.equals(resolved)) {
+					return new EmptyIteration<>();
+				}
+				CompositeBindingSet newBs = new CompositeBindingSet(bs);
+				if (objectValue == null) {
+					newBs.addBinding(objectVar.getName(), resolved);
+				}
+				return new SingletonIteration<>(newBs);
+			}
+
 			final Iterator<Record> it;
 			if (predValue != null) {
 				String predValueStr = predValue.stringValue();
@@ -84,8 +100,6 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				it = ((Record) data).iterator();
 			}
 
-			Var variable = stmt.getObjectVar();
-			Value objectValue = StrictEvaluationStrategy.getVarValue(variable, bs);
 			return new AbstractCloseableIteration<>() {
 				CompositeBindingSet next;
 
@@ -104,7 +118,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 							newBs.addBinding(stmt.getPredicateVar().getName(), toRdfValue(r.getProperty()));
 						}
 						if (objectValue == null) {
-							newBs.addBinding(variable.getName(), newObjectValue);
+							newBs.addBinding(objectVar.getName(), newObjectValue);
 						}
 						next = newBs;
 					}
@@ -132,10 +146,10 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 		} else if (data instanceof Object[] || data instanceof List<?>) {
 			List<?> list = data instanceof Object[] ? Arrays.asList((Object[]) data) : (List<?>) data;
 			Var predVar = stmt.getPredicateVar();
-			Value predValue = StrictEvaluationStrategy.getVarValue(predVar, bs);
+			Value predValue = getVarValue(predVar, bs);
 			if (predValue == null) {
 				Iterator<?> it = list.iterator();
-				Value objValue = StrictEvaluationStrategy.getVarValue(stmt.getObjectVar(), bs);
+				Value objValue = getVarValue(stmt.getObjectVar(), bs);
 				return new AbstractCloseableIteration<>() {
 					BindingSet next = null;
 					int i = 0;
@@ -176,7 +190,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 				if (localName.matches("_[0-9]+")) {
 					int index = Integer.parseInt(localName.substring(1));
 					if (index > 0 && index <= list.size()) {
-						return compareAndBind(bs, stmt.getObjectVar(), AAS.toRdfValue(list.get(index - 1), vf));
+						return compareAndBind(bs, stmt.getObjectVar(), toRdfValue(list.get(index - 1)));
 					}
 				}
 			}
@@ -226,8 +240,8 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 		final Var predVar = stmt.getPredicateVar();
 		final Var objectVar = stmt.getObjectVar();
 
-		final Value subjValue = StrictEvaluationStrategy.getVarValue(stmt.getSubjectVar(), bs);
-		final Value predValue = StrictEvaluationStrategy.getVarValue(predVar, bs);
+		final Value subjValue = getVarValue(stmt.getSubjectVar(), bs);
+		final Value predValue = getVarValue(predVar, bs);
 
 		if (subjValue != null) {
 			final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<>() {
@@ -373,7 +387,7 @@ public class AasEvaluationStrategy extends StrictEvaluationStrategy {
 	}
 
 	public Value toRdfValue(Object value) {
-		Value rdfValue = AAS.toRdfValue(value, getValueFactory());
+		Value rdfValue = Conversions.toRdfValue(value, getValueFactory(), true);
 		if (rdfValue instanceof HasValue) {
 			valueCache.putIfAbsent(rdfValue, ((HasValue) rdfValue).getValue());
 		}
