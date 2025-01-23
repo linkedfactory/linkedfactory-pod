@@ -94,6 +94,10 @@ public class AasFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException>
 
         // inspect further nodes
         for (TupleExpr expr : joinArgs) {
+            if (expr instanceof AasFetch) {
+                // skip existing fetches
+                continue;
+            }
             expr.visit(this);
         }
     }

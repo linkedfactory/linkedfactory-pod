@@ -9,15 +9,12 @@ import org.eclipse.rdf4j.query.algebra.TupleExpr;
 import org.eclipse.rdf4j.query.algebra.Var;
 import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
 
 	public final Map<Var, Parameters> parameterIndex = new HashMap<>();
-	public final Map<Var, List<StatementPattern>> referencedBy = new HashMap<>();
 
 	/**
 	 * Extracts the parameters from the given <code>expr</code>.
@@ -74,14 +71,8 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 			Parameters params = createParameters(sp.getObjectVar());
 			parameterIndex.put(sp.getSubjectVar(), params);
 		} else {
-			// if (KVIN.VALUE.equals(pValue)) {
-				// ensure that parameters are created if only kvin:value is present
-				// createParameters(sp.getSubjectVar());
-			// }
-
 			// normal statement
 			remove = false;
-			referencedBy.computeIfAbsent(sp.getObjectVar(), v -> new ArrayList<>()).add(sp);
 		}
 		// remove any meta statements (from, to etc.) sub-statements for
 		// properties of values
