@@ -125,9 +125,10 @@ public class CsvFormatParser {
 						if (timeValue != null) {
 							time = timeValue;
 						} else {
+							String index = line[0];
 							line = null;
 							throw new CsvValidationException(
-									String.format("Invalid time format %s; expected long timestamp", line[0]));
+									String.format("Invalid time format %s; expected long timestamp", index));
 						}
 					}
 				}
