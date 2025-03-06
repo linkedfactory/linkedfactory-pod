@@ -80,37 +80,32 @@ class StreamDataActor extends CometActor with KvinListener {
     case uri => Some(uri)
   }.toList
 
-  /**
-   * Retrieve item properties
-   */
-  def computeProperties(kvin: Kvin, item: URI, context: URI): List[URI] = properties getOrElse kvin.properties(item, context).iterator.asScala.toList
-
   def propertyInfos(item: URI) = items.getOrElseUpdate(item, mutable.Map.empty[URI, PropertyInfo])
 
   def propertyInfo(property: URI, propertyInfos: mutable.Map[URI, PropertyInfo]) = propertyInfos.getOrElseUpdate(property, new PropertyInfo)
 
   override def render = {
     val jsCmd = Data.kvin map { kvin =>
-      val data = for ((item, propInfos) <- items) yield {
-        val itemData = computeProperties(kvin, item, context) map { property =>
-          val propInfo = propertyInfo(property, propInfos)
-          var timestamp = propInfo.lastTimestamp
-          val end = if (timestamp == 0L) KvinTuple.TIME_MAX_VALUE else timestamp
-
+      // fetches data via batch API
+      val tuples = kvin.fetch(items.keys.toList.asJava, properties.map(_.asJava) getOrElse Nil.asJava, context,
+        KvinTuple.TIME_MAX_VALUE, 0L, limit, 0L, null)
+      val itemsJson = tuples.toList.asScala.groupBy(t => t.item).map { case (item, propertyValues) =>
+        val propertyInfos = items(item)
+        val propertyValuesJson = propertyValues.groupBy(t => t.property).map { case (property, values) =>
+          val pInfo = propertyInfo(property, propertyInfos)
+          var timestamp = pInfo.lastTimestamp
           val field = JField(property.toString, JArray(
-            kvin.fetch(item, property,context, end, 0L, limit, 0L, null)
-              .iterator.asScala.map { e =>
+            values.map { e =>
               timestamp = timestamp.max(e.time)
               ("time", e.time) ~ ("seqNr", decompose(e.seqNr)) ~ ("value", decompose(e.value))
             }.toList))
-
           // update time stamp for last query
-          propInfo.lastTimestamp = timestamp + 1
+          pInfo.lastTimestamp = timestamp + 1
           field
-        }
-        JField(item.toString, JObject(itemData.toList))
-      }
-      OnLoad(triggerCmd("stream-init", compactRender(JObject(data.toList))))
+        }.toList
+        JField(item.toString, JObject(propertyValuesJson))
+      }.toList
+      OnLoad(triggerCmd("stream-init", compactRender(JObject(itemsJson))))
     }
     Script(jsCmd getOrElse Noop)
   }
@@ -133,7 +128,9 @@ class StreamDataActor extends CometActor with KvinListener {
       _.split("\\s+").flatMap { s => tryo(URIs.createURI(s)) }.toList
     }
     Data.kvin map { kvin =>
-      items = mutable.Map(computeItems(kvin, context, itemsOrPatterns).map { (_, mutable.Map.empty[URI, PropertyInfo]) }: _*)
+      items = mutable.Map(computeItems(kvin, context, itemsOrPatterns).map {
+        (_, mutable.Map.empty[URI, PropertyInfo])
+      }: _*)
       kvin.addListener(this)
     }
   }
@@ -145,7 +142,7 @@ class StreamDataActor extends CometActor with KvinListener {
   override def entityCreated(item: URI) {
   }
 
-  override def valueAdded(item: URI, property: URI, ctx : URI, time: Long, seqNr: Long, value: Any) {
+  override def valueAdded(item: URI, property: URI, ctx: URI, time: Long, seqNr: Long, value: Any) {
     var trackedItem = items.contains(item)
     if (!trackedItem && prefixes != null && {
       val prefix = prefixes.floor(item.toString)
@@ -189,7 +186,7 @@ class StreamDataActor extends CometActor with KvinListener {
               propData map { propData =>
                 propInfo.lastTimestamp = timestamp + 1
                 List(JField(property.toString, JArray(propData)))
-              } getOrElse(Nil)
+              } getOrElse Nil
           }
           if (itemData.isEmpty) Nil else List(JField(item.toString, itemData.toList))
       }
