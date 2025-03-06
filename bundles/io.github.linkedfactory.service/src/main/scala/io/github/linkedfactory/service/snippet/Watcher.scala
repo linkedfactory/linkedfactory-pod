@@ -15,10 +15,13 @@
  */
 package io.github.linkedfactory.service.snippet
 
+import net.enilink.komma.core.URIs
+
 import scala.xml.NodeSeq
 import scala.xml.NodeSeq.seqToNodeSeq
 import net.liftweb.http.S
 import net.liftweb.http.LiftRules
+import net.liftweb.util.Helpers.tryo
 
 class Watcher {
   def render(ns: NodeSeq): NodeSeq = {
@@ -28,7 +31,9 @@ class Watcher {
       origHeaders.filter { case (key, _) => key != "X-Frame-Options" }
     })
 
-    val items = S.params("items").mkString(" ")
+    val items = (S.param("item") or S.param("items")) getOrElse ""
+    val properties = S.param("property") or S.param("properties")
+
     val limit = S.param("limit")
     <script data-lift="head">
       {
@@ -38,6 +43,8 @@ $(document).on("stream-init stream-update", function(evt, data) {
 });"""
       }
     </script>
-    <div data-lift={ "StreamData?items=" + items + (limit.map(";limit=" + _) openOr "") }></div>
+    <div data-lift={ "StreamData?items=" + items +
+      (properties.map(";properties=" + _) openOr "") +
+      (limit.map(";limit=" + _) openOr "") }></div>
   }
 }

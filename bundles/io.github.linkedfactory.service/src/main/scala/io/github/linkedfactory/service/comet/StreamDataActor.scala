@@ -20,14 +20,14 @@ import io.github.linkedfactory.service.Data
 import net.enilink.komma.core.{URI, URIs}
 import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.Full
-import net.liftweb.http.CometActor
+import net.liftweb.http.{CometActor, S}
 import net.liftweb.http.js.JE.JsRaw
 import net.liftweb.http.js.JsCmds.{Noop, OnLoad, Script, jsExpToJsCmd}
 import net.liftweb.json.Extraction.decompose
 import net.liftweb.json.JsonAST.{JArray, JField, JObject}
 import net.liftweb.json.JsonDSL.{jobject2assoc, list2jvalue, long2jvalue, pair2Assoc}
 import net.liftweb.json.compactRender
-import net.liftweb.util.Helpers.intToTimeSpanBuilder
+import net.liftweb.util.Helpers.{intToTimeSpanBuilder, tryo}
 import net.liftweb.util.Schedule
 
 import java.util.TreeSet
@@ -58,6 +58,7 @@ class StreamDataActor extends CometActor with KvinListener {
   var changedItems = mutable.Set.empty[(URI, URI)]
 
   var itemsOrPatterns = Set.empty[URI]
+  var properties: Option[List[URI]] = None
   var prefixes: TreeSet[String] = null
   var items = mutable.Map.empty[URI, mutable.Map[URI, PropertyInfo]]
   var context = Kvin.DEFAULT_CONTEXT
@@ -82,7 +83,7 @@ class StreamDataActor extends CometActor with KvinListener {
   /**
    * Retrieve item properties
    */
-  def computeProperties(kvin: Kvin, item: URI, context: URI): List[URI] = kvin.properties(item, context).iterator.asScala.toList
+  def computeProperties(kvin: Kvin, item: URI, context: URI): List[URI] = properties getOrElse kvin.properties(item, context).iterator.asScala.toList
 
   def propertyInfos(item: URI) = items.getOrElseUpdate(item, mutable.Map.empty[URI, PropertyInfo])
 
@@ -127,6 +128,9 @@ class StreamDataActor extends CometActor with KvinListener {
         if (prefixes == null) prefixes = new TreeSet
         prefixes.add(trimStar(uri).toString)
       }
+    }
+    properties = attributes.get("properties").map {
+      _.split("\\s+").flatMap { s => tryo(URIs.createURI(s)) }.toList
     }
     Data.kvin map { kvin =>
       items = mutable.Map(computeItems(kvin, context, itemsOrPatterns).map { (_, mutable.Map.empty[URI, PropertyInfo]) }: _*)
