@@ -34,8 +34,7 @@ import io.github.linkedfactory.core.kvin.KvinTuple;
  * actually a helper class for {@link Kvin} compatible stores to provide
  * pre-aggregated values.
  *
- * @param <T>
- *            A sub-class of {@link KvinTuple}
+ * @param <T> A sub-class of {@link KvinTuple}
  */
 public abstract class AggregatingIterator<T extends KvinTuple> extends NiceIterator<T> {
 	static final Logger log = LoggerFactory.getLogger(AggregatingIterator.class);
@@ -83,16 +82,24 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 		inInterval.add(next);
 
 		long intervalStart = next.time - (next.time % interval);
+		T prev = next;
 		next = null;
 		while (base.hasNext()) {
 			T entry = base.next();
+			if (entry.item != prev.item && !entry.item.equals(prev.item) ||
+					entry.property != prev.property && !entry.property.equals(prev.property)) {
+				next = entry;
+				// start new interval if item or property changes
+				break;
+			}
 			long entryIntervalStart = entry.time - (entry.time % interval);
 			if (entryIntervalStart != intervalStart) {
 				next = entry;
-				// starts new interval
+				// start new interval
 				break;
 			} else {
 				inInterval.add(entry);
+				prev = entry;
 			}
 		}
 
@@ -122,37 +129,40 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 		Iterator<T> it = elements.iterator();
 		Object value = it.next().value;
 		switch (op) {
-		case "min":
-			while (it.hasNext()) {
-				Object current = it.next().value;
-				if (utils.compareWithConversion(value, current) > 0) {
-					value = current;
+			case "first":
+				// just use first value
+				break;
+			case "min":
+				while (it.hasNext()) {
+					Object current = it.next().value;
+					if (utils.compareWithConversion(value, current) > 0) {
+						value = current;
+					}
 				}
-			}
-			break;
-		case "max":
-			while (it.hasNext()) {
-				Object current = it.next().value;
-				if (utils.compareWithConversion(value, current) < 0) {
-					value = current;
+				break;
+			case "max":
+				while (it.hasNext()) {
+					Object current = it.next().value;
+					if (utils.compareWithConversion(value, current) < 0) {
+						value = current;
+					}
 				}
-			}
-			break;
-		case "avg":
-			long count = 1;
-			while (it.hasNext()) {
-				Object current = it.next().value;
-				value = utils.add(value, current);
-				count++;
-			}
-			value = utils.divide(value, count);
-			break;
-		case "sum":
-			while (it.hasNext()) {
-				Object current = it.next().value;
-				value = utils.add(value, current);
-			}
-			break;
+				break;
+			case "avg":
+				long count = 1;
+				while (it.hasNext()) {
+					Object current = it.next().value;
+					value = utils.add(value, current);
+					count++;
+				}
+				value = utils.divide(value, count);
+				break;
+			case "sum":
+				while (it.hasNext()) {
+					Object current = it.next().value;
+					value = utils.add(value, current);
+				}
+				break;
 		}
 		return value;
 	}
