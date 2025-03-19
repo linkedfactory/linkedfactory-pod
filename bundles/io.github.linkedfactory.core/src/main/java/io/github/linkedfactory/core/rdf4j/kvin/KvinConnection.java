@@ -45,8 +45,9 @@ public class KvinConnection extends SailConnectionWrapper {
 			var vf = kvinSail.getValueFactory();
 			for (Resource ctx : contexts) {
 				if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith(KVIN_NS)) {
+					String newCtx = ctx.stringValue().substring(KVIN_NS.length());
 					stmtsBySubject.computeIfAbsent(subj, key -> new ArrayList<>()).add(
-							vf.createStatement(subj, pred, obj, vf.createIRI(ctx.stringValue().substring(KVIN_NS.length()))));
+							vf.createStatement(subj, pred, obj, newCtx.isEmpty() ? null : vf.createIRI(newCtx)));
 				} else {
 					super.addStatement(subj, pred, obj, ctx);
 				}
@@ -62,8 +63,9 @@ public class KvinConnection extends SailConnectionWrapper {
 			var vf = kvinSail.getValueFactory();
 			for (Resource ctx : contexts) {
 				if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith(KVIN_NS)) {
+					String newCtx = ctx.stringValue().substring(KVIN_NS.length());
 					stmtsBySubject.computeIfAbsent(subj, key -> new ArrayList<>()).add(
-							vf.createStatement(subj, pred, obj, vf.createIRI(ctx.stringValue().substring(KVIN_NS.length()))));
+							vf.createStatement(subj, pred, obj, newCtx.isEmpty() ? null : vf.createIRI(newCtx)));
 				} else {
 					super.addStatement(modify, subj, pred, obj, contexts);
 				}
@@ -125,7 +127,7 @@ public class KvinConnection extends SailConnectionWrapper {
 			value = convertValue(rdfValue);
 		}
 		return new KvinTuple(convertIri(item).getURI(), convertIri(predicate).getURI(),
-				context.isIRI() ? convertIri((IRI) context).getURI() : Kvin.DEFAULT_CONTEXT,
+				context != null && context.isIRI() ? convertIri((IRI) context).getURI() : Kvin.DEFAULT_CONTEXT,
 				time < 0 ? currentTime : time, seqNr, value);
 	}
 
