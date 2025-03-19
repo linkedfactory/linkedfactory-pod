@@ -25,6 +25,7 @@ public class KvinConnection extends SailConnectionWrapper {
 	final KvinSail kvinSail;
 	final RDF4JValueConverter valueConverter;
 	final LiteralConverter literalConverter;
+	private static String KVIN_NS = "kvin:";
 	private final Pattern containerMembershipPredicatePattern =
 			Pattern.compile("^http://www.w3.org/1999/02/22-rdf-syntax-ns#_[1-9][0-9]*$");
 	private Map<Resource, List<Statement>> stmtsBySubject = new LinkedHashMap<>();
@@ -41,10 +42,11 @@ public class KvinConnection extends SailConnectionWrapper {
 		if (contexts.length == 0) {
 			super.addStatement(subj, pred, obj, contexts);
 		} else {
+			var vf = kvinSail.getValueFactory();
 			for (Resource ctx : contexts) {
-				if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith("kvin:")) {
+				if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith(KVIN_NS)) {
 					stmtsBySubject.computeIfAbsent(subj, key -> new ArrayList<>()).add(
-							kvinSail.getValueFactory().createStatement(subj, pred, obj, ctx));
+							vf.createStatement(subj, pred, obj, vf.createIRI(ctx.stringValue().substring(KVIN_NS.length()))));
 				} else {
 					super.addStatement(subj, pred, obj, ctx);
 				}
@@ -57,10 +59,11 @@ public class KvinConnection extends SailConnectionWrapper {
 		if (contexts.length == 0) {
 			super.addStatement(modify, subj, pred, obj, contexts);
 		} else {
+			var vf = kvinSail.getValueFactory();
 			for (Resource ctx : contexts) {
-				if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith("kvin:")) {
+				if (ctx != null && ctx.isIRI() && ((IRI) ctx).getNamespace().startsWith(KVIN_NS)) {
 					stmtsBySubject.computeIfAbsent(subj, key -> new ArrayList<>()).add(
-							kvinSail.getValueFactory().createStatement(subj, pred, obj, ctx));
+							vf.createStatement(subj, pred, obj, vf.createIRI(ctx.stringValue().substring(KVIN_NS.length()))));
 				} else {
 					super.addStatement(modify, subj, pred, obj, contexts);
 				}
@@ -83,7 +86,7 @@ public class KvinConnection extends SailConnectionWrapper {
 							IRI item = (IRI) e.getKey();
 							return e.getValue().stream().map(stmt -> {
 								IRI predicate = stmt.getPredicate();
-								return toKvinTuple(item, predicate, stmt.getObject(), currentTime);
+								return toKvinTuple(item, predicate, stmt.getObject(), currentTime, stmt.getContext());
 							});
 							//System.out.println(tuple);
 						}).iterator())) {
@@ -93,7 +96,7 @@ public class KvinConnection extends SailConnectionWrapper {
 		}
 	}
 
-	private KvinTuple toKvinTuple(IRI item, IRI predicate, Value rdfValue, long currentTime) {
+	private KvinTuple toKvinTuple(IRI item, IRI predicate, Value rdfValue, long currentTime, Resource context) {
 		long time = -1;
 		int seqNr = 0;
 		Object value = null;
@@ -122,7 +125,8 @@ public class KvinConnection extends SailConnectionWrapper {
 			value = convertValue(rdfValue);
 		}
 		return new KvinTuple(convertIri(item).getURI(), convertIri(predicate).getURI(),
-				Kvin.DEFAULT_CONTEXT, time < 0 ? currentTime : time, seqNr, value);
+				context.isIRI() ? convertIri((IRI) context).getURI() : Kvin.DEFAULT_CONTEXT,
+				time < 0 ? currentTime : time, seqNr, value);
 	}
 
 	private IReference convertIri(IRI rdfValue) {
