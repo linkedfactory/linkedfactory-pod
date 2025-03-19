@@ -95,17 +95,17 @@ object Data {
       override def entityCreated(item: URI): Unit = {
         // FIXME: add/use actual subject via session/token/...
         modelForRequest.foreach { m =>
+          val uow = Globals.contextModelSet.vend.map(_.getUnitOfWork)
           createHierarchyExecutor.submit(new Runnable {
             override def run(): Unit = {
               Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() => {
-                val uow = m.getModelSet.getUnitOfWork
-                uow.begin()
+                uow.foreach(_.begin())
                 try {
                   withTransaction(m.getManager) { manager =>
                     createHierarchy(item, manager)
                   }
                 } finally {
-                  uow.end()
+                  uow.foreach(_.end())
                 }
               }))
             }
