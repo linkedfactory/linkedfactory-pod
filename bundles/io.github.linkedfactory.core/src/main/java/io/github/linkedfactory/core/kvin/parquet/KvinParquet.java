@@ -75,15 +75,15 @@ public class KvinParquet implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinParquet.class);
 	static final long[] EMPTY_IDS = {0};
 	static Comparator<KvinRecord> KVIN_RECORD_COMPARATOR = (a, b) -> {
-		int diff = (int)(a.itemId - b.itemId);
+		int diff = (int) (a.itemId - b.itemId);
 		if (diff != 0) {
 			return diff;
 		}
-		diff = (int)(a.propertyId - b.propertyId);
+		diff = (int) (a.propertyId - b.propertyId);
 		if (diff != 0) {
 			return diff;
 		}
-		diff = (int)(a.time - b.time);
+		diff = (int) (a.time - b.time);
 		if (diff != 0) {
 			// time is reverse
 			return -diff;
@@ -551,10 +551,10 @@ public class KvinParquet implements Kvin {
 	}
 
 	private long[] generateIds(KvinTuple tuple,
-	                          WriteContext writeContext,
-	                          ParquetWriter itemMappingWriter,
-	                          ParquetWriter propertyMappingWriter,
-	                          ParquetWriter contextMappingWriter) {
+	                           WriteContext writeContext,
+	                           ParquetWriter itemMappingWriter,
+	                           ParquetWriter propertyMappingWriter,
+	                           ParquetWriter contextMappingWriter) {
 		long itemId = writeContext.itemMap.computeIfAbsent(tuple.item.toString(), key -> {
 			if (writeContext.hasExistingData) {
 				long id = getId(tuple.item, IdType.ITEM_ID);
@@ -612,7 +612,7 @@ public class KvinParquet implements Kvin {
 			}
 			return newId;
 		});
-		return new long[] {itemId, contextId, propertyId};
+		return new long[]{itemId, contextId, propertyId};
 	}
 
 	private long getId(URI entity, IdType idType) {
@@ -766,7 +766,7 @@ public class KvinParquet implements Kvin {
 		if (itemId != 0L && propertyId != 0L && contextId != 0L) {
 			return and(eq(FilterApi.longColumn("propertyId"), propertyId),
 					and(eq(FilterApi.longColumn("itemId"), itemId),
-					eq(FilterApi.longColumn("contextId"), contextId)));
+							eq(FilterApi.longColumn("contextId"), contextId)));
 		} else if (contextId != 0L) {
 			return and(eq(FilterApi.longColumn("itemId"), itemId),
 					eq(FilterApi.longColumn("contextId"), contextId));
@@ -851,6 +851,7 @@ public class KvinParquet implements Kvin {
 			ParquetReadOptions options = optionsBuilder.build();
 			ParquetFileReader r = new ParquetFileReader(configuration, fileInfo.path, fileInfo.metadata, options) {
 				static Field blocksField;
+
 				static {
 					try {
 						blocksField = ParquetFileReader.class.getDeclaredField("blocks");
@@ -1039,7 +1040,9 @@ public class KvinParquet implements Kvin {
 			}
 
 			final FilterPredicate filterFinal = filter;
-			List<java.nio.file.Path> dataFolders = getDataFolders(itemIds);
+			List<java.nio.file.Path> dataFolders = getDataFolders(itemIds,
+					end != null ? getDate(end) : null,
+					begin != null ? getDate(begin) : null);
 			if (dataFolders.isEmpty()) {
 				// ensure read lock is freed
 				readLock.release();
@@ -1235,6 +1238,10 @@ public class KvinParquet implements Kvin {
 	}
 
 	private List<java.nio.file.Path> getDataFolders(long[] itemIds) throws IOException {
+		return getDataFolders(itemIds, null, null);
+	}
+
+	private List<java.nio.file.Path> getDataFolders(long[] itemIds, Calendar end, Calendar begin) throws IOException {
 		java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
 		Properties meta;
 		try {
@@ -1249,6 +1256,13 @@ public class KvinParquet implements Kvin {
 			throw new IOException(e);
 		}
 		return meta.entrySet().stream().flatMap(entry -> {
+					// exclude year folders that are outside of begin and end time range
+					int year = begin != null || end != null ? Integer.parseInt(entry.getKey().toString()) : -1;
+					if (begin != null && year < begin.get(Calendar.YEAR) ||
+							end != null && year > end.get(Calendar.YEAR)) {
+						return Stream.empty();
+					}
+
 					String idRange = (String) entry.getValue();
 					long[] minMax = splitRange(idRange);
 					if (minMax != null && anyBetween(itemIds, minMax[0], minMax[1])) {
@@ -1263,6 +1277,15 @@ public class KvinParquet implements Kvin {
 								return p;
 							});
 							return yearMeta.entrySet().stream().filter(weekEntry -> {
+								// exclude week folders that are outside of begin and end time range
+								if (begin != null || end != null) {
+									int week = Integer.parseInt(weekEntry.getKey().toString());
+									if (begin != null && year == begin.get(Calendar.YEAR) && week < begin.get(Calendar.WEEK_OF_YEAR) ||
+											end != null && year == end.get(Calendar.YEAR) && week > end.get(Calendar.WEEK_OF_YEAR)) {
+										return false;
+									}
+								}
+
 								String weekIdRange = (String) weekEntry.getValue();
 								long[] weekMinMax = splitRange(weekIdRange);
 								return weekMinMax != null && anyBetween(itemIds, weekMinMax[0], weekMinMax[1]);

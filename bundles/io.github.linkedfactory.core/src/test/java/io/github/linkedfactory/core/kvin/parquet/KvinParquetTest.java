@@ -22,6 +22,7 @@ public class KvinParquetTest {
 	File tempDir;
 	KvinTupleGenerator tupleGenerator;
 	final long startTime = 1696197600000L;
+	final long startTimeSecondWeek = 1697407200000L;
 
 	@Before
 	public void setup() throws IOException {
@@ -48,7 +49,7 @@ public class KvinParquetTest {
 	public void nonSequentialPut() {
 		// inserting as a new week
 		// 16.10.2023 0:00
-		kvinParquet.put(tupleGenerator.setStartTime(1697407200000L)
+		kvinParquet.put(tupleGenerator.setStartTime(startTimeSecondWeek)
 				.setItems(10)
 				.setPropertiesPerItem(10)
 				.setValuesPerProperty(10)
@@ -86,6 +87,27 @@ public class KvinParquetTest {
 		IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, limit);
 		assertNotNull(tuples);
 		assertTrue(tuples.toList().size() > 0);
+		tuples.close();
+	}
+
+	@Test
+	public void shouldFetchWithTimeRange() {
+		// fetches data from first week
+		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/" + 1);
+		URI property = URIs.createURI("http://example.org/" + 1);
+
+		IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT,
+				startTime + 100, startTime + 50, 0, 0, null);
+		assertNotNull(tuples);
+		assertEquals(5, tuples.toList().size());
+		tuples.close();
+
+		// fetches data from second week
+		item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/new-week/" + 1);
+		tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT,
+				startTimeSecondWeek + 100, startTimeSecondWeek + 50, 0, 0, null);
+		assertNotNull(tuples);
+		assertEquals(5, tuples.toList().size());
 		tuples.close();
 	}
 
