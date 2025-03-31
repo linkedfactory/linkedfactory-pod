@@ -41,6 +41,9 @@ public class Compactor {
 	}
 
 	public void execute() throws IOException {
+		// delete compaction folder if it exists
+		FileUtils.deleteDirectory(compactionFolder);
+
 		Set<String> compactedMappings;
 		List<File> weekFolders;
 		Lock readLock = kvinParquet.readLock();
