@@ -180,7 +180,7 @@ public class KvinPartitioned implements Kvin {
 	public IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end, long begin, long limit, long interval, String op) {
 		IExtendedIterator<KvinTuple> internalResult = fetchInternal(items, properties, context, end, begin, limit);
 		if (op != null) {
-			internalResult = new AggregatingIterator<>(internalResult, interval == 0 ? end - begin : interval, op.trim().toLowerCase(), limit) {
+			internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
 				@Override
 				protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
 					return new KvinTuple(item, property, context, time, seqNr, value);

@@ -81,7 +81,7 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 		}
 		inInterval.add(next);
 
-		long intervalStart = next.time - (next.time % interval);
+		long intervalStart = interval == 0 ? 0 : next.time - (next.time % interval);
 		T prev = next;
 		next = null;
 		while (base.hasNext()) {
@@ -92,7 +92,7 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 				// start new interval if item or property changes
 				break;
 			}
-			long entryIntervalStart = entry.time - (entry.time % interval);
+			long entryIntervalStart = interval == 0 ? 0 : entry.time - (entry.time % interval);
 			if (entryIntervalStart != intervalStart) {
 				next = entry;
 				// start new interval
