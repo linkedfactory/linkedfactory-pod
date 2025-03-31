@@ -11,8 +11,8 @@
 	<artifactId>io.github.linkedfactory.core</artifactId>
 
 	<properties>
-		<parquet.version>1.14.1</parquet.version>
-		<hadoop.version>3.3.5</hadoop.version>
+		<parquet.version>1.15.1</parquet.version>
+		<hadoop.version>3.3.6</hadoop.version>
 	</properties>
 
 	<dependencies>

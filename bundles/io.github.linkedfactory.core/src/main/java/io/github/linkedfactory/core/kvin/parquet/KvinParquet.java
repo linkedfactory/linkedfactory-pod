@@ -103,12 +103,12 @@ public class KvinParquet implements Kvin {
 	final Cache<Pair<Path, Integer>, ColumnIndexStore> indexCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 
 	// Lock
-	Map<Path, InputFileInfo> inputFileCache = new HashMap<>(); // hadoop input file cache
-	Cache<Long, URI> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
-	Cache<java.nio.file.Path, Properties> metaCache = CacheBuilder.newBuilder().maximumSize(10000).build();
-	Cache<java.nio.file.Path, List<Path>> filesCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	final Map<Path, InputFileInfo> inputFileCache = new HashMap<>(); // hadoop input file cache
+	final Cache<Long, URI> propertyIdReverseLookUpCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	final Cache<java.nio.file.Path, Properties> metaCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	final Cache<java.nio.file.Path, List<Path>> filesCache = CacheBuilder.newBuilder().maximumSize(10000).build();
+	final ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 	String archiveLocation;
-	ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 
 	public KvinParquet(String archiveLocation) {
 		this.archiveLocation = archiveLocation;
@@ -468,7 +468,7 @@ public class KvinParquet implements Kvin {
 		java.nio.file.Path destination = Paths.get(archiveLocation);
 		Files.walk(source)
 				.skip(1)
-				.filter(p -> Files.isRegularFile(p))
+				.filter(Files::isRegularFile)
 				.forEach(sourceFile -> {
 					java.nio.file.Path dest = destination.resolve(source.relativize(sourceFile)).getParent();
 					try {
@@ -780,7 +780,7 @@ public class KvinParquet implements Kvin {
 		try {
 			IExtendedIterator<KvinTuple> internalResult = fetchInternal(items, properties, context, end, begin, limit);
 			if (op != null) {
-				internalResult = new AggregatingIterator<>(internalResult, interval == 0 ? end - begin : interval, op.trim().toLowerCase(), limit) {
+				internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
 					@Override
 					protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
 						return new KvinTuple(item, property, context, time, seqNr, value);
@@ -849,7 +849,8 @@ public class KvinParquet implements Kvin {
 			optionsBuilder.withAllocator(new HeapByteBufferAllocator());
 			optionsBuilder.withRecordFilter(filter);
 			ParquetReadOptions options = optionsBuilder.build();
-			ParquetFileReader r = new ParquetFileReader(configuration, fileInfo.path, fileInfo.metadata, options) {
+			ParquetFileReader r = new ParquetFileReader(configuration, fileInfo.path, fileInfo.metadata, options
+					/* , new MemoryMappedSeekableInputStream(Paths.get(fileInfo.path.toString())) */) {
 				static Field blocksField;
 
 				static {
@@ -1448,7 +1449,7 @@ public class KvinParquet implements Kvin {
 		long itemId, propertyId, contextId;
 	}
 
-	class WriteContext {
+	static class WriteContext {
 		boolean hasExistingData;
 		long itemIdCounter = 0, propertyIdCounter = 0, contextIdCounter = 0;
 		long lastItemId = 0;
