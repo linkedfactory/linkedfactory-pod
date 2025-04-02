@@ -58,6 +58,8 @@
 						<net.enilink.commons.logging>3</net.enilink.commons.logging>
 						<net.enilink.platform.lift>4</net.enilink.platform.lift>
 						<org.eclipse.equinox.http.jetty>4</org.eclipse.equinox.http.jetty>
+						<org.eclipse.equinox.http.registry>4</org.eclipse.equinox.http.registry>
+						<org.eclipse.rap.rwt.osgi>4</org.eclipse.rap.rwt.osgi>
 						<org.eclipse.core.runtime>0</org.eclipse.core.runtime>
 						<org.eclipse.equinox.common>2</org.eclipse.equinox.common>
 						<org.apache.felix.scr>2</org.apache.felix.scr>
@@ -103,6 +105,18 @@
 					</plugin>
 				</plugins>
 			</build>
+		</profile>
+		<profile>
+			<id>workbench</id>
+
+			<dependencies>
+				<dependency>
+					<groupId>net.enilink.platform</groupId>
+					<artifactId>net.enilink.platform.workbench.feature</artifactId>
+					<version>${enilink.version}</version>
+					<type>pom</type>
+				</dependency>
+			</dependencies>
 		</profile>
 	</profiles>
 
