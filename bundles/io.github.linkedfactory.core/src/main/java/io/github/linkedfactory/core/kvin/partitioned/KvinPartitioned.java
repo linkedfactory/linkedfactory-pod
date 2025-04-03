@@ -97,24 +97,24 @@ public class KvinPartitioned implements Kvin {
 			new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
 			try {
 				new Compactor(archiveStore).execute();
+
+				try {
+					writeLock = writeLock();
+					this.hotStoreArchive.close();
+					this.hotStoreArchive = null;
+					FileUtils.deleteDirectory(this.currentStoreArchivePath);
+				} catch (IOException e) {
+					log.error("Deleting hot store archive failed", e);
+				} finally {
+					if (writeLock != null) {
+						writeLock.release();
+					}
+				}
 			} catch (IOException e) {
 				log.error("Compacting archive store failed", e);
 			}
 		} catch (Exception e) {
 			log.error("Archiving data to archive store failed", e);
-		}
-
-		try {
-			writeLock = writeLock();
-			this.hotStoreArchive.close();
-			this.hotStoreArchive = null;
-			FileUtils.deleteDirectory(this.currentStoreArchivePath);
-		} catch (IOException e) {
-			log.error("Deleting hot store archive failed", e);
-		} finally {
-			if (writeLock != null) {
-				writeLock.release();
-			}
 		}
 	}
 
