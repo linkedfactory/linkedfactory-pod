@@ -298,20 +298,14 @@
 
 	<repositories>
 		<repository>
-			<id>oss-sonatype-snapshots</id>
-			<name>OSS Sonatype Snapshots</name>
-			<url>https://oss.sonatype.org/content/repositories/snapshots/</url>
 			<releases>
 				<enabled>false</enabled>
 			</releases>
-		</repository>
-		<repository>
-			<id>oss-sonatype-releases</id>
-			<name>OSS Sonatype Releases</name>
-			<url>https://oss.sonatype.org/content/repositories/releases/</url>
 			<snapshots>
-				<enabled>false</enabled>
+				<enabled>true</enabled>
 			</snapshots>
+			<id>central-snapshots</id>
+			<url>https://central.sonatype.com/repository/maven-snapshots/</url>
 		</repository>
 	</repositories>
 
