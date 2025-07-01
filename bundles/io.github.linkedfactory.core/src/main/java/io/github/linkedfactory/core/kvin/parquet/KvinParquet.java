@@ -778,7 +778,7 @@ public class KvinParquet implements Kvin {
 	@Override
 	public IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end, long begin, long limit, long interval, String op) {
 		try {
-			IExtendedIterator<KvinTuple> internalResult = fetchInternal(items, properties, context, end, begin, limit);
+			IExtendedIterator<KvinTuple> internalResult = fetchInternal(items, properties, context, end, begin, op == null ? limit : 0L);
 			if (op != null) {
 				internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
 					@Override

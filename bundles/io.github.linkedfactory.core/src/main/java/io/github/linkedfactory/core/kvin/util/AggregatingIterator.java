@@ -59,13 +59,13 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 
 	@Override
 	public boolean hasNext() {
+		if (limit > 0 && count >= limit) {
+			return false;
+		}
 		if (next != null) {
 			return true;
 		}
-		boolean hasNext = false;
-		if (limit == 0 || count < limit) {
-			hasNext = base.hasNext();
-		}
+		boolean hasNext = base.hasNext();
 		if (!hasNext) {
 			close();
 		}
