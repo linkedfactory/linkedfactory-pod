@@ -18,6 +18,7 @@ package io.github.linkedfactory.core.kvin.util;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 import io.github.linkedfactory.core.kvin.Kvin;
 import org.slf4j.Logger;
@@ -44,7 +45,7 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 	final String op;
 	final long limit;
 
-	T next;
+	T next, baseNext;
 	int seqNr = 1;
 	long count = 0;
 
@@ -59,48 +60,76 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 
 	@Override
 	public boolean hasNext() {
-		if (limit > 0 && count >= limit) {
-			return false;
-		}
 		if (next != null) {
 			return true;
 		}
-		boolean hasNext = base.hasNext();
-		if (!hasNext) {
-			close();
+		if (base.hasNext()) {
+			next = computeNext();
 		}
-		return hasNext;
+		return next != null;
 	}
 
 	@Override
 	public T next() {
+		if (hasNext()) {
+			T value = next;
+			next = null;
+			return value;
+		}
+		throw new NoSuchElementException();
+	}
+
+	protected T computeNext() {
 		// keeps elements of current active interval
 		List<T> inInterval = new ArrayList<>();
-		if (next == null) {
-			next = base.next();
+		long intervalStart = -1;
+		if (baseNext != null && (limit == 0 || count < limit)) {
+			inInterval.add(baseNext);
+			intervalStart = interval == 0 ? 0 : baseNext.time - (baseNext.time % interval);
 		}
-		inInterval.add(next);
-
-		long intervalStart = interval == 0 ? 0 : next.time - (next.time % interval);
-		T prev = next;
-		next = null;
+		T prev = baseNext;
+		baseNext = null;
 		while (base.hasNext()) {
 			T entry = base.next();
-			if (entry.item != prev.item && !entry.item.equals(prev.item) ||
-					entry.property != prev.property && !entry.property.equals(prev.property)) {
-				next = entry;
-				// start new interval if item or property changes
-				break;
+			if (prev != null && (entry.item != prev.item && !entry.item.equals(prev.item) ||
+					entry.property != prev.property && !entry.property.equals(prev.property))) {
+				baseNext = entry;
+				count = 0;
+
+				if (!inInterval.isEmpty()) {
+					// start new interval if item or property changes and current interval is not empty
+					break;
+				}
 			}
+
+			// skip values of same item and property if required
+			if (limit > 0 && count >= limit) {
+				continue;
+			}
+
 			long entryIntervalStart = interval == 0 ? 0 : entry.time - (entry.time % interval);
+			if (intervalStart < 0) {
+				intervalStart = entryIntervalStart;
+			}
+
 			if (entryIntervalStart != intervalStart) {
-				next = entry;
+				baseNext = entry;
 				// start new interval
 				break;
 			} else {
 				inInterval.add(entry);
 				prev = entry;
 			}
+		}
+
+		// item and property has not changed
+		if (limit > 0 && count >= limit) {
+			return null;
+		}
+
+		// no values to aggregate
+		if (inInterval.isEmpty()) {
+			return null;
 		}
 
 		count++;
