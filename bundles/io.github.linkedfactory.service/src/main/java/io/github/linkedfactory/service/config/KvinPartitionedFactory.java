@@ -24,6 +24,7 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 			log.info("Using path: {} for archiving", archivePath);
 
 			Duration archiveIntervalDuration = null;
+			Integer age = getArchiveAge();
 			if (archiveInterval != null) {
 				try {
 					archiveIntervalDuration = Duration.ofMillis(Long.parseLong(archiveInterval.getLabel()));
@@ -34,12 +35,14 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 						// ignore
 					}
 				}
-				if (archiveIntervalDuration == null) {
-					log.error("invalid archive interval: {}", archiveInterval);
+				if (archiveIntervalDuration == null ) {
+					log.error("invalid archive interval : {}", archiveInterval);
+				} else if (age != null && archiveIntervalDuration.toDays() < age) {
+					log.error("{} > {} ", archiveInterval, age);
+					age = null;
 				}
 			}
-
-			return new KvinPartitioned(archivePath, archiveIntervalDuration);
+			return new KvinPartitioned(archivePath, archiveIntervalDuration, age);
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
@@ -47,4 +50,7 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 
 	@Iri("plugin://io.github.linkedfactory.service/data/archiveInterval")
 	public abstract ILiteral getArchiveInterval();
+
+	@Iri("plugin://io.github.linkedfactory.service/data/archiveAge")
+	public abstract Integer getArchiveAge();
 }

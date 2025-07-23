@@ -61,6 +61,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
@@ -109,9 +111,14 @@ public class KvinParquet implements Kvin {
 	final Cache<java.nio.file.Path, List<Path>> filesCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 	String archiveLocation;
+	Integer age;
 
-	public KvinParquet(String archiveLocation) {
+	public KvinParquet(String archiveLocation){
+		this(archiveLocation, null);
+	}
+	public KvinParquet(String archiveLocation, Integer age) {
 		this.archiveLocation = archiveLocation;
+		this.age = age;
 		if (!this.archiveLocation.endsWith("/")) {
 			this.archiveLocation = this.archiveLocation + "/";
 		}
@@ -1367,6 +1374,44 @@ public class KvinParquet implements Kvin {
 
 	@Override
 	public void close() {
+	}
+
+	//remove archive older than archive age
+	public void cleanUp() {
+		if(this.age != null){
+			Properties years = new Properties();
+			try {
+				years.load(Files.newInputStream(Paths.get(archiveLocation).resolve("meta.properties")));
+			} catch (IOException e) {
+				log.error("Error while loading meta data", e);
+			}
+			years.keySet().forEach(year -> {
+				cleanYear(Paths.get(archiveLocation).resolve((String) year));
+			});
+
+
+		}
+	}
+
+	private void cleanYear(java.nio.file.Path yearPath)  {
+		Instant cutoff = Instant.now().minus(Duration.ofDays(age));
+		Properties weeks = new Properties();
+		try {
+			weeks.load(Files.newInputStream(yearPath.resolve("meta.properties")));
+		} catch (IOException e) {
+			log.error("Error while loading meta data", e);
+		}
+		weeks.keySet().forEach(week -> {
+            try {
+                Files.walk(yearPath.resolve((String) week), 1).skip(1).
+                        filter(path ->  Instant.ofEpochMilli(path.toFile().lastModified()).isBefore(cutoff))
+                        .sorted(Comparator.reverseOrder())
+                        .map(java.nio.file.Path::toFile)
+                        .forEach(File::delete);
+            } catch (IOException e) {
+				log.error("Error while removing data", e);;
+            }
+        });
 	}
 
 	// id enum
