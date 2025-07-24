@@ -1377,41 +1377,23 @@ public class KvinParquet implements Kvin {
 	}
 
 	//remove archive older than archive age
-	public void cleanUp() {
-		if(this.age != null){
-			Properties years = new Properties();
-			try {
-				years.load(Files.newInputStream(Paths.get(archiveLocation).resolve("meta.properties")));
-			} catch (IOException e) {
-				log.error("Error while loading meta data", e);
-			}
-			years.keySet().forEach(year -> {
-				cleanYear(Paths.get(archiveLocation).resolve((String) year));
-			});
+	public void cleanUp() throws IOException {
+		if(this.age != null && Files.exists(Paths.get(archiveLocation))){
+			log.info("remove old parquet files older than {} days", age);
+			Instant cutoff = Instant.now().minus(Duration.ofDays(age));
+			Files.walk(Paths.get(archiveLocation), 3).skip(1)
+					.map(java.nio.file.Path::toFile)
+					.filter(file ->  file.getName().startsWith("data") && Instant.ofEpochMilli(file.lastModified()).isBefore(cutoff))
+					.sorted(Comparator.reverseOrder())
+					.forEach(file -> {
+                        if (file.delete()) {
+                            log.info("{} deleted", file.getName());
+                        } else {
+                            log.info("{} couldn't bedeleted", file.getName());
+                        }
 
-
+                    });
 		}
-	}
-
-	private void cleanYear(java.nio.file.Path yearPath)  {
-		Instant cutoff = Instant.now().minus(Duration.ofDays(age));
-		Properties weeks = new Properties();
-		try {
-			weeks.load(Files.newInputStream(yearPath.resolve("meta.properties")));
-		} catch (IOException e) {
-			log.error("Error while loading meta data", e);
-		}
-		weeks.keySet().forEach(week -> {
-            try {
-                Files.walk(yearPath.resolve((String) week), 1).skip(1).
-                        filter(path ->  Instant.ofEpochMilli(path.toFile().lastModified()).isBefore(cutoff))
-                        .sorted(Comparator.reverseOrder())
-                        .map(java.nio.file.Path::toFile)
-                        .forEach(File::delete);
-            } catch (IOException e) {
-				log.error("Error while removing data", e);;
-            }
-        });
 	}
 
 	// id enum
