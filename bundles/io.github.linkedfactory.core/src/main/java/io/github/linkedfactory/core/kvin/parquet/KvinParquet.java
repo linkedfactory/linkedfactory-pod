@@ -111,14 +111,15 @@ public class KvinParquet implements Kvin {
 	final Cache<java.nio.file.Path, List<Path>> filesCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 	String archiveLocation;
-	Integer age;
+	Duration retentionPeriod;
 
-	public KvinParquet(String archiveLocation){
+	public KvinParquet(String archiveLocation) {
 		this(archiveLocation, null);
 	}
-	public KvinParquet(String archiveLocation, Integer age) {
+
+	public KvinParquet(String archiveLocation, Duration retentionPeriod) {
 		this.archiveLocation = archiveLocation;
-		this.age = age;
+		this.retentionPeriod = retentionPeriod;
 		if (!this.archiveLocation.endsWith("/")) {
 			this.archiveLocation = this.archiveLocation + "/";
 		}
@@ -1378,21 +1379,21 @@ public class KvinParquet implements Kvin {
 
 	//remove archive older than archive age
 	public void cleanUp() throws IOException {
-		if(this.age != null && Files.exists(Paths.get(archiveLocation))){
-			log.info("remove old parquet files older than {} days", age);
-			Instant cutoff = Instant.now().minus(Duration.ofDays(age));
+		if (this.retentionPeriod != null && Files.exists(Paths.get(archiveLocation))) {
+			log.info("remove old parquet files older than {} days", retentionPeriod.toDays());
+			Instant cutoff = Instant.now().minus(retentionPeriod);
 			Files.walk(Paths.get(archiveLocation), 3).skip(1)
 					.map(java.nio.file.Path::toFile)
-					.filter(file ->  file.getName().startsWith("data") && Instant.ofEpochMilli(file.lastModified()).isBefore(cutoff))
+					.filter(file -> file.getName().startsWith("data") && Instant.ofEpochMilli(file.lastModified()).isBefore(cutoff))
 					.sorted(Comparator.reverseOrder())
 					.forEach(file -> {
-                        if (file.delete()) {
-                            log.info("{} deleted", file.getName());
-                        } else {
-                            log.info("{} couldn't bedeleted", file.getName());
-                        }
+						if (file.delete()) {
+							log.info("{} deleted", file.getName());
+						} else {
+							log.info("{} couldn't bedeleted", file.getName());
+						}
 
-                    });
+					});
 		}
 	}
 

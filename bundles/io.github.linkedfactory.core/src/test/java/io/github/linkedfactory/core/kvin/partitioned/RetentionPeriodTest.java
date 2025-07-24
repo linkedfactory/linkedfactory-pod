@@ -15,10 +15,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 
 import static org.junit.Assert.*;
 
-public class ArchiveAgeTest {
+public class RetentionPeriodTest {
     static String itemTemplate = "http://localhost:8080/linkedfactory/demofactory/{}";
     static String propertyTemplate = "http://example.org/{}";
     KvinTupleGenerator tupleGenerator;
@@ -28,13 +29,8 @@ public class ArchiveAgeTest {
     @Before
     public void setup() throws IOException {
         tempDir = Files.createTempDirectory("kvinPartitioned").toFile();
-        tupleGenerator = new KvinTupleGenerator()
-                .setItems(10)
-                .setPropertiesPerItem(10)
-                .setValuesPerProperty(10)
-                .setItemPattern(itemTemplate)
-                .setPropertyPattern(propertyTemplate);
-        kvinPartitioned = new KvinPartitioned(tempDir, null, 0);
+        tupleGenerator = new KvinTupleGenerator().setItems(10).setPropertiesPerItem(10).setValuesPerProperty(10).setItemPattern(itemTemplate).setPropertyPattern(propertyTemplate);
+        kvinPartitioned = new KvinPartitioned(tempDir, null, Duration.ZERO);
     }
 
     @After
@@ -87,7 +83,7 @@ public class ArchiveAgeTest {
         assertTrue(archived);
         kvinPartitioned.runArchival();
         // assure that old data before the current moment removed
-        archived =  Files.walk(archivePath, 3).skip(1).anyMatch(p -> p.toFile().getName().startsWith("data"));
+        archived = Files.walk(archivePath, 3).skip(1).anyMatch(p -> p.toFile().getName().startsWith("data"));
         assertFalse(archived);
     }
 

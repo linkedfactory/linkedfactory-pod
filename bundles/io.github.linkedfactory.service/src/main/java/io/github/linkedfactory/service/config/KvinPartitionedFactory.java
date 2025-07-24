@@ -14,43 +14,51 @@ import java.time.format.DateTimeParseException;
 
 @Iri("plugin://io.github.linkedfactory.service/data/KvinPartitioned")
 public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
-	private static final Logger log = LoggerFactory.getLogger(KvinPartitionedFactory.class);
+    private static final Logger log = LoggerFactory.getLogger(KvinPartitionedFactory.class);
 
-	@Override
-	public Kvin create() {
-		try {
-			File archivePath = getStorePAthOr("linkedfactory-partition");
-			ILiteral archiveInterval = getArchiveInterval();
-			log.info("Using path: {} for archiving", archivePath);
+    @Override
+    public Kvin create() {
+        try {
+            File archivePath = getStorePAthOr("linkedfactory-partition");
+            ILiteral archiveInterval = getArchiveInterval();
+            ILiteral retentionPeriod = getRetentionPeriod();
+            log.info("Using path: {} for archiving", archivePath);
 
-			Duration archiveIntervalDuration = null;
-			Integer age = getArchiveAge();
-			if (archiveInterval != null) {
-				try {
-					archiveIntervalDuration = Duration.ofMillis(Long.parseLong(archiveInterval.getLabel()));
-				} catch (NumberFormatException nfe) {
-					try {
-						archiveIntervalDuration = Duration.parse(archiveInterval.getLabel());
-					} catch (DateTimeParseException dtpe) {
-						// ignore
-					}
-				}
-				if (archiveIntervalDuration == null ) {
-					log.error("invalid archive interval : {}", archiveInterval);
-				} else if (age != null && archiveIntervalDuration.toDays() < age) {
-					log.error("{} > {} ", archiveInterval, age);
-					age = null;
-				}
-			}
-			return new KvinPartitioned(archivePath, archiveIntervalDuration, age);
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
-	}
+            Duration archiveIntervalDuration = durationFromLiteral(archiveInterval);
+            Duration retentionPeriodDuration = durationFromLiteral(retentionPeriod);
 
-	@Iri("plugin://io.github.linkedfactory.service/data/archiveInterval")
-	public abstract ILiteral getArchiveInterval();
+            if (archiveIntervalDuration == null) {
+                log.error("invalid archive interval : {}", archiveInterval);
+            } else if (retentionPeriodDuration != null && archiveIntervalDuration.compareTo(retentionPeriodDuration) < 1) {
+                log.error("{} > {} ", archiveInterval, retentionPeriod);
+                retentionPeriod = null; //not limited
+            }
 
-	@Iri("plugin://io.github.linkedfactory.service/data/archiveAge")
-	public abstract Integer getArchiveAge();
+            return new KvinPartitioned(archivePath, archiveIntervalDuration, retentionPeriodDuration);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Iri("plugin://io.github.linkedfactory.service/data/archiveInterval")
+    public abstract ILiteral getArchiveInterval();
+
+    @Iri("plugin://io.github.linkedfactory.service/data/retentionPeriod")
+    public abstract ILiteral getRetentionPeriod();
+
+    private Duration durationFromLiteral(ILiteral literal) {
+        Duration duration = null;
+        if (literal != null) {
+            try {
+                duration = Duration.ofMillis(Long.parseLong(literal.getLabel()));
+            } catch (NumberFormatException nfe) {
+                try {
+                    duration = Duration.parse(literal.getLabel());
+                } catch (DateTimeParseException dtpe) {
+                    // ignore
+                }
+            }
+        }
+        return duration;
+    }
 }

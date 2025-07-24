@@ -8,4 +8,4 @@
 <> <defaultModel> <http://linkedfactory.github.io/data/> .
 <> <store> [ a <KvinLevelDb> ; <dirName> "linkedfactory-valuestore" ] .
 
-#<> <store> [ a <KvinPartitioned> ; <dirName> "linkedfactory-partitioned" ; <archiveInterval> "P2D" ; <archiveAge> 30] .
+#<> <store> [ a <KvinPartitioned> ; <dirName> "linkedfactory-partitioned" ; <archiveInterval> "P2D" ; <retentionPeriod > "P20D"] .

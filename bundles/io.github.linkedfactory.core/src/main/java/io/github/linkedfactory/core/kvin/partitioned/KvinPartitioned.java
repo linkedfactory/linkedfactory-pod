@@ -45,7 +45,7 @@ public class KvinPartitioned implements Kvin {
 		this(path, null, null);
 	}
 
-	public KvinPartitioned(File path, Duration archiveInterval, Integer age) throws IOException {
+	public KvinPartitioned(File path, Duration archiveInterval, Duration retentionPeriod) throws IOException {
 		this.path = path;
 		this.archiveInterval = archiveInterval;
 		this.currentStorePath = new File(path, "current");
@@ -56,7 +56,7 @@ public class KvinPartitioned implements Kvin {
 		if (Files.exists(this.currentStoreArchivePath.toPath())) {
 			hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
 		}
-		archiveStore = new KvinParquet(archiveStorePath.toString(), age);
+		archiveStore = new KvinParquet(archiveStorePath.toString(), retentionPeriod);
 		scheduleCyclicArchival();
 	}
 
