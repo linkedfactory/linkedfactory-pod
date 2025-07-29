@@ -61,6 +61,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.temporal.ChronoField;
+import java.time.temporal.IsoFields;
+import java.time.temporal.TemporalField;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
@@ -109,9 +115,15 @@ public class KvinParquet implements Kvin {
 	final Cache<java.nio.file.Path, List<Path>> filesCache = CacheBuilder.newBuilder().maximumSize(10000).build();
 	final ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 	String archiveLocation;
+	Duration retentionPeriod;
 
 	public KvinParquet(String archiveLocation) {
+		this(archiveLocation, null);
+	}
+
+	public KvinParquet(String archiveLocation, Duration retentionPeriod) {
 		this.archiveLocation = archiveLocation;
+		this.retentionPeriod = retentionPeriod;
 		if (!this.archiveLocation.endsWith("/")) {
 			this.archiveLocation = this.archiveLocation + "/";
 		}
@@ -403,8 +415,9 @@ public class KvinParquet implements Kvin {
 				long[] minMaxYear = minMaxYears.get(year);
 				meta.put(yearFolderName, minMaxYear[0] + "-" + minMaxYear[1]);
 			}
-
-			meta.store(Files.newOutputStream(tempPath.resolve("meta.properties")), null);
+			if (!meta.isEmpty()) {
+				meta.store(Files.newOutputStream(tempPath.resolve("meta.properties")), null);
+			}
 			createMetaFiles(tempPath, writersPerYear);
 
 			java.nio.file.Path validPath = tempPath.resolve("valid");
@@ -1367,6 +1380,126 @@ public class KvinParquet implements Kvin {
 
 	@Override
 	public void close() {
+	}
+
+	/**
+	 * Cleans up archive according to retention period.
+	 *
+	 * @throws IOException
+	 */
+	public void cleanUp() throws IOException {
+		var writeLock = writeLock();
+		try {
+			cleanUpInternal();
+		} finally {
+			writeLock.release();
+		}
+	}
+
+	protected void cleanUpInternal() throws IOException {
+		if (this.retentionPeriod != null && Files.exists(Paths.get(archiveLocation))) {
+			log.info("remove parquet files older than {} days", retentionPeriod.toDays());
+			var maxAge = Instant.now().minus(retentionPeriod).atZone(ZoneId.of("UTC"));
+
+			java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
+			Properties meta;
+			try {
+				meta = metaCache.get(metaPath, () -> {
+					Properties p = new Properties();
+					if (Files.exists(metaPath)) {
+						p.load(Files.newInputStream(metaPath));
+					}
+					return p;
+				});
+			} catch (ExecutionException e) {
+				throw new IOException(e);
+			}
+
+			var metaNew = new Properties();
+			var metaChanged = false;
+			for (var yearEntry : meta.entrySet()) {
+				// exclude year folders that newer than max age
+				int year = Integer.parseInt(yearEntry.getKey().toString());
+				if (year > maxAge.get(ChronoField.YEAR)) {
+					continue;
+				}
+
+				long[] minMaxYearNew = new long[]{Long.MAX_VALUE, Long.MIN_VALUE};
+				var yearFolder = Paths.get(archiveLocation, yearEntry.getKey().toString());
+				var yearMetaPath = yearFolder.resolve("meta.properties");
+				if (Files.exists(yearFolder)) {
+					Properties yearMeta;
+					try {
+						yearMeta = metaCache.get(yearMetaPath, () -> {
+							Properties p = new Properties();
+							if (Files.exists(yearMetaPath)) {
+								p.load(Files.newInputStream(yearMetaPath));
+							}
+							return p;
+						});
+					} catch (Exception e) {
+						log.error("Error while loading meta data", e);
+						yearMeta = new Properties();
+					}
+
+					var yearMetaNew = new Properties();
+					boolean yearChanged = false;
+					for (var weekEntry : yearMeta.entrySet()) {
+						// exclude week folders that are newer than max age
+						int week = Integer.parseInt(weekEntry.getKey().toString());
+
+						if (year == maxAge.get(ChronoField.YEAR) && week > maxAge.get(ChronoField.ALIGNED_WEEK_OF_YEAR)) {
+							long[] minMaxWeek = splitRange((String) yearEntry.getValue());
+							minMaxYearNew[0] = Math.min(minMaxWeek[0], minMaxYearNew[0]);
+							minMaxYearNew[1] = Math.max(minMaxWeek[1], minMaxYearNew[1]);
+
+							yearMetaNew.put(weekEntry.getKey(), weekEntry.getValue());
+							continue;
+						}
+
+						// remove week entry from metadata
+						yearChanged = true;
+
+						var weekFolder = yearFolder.resolve(weekEntry.getKey().toString());
+						if (Files.exists(weekFolder)) {
+							// recursively delete all data files within week folder
+							try (var paths = Files.walk(weekFolder)) {
+								paths.sorted(Comparator.reverseOrder()).forEach(p -> {
+									try {
+										Files.delete(p);
+									} catch (IOException e) {
+										log.error("Error while deleting archive file or folder", p);
+									}
+								});
+							}
+						}
+					}
+					if (yearMeta.isEmpty()) {
+						Files.delete(yearFolder);
+						metaChanged = true;
+					} else {
+						if (yearChanged) {
+							// store updated metadata file for this year
+							yearMetaNew.store(Files.newOutputStream(yearMetaPath), null);
+							// update id range for year
+							metaNew.put(yearEntry.getKey(), minMaxYearNew[0] + "-" + minMaxYearNew[1]);
+							metaChanged = true;
+						} else {
+							// keep existing entry
+							metaNew.put(yearEntry.getKey(), yearEntry.getValue());
+						}
+					}
+				}
+			}
+
+			if (metaChanged) {
+				// update top-level metadata
+				metaNew.store(Files.newOutputStream(metaPath), null);
+
+				// clear caches
+				clearCaches();
+			}
+		}
 	}
 
 	// id enum

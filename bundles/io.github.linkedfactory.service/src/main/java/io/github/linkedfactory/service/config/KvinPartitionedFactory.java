@@ -21,25 +21,20 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 		try {
 			File archivePath = getStorePAthOr("linkedfactory-partition");
 			ILiteral archiveInterval = getArchiveInterval();
+			ILiteral retentionPeriod = getRetentionPeriod();
 			log.info("Using path: {} for archiving", archivePath);
 
-			Duration archiveIntervalDuration = null;
-			if (archiveInterval != null) {
-				try {
-					archiveIntervalDuration = Duration.ofMillis(Long.parseLong(archiveInterval.getLabel()));
-				} catch (NumberFormatException nfe) {
-					try {
-						archiveIntervalDuration = Duration.parse(archiveInterval.getLabel());
-					} catch (DateTimeParseException dtpe) {
-						// ignore
-					}
-				}
-				if (archiveIntervalDuration == null) {
-					log.error("invalid archive interval: {}", archiveInterval);
-				}
+			Duration archiveIntervalDuration = durationFromLiteral(archiveInterval);
+			Duration retentionPeriodDuration = durationFromLiteral(retentionPeriod);
+
+			if (archiveIntervalDuration == null) {
+				log.error("invalid archive interval : {}", archiveInterval);
+			} else if (retentionPeriodDuration != null && archiveIntervalDuration.compareTo(retentionPeriodDuration) < 1) {
+				log.error("{} > {} ", archiveInterval, retentionPeriod);
+				retentionPeriodDuration = null; // not limited
 			}
 
-			return new KvinPartitioned(archivePath, archiveIntervalDuration);
+			return new KvinPartitioned(archivePath, archiveIntervalDuration, retentionPeriodDuration);
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
@@ -47,4 +42,23 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 
 	@Iri("plugin://io.github.linkedfactory.service/data/archiveInterval")
 	public abstract ILiteral getArchiveInterval();
+
+	@Iri("plugin://io.github.linkedfactory.service/data/retentionPeriod")
+	public abstract ILiteral getRetentionPeriod();
+
+	private Duration durationFromLiteral(ILiteral literal) {
+		Duration duration = null;
+		if (literal != null) {
+			try {
+				duration = Duration.ofMillis(Long.parseLong(literal.getLabel()));
+			} catch (NumberFormatException nfe) {
+				try {
+					duration = Duration.parse(literal.getLabel());
+				} catch (DateTimeParseException dtpe) {
+					// ignore
+				}
+			}
+		}
+		return duration;
+	}
 }

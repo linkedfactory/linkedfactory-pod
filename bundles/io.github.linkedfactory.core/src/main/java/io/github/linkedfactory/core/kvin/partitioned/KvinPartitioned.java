@@ -42,10 +42,10 @@ public class KvinPartitioned implements Kvin {
 	ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 
 	public KvinPartitioned(File path) throws IOException {
-		this(path, null);
+		this(path, null, null);
 	}
 
-	public KvinPartitioned(File path, Duration archiveInterval) throws IOException {
+	public KvinPartitioned(File path, Duration archiveInterval, Duration retentionPeriod) throws IOException {
 		this.path = path;
 		this.archiveInterval = archiveInterval;
 		this.currentStorePath = new File(path, "current");
@@ -56,7 +56,7 @@ public class KvinPartitioned implements Kvin {
 		if (Files.exists(this.currentStoreArchivePath.toPath())) {
 			hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
 		}
-		archiveStore = new KvinParquet(archiveStorePath.toString());
+		archiveStore = new KvinParquet(archiveStorePath.toString(), retentionPeriod);
 		scheduleCyclicArchival();
 	}
 
@@ -97,7 +97,7 @@ public class KvinPartitioned implements Kvin {
 			new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
 			try {
 				new Compactor(archiveStore).execute();
-
+				archiveStore.cleanUp();
 				try {
 					writeLock = writeLock();
 					this.hotStoreArchive.close();
