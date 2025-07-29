@@ -411,8 +411,9 @@ public class KvinParquet implements Kvin {
 				long[] minMaxYear = minMaxYears.get(year);
 				meta.put(yearFolderName, minMaxYear[0] + "-" + minMaxYear[1]);
 			}
-
-			meta.store(Files.newOutputStream(tempPath.resolve("meta.properties")), null);
+			if (!meta.isEmpty()) {
+				meta.store(Files.newOutputStream(tempPath.resolve("meta.properties")), null);
+			}
 			createMetaFiles(tempPath, writersPerYear);
 
 			java.nio.file.Path validPath = tempPath.resolve("valid");
@@ -1380,20 +1381,139 @@ public class KvinParquet implements Kvin {
 	//remove archive older than archive age
 	public void cleanUp() throws IOException {
 		if (this.retentionPeriod != null && Files.exists(Paths.get(archiveLocation))) {
-			log.info("remove old parquet files older than {} days", retentionPeriod.toDays());
+			log.info("remove parquet files older than {} days", retentionPeriod.toDays());
 			Instant cutoff = Instant.now().minus(retentionPeriod);
-			Files.walk(Paths.get(archiveLocation), 3).skip(1)
-					.map(java.nio.file.Path::toFile)
-					.filter(file -> file.getName().startsWith("data") && Instant.ofEpochMilli(file.lastModified()).isBefore(cutoff))
-					.sorted(Comparator.reverseOrder())
-					.forEach(file -> {
-						if (file.delete()) {
-							log.info("{} deleted", file.getName());
+			Map<String, WriterState> writers = new HashMap<>();
+			Map<Integer, long[]> minMaxYears = new HashMap<>();
+			Files.walk(Paths.get(archiveLocation), 3).skip(1).map(java.nio.file.Path::toFile).filter(file -> file.getName().startsWith("data") && Instant.ofEpochMilli(file.lastModified()).isBefore(cutoff)).sorted(Comparator.reverseOrder()).forEach(dataFile -> {
+				WriterState writerState = null;
+				String prevKey = null;
+				IExtendedIterator<KvinRecord> it = ParquetHelpers.createKvinRecordReader(new Path(dataFile.getPath()), null);
+				while (it.hasNext()) {
+					KvinRecord record = it.next();
+					Calendar tupleDate = getDate(record.time);
+					int year = tupleDate.get(Calendar.YEAR);
+					int week = tupleDate.get(Calendar.WEEK_OF_YEAR);
+					String key = year + "-" + week;
+					if (!key.equals(prevKey)) {
+						writerState = writers.get(key);
+						if (writerState == null) {
+							writerState = new WriterState(dataFile.toPath(), null, year, week);
+							writers.put(key, writerState);
+						}
+						prevKey = key;
+					}
+					writerState.minMax[0] = Math.min(writerState.minMax[0], record.itemId);
+					writerState.minMax[1] = Math.max(writerState.minMax[1], record.itemId);
+				}
+				for (WriterState state : writers.values()) {
+					minMaxYears.compute(state.year, (k, v) -> {
+						if (v == null) {
+							return Arrays.copyOf(state.minMax, state.minMax.length);
 						} else {
-							log.info("{} couldn't bedeleted", file.getName());
+							v[0] = Math.min(v[0], state.minMax[0]);
+							v[1] = Math.max(v[1], state.minMax[1]);
+							return v;
+						}
+					});
+				}
+				if (dataFile.delete()) {
+					log.info("{} deleted", dataFile.getName());
+					File parent = dataFile.getParentFile();
+					if (parent.listFiles().length == 0) {
+						parent.delete();
+					}
+
+				} else {
+					log.info("{} couldn't be deleted", dataFile.getName());
+				}
+
+			});
+			var metaPath = Paths.get(archiveLocation, "meta.properties");
+			Properties meta = new Properties();
+			if (Files.exists(metaPath)) {
+				meta.load(Files.newInputStream(metaPath));
+			}
+			log.info("meta before clean up: {}", meta.entrySet());
+			meta.stringPropertyNames().forEach(yearStr -> {
+				String idRange = String.valueOf(meta.get(yearStr));
+				minMaxYears.computeIfPresent(Integer.parseInt(yearStr), (k, v) -> {
+					long[] minMaxYear = splitRange(idRange);
+					if (minMaxYear[1] > v[1]) {
+						if (v[1] > v[0]) {
+							v[0] = v[0] + 1;
+							v[1] = Math.max(v[1], minMaxYear[1]);
+						} else {
+							v[0] = v[0] + 1;
+							v[1] = Math.max(v[1], minMaxYear[1]);
 						}
 
-					});
+						return v;
+					} else {
+						return null;
+					}
+				});
+			});
+			Map<Integer, List<WriterState>> writersPerYear = writers.values().stream().collect(Collectors.groupingBy(s -> s.year));
+			for (Map.Entry<Integer, List<WriterState>> entry : writersPerYear.entrySet()) {
+				int year = entry.getKey();
+				String yearFolderName = String.format("%04d", year);
+				long[] minMaxYear = minMaxYears.get(year);
+				if (minMaxYear != null) {
+					meta.put(yearFolderName, minMaxYear[0] + "-" + minMaxYear[1]);
+				} else {
+					meta.remove(yearFolderName);
+				}
+			}
+			log.info("meta after cleanup: {}", meta.entrySet());
+			Files.deleteIfExists(metaPath);
+			if (!meta.isEmpty()) {
+				meta.store(Files.newOutputStream(metaPath), null);
+			}
+			Files.walk(Paths.get(archiveLocation), 1).skip(1).forEach(parent -> {
+				if (Files.isDirectory(parent)) {
+					java.nio.file.Path yearMetaPath = parent.resolve("meta.properties");
+					if (Files.exists(yearMetaPath)) {
+						Properties yearMeta = new Properties();
+						try {
+							yearMeta.load(Files.newInputStream(yearMetaPath));
+						} catch (IOException e) {
+							log.error("Error while loading meta data", e);
+						}
+						yearMeta.stringPropertyNames().forEach(week -> {
+							String idRange = String.valueOf(yearMeta.get(week));
+							String key = parent.getFileName() + "-" + Integer.parseInt(week);
+							WriterState state = writers.get(key);
+							if (state != null) {
+								long[] minMaxWeek = splitRange(idRange);
+								if (minMaxWeek != null) {
+									if (minMaxWeek[1] > state.minMax[1]) {
+										yearMeta.put(week, state.minMax[1] + "-" + minMaxWeek[1]);
+									} else {
+										yearMeta.remove(week);
+									}
+								} else {
+									yearMeta.remove(week);
+								}
+							} else {
+								yearMeta.remove(week);
+							}
+						});
+						try {
+							Files.deleteIfExists(yearMetaPath);
+							if (!yearMeta.isEmpty()) yearMeta.store(Files.newOutputStream(yearMetaPath), null);
+						} catch (IOException e) {
+							log.error("Error while updating meta data data", e);
+						}
+
+					}
+					File parentFile = parent.toFile();
+					if (parentFile.listFiles().length == 0) {
+						parentFile.delete();
+					}
+
+				}
+			});
 		}
 	}
 

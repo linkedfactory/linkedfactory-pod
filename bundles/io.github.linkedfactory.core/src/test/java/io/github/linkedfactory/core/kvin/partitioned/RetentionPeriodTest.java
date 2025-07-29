@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.stream.Collectors;
 
 import static org.junit.Assert.*;
 
@@ -81,10 +82,19 @@ public class RetentionPeriodTest {
         // assure that the data was archived
         boolean archived = Files.walk(archivePath, 3).skip(1).anyMatch(p -> p.toFile().getName().startsWith("data"));
         assertTrue(archived);
+        assertTrue(Files.exists(archivePath.resolve("meta.properties")));
+        System.out.println("meta data:" + Files.readAllLines(archivePath.resolve("meta.properties")));
+        assertTrue(Files.exists(archivePath.resolve("2023")));
+        assertTrue(Files.exists(archivePath.resolve("2023").resolve("meta.properties")));
+        assertTrue(Files.exists(archivePath.resolve("2023").resolve("01")));
         kvinPartitioned.runArchival();
+        assertFalse(Files.exists(archivePath.resolve("meta.properties")));
         // assure that old data before the current moment removed
-        archived = Files.walk(archivePath, 3).skip(1).anyMatch(p -> p.toFile().getName().startsWith("data"));
-        assertFalse(archived);
+        boolean cleaned = Files.walk(archivePath, 3).skip(1).anyMatch(p -> p.toFile().getName().startsWith("data"));
+        assertFalse(cleaned);
+        System.out.println("after clean up:" + Files.list(archivePath).map(f -> f.toFile().getName()).collect(Collectors.toSet()));
+        assertFalse(Files.exists(archivePath.resolve("meta.properties")));
+        assertFalse(Files.exists(archivePath.resolve("2023")));
     }
 
 }
