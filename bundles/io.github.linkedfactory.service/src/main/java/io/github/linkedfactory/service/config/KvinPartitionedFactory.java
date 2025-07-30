@@ -27,13 +27,9 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 			Duration archiveIntervalDuration = durationFromLiteral(archiveInterval);
 			Duration retentionPeriodDuration = durationFromLiteral(retentionPeriod);
 
-			if (archiveIntervalDuration == null) {
+			if (archiveIntervalDuration == null ) {
 				log.error("invalid archive interval : {}", archiveInterval);
-			} else if (retentionPeriodDuration != null && archiveIntervalDuration.compareTo(retentionPeriodDuration) < 1) {
-				log.error("{} > {} ", archiveInterval, retentionPeriod);
-				retentionPeriodDuration = null; // not limited
 			}
-
 			return new KvinPartitioned(archivePath, archiveIntervalDuration, retentionPeriodDuration);
 		} catch (IOException e) {
 			throw new RuntimeException(e);
