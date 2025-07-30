@@ -193,20 +193,16 @@ public class KvinParquet implements Kvin {
 		}
 	}
 
-	private InputFileInfo getFile(Path path) {
+	private InputFileInfo getFile(Path path) throws IOException {
 		InputFileInfo inputFileInfo;
 		synchronized (inputFileCache) {
 			inputFileInfo = inputFileCache.get(path);
 			if (inputFileInfo == null) {
-				try {
-					HadoopInputFile inputFile = HadoopInputFile.fromPath(path, new Configuration());
-					ParquetReadOptions.Builder optionsBuilder = HadoopReadOptions.builder(configuration, path);
-					var options = optionsBuilder.build();
-					ParquetMetadata metadata = ParquetFileReader.readFooter(inputFile, options, inputFile.newStream());
-					inputFileInfo = new InputFileInfo(path, inputFile, metadata);
-				} catch (IOException e) {
-					throw new RuntimeException(e);
-				}
+				HadoopInputFile inputFile = HadoopInputFile.fromPath(path, new Configuration());
+				ParquetReadOptions.Builder optionsBuilder = HadoopReadOptions.builder(configuration, path);
+				var options = optionsBuilder.build();
+				ParquetMetadata metadata = ParquetFileReader.readFooter(inputFile, options, inputFile.newStream());
+				inputFileInfo = new InputFileInfo(path, inputFile, metadata);
 				inputFileCache.put(path, inputFileInfo);
 			}
 		}
@@ -856,129 +852,125 @@ public class KvinParquet implements Kvin {
 				.build();
 	}
 
-	private IExtendedIterator<KvinRecord> createKvinRecordReader(InputFileInfo fileInfo, FilterCompat.Filter filter) {
-		try {
-			ParquetReadOptions.Builder optionsBuilder = HadoopReadOptions.builder(configuration, fileInfo.path);
-			optionsBuilder.withAllocator(new HeapByteBufferAllocator());
-			optionsBuilder.withRecordFilter(filter);
-			ParquetReadOptions options = optionsBuilder.build();
-			ParquetFileReader r = new ParquetFileReader(configuration, fileInfo.path, fileInfo.metadata, options
-					/* , new MemoryMappedSeekableInputStream(Paths.get(fileInfo.path.toString())) */) {
-				static Field blocksField;
+	private IExtendedIterator<KvinRecord> createKvinRecordReader(InputFileInfo fileInfo, FilterCompat.Filter filter) throws IOException {
+		ParquetReadOptions.Builder optionsBuilder = HadoopReadOptions.builder(configuration, fileInfo.path);
+		optionsBuilder.withAllocator(new HeapByteBufferAllocator());
+		optionsBuilder.withRecordFilter(filter);
+		ParquetReadOptions options = optionsBuilder.build();
+		ParquetFileReader r = new ParquetFileReader(configuration, fileInfo.path, fileInfo.metadata, options
+				/* , new MemoryMappedSeekableInputStream(Paths.get(fileInfo.path.toString())) */) {
+			static Field blocksField;
 
-				static {
+			static {
+				try {
+					blocksField = ParquetFileReader.class.getDeclaredField("blocks");
+					// make it accessible
+					blocksField.setAccessible(true);
+				} catch (NoSuchFieldException e) {
+					// ignore
+				}
+			}
+
+			@Override
+			public ColumnIndexStore getColumnIndexStore(int blockIndex) {
+				if (blocksField != null) {
 					try {
-						blocksField = ParquetFileReader.class.getDeclaredField("blocks");
-						// make it accessible
-						blocksField.setAccessible(true);
-					} catch (NoSuchFieldException e) {
-						// ignore
+						BlockMetaData block = (BlockMetaData) ((List<?>) blocksField.get(this)).get(blockIndex);
+						return indexCache.get(new Pair<>(fileInfo.path, block.getOrdinal()), () -> {
+							Map<ColumnPath, ColumnIndex> columnIndexes = new HashMap<>();
+							Map<ColumnPath, OffsetIndex> offsetIndexes = new HashMap<>();
+							for (ColumnChunkMetaData columnChunkMetaData : block.getColumns()) {
+								columnIndexes.put(columnChunkMetaData.getPath(), readColumnIndex(columnChunkMetaData));
+								offsetIndexes.put(columnChunkMetaData.getPath(), readOffsetIndex(columnChunkMetaData));
+							}
+							return new ColumnIndexStore() {
+								@Override
+								public ColumnIndex getColumnIndex(ColumnPath column) {
+									return columnIndexes.get(column);
+								}
+
+								@Override
+								public OffsetIndex getOffsetIndex(ColumnPath column) throws MissingOffsetIndexException {
+									return offsetIndexes.get(column);
+								}
+							};
+						});
+					} catch (IllegalAccessException | ExecutionException e) {
+						log.error("Error while creating index store", e);
 					}
 				}
+				return super.getColumnIndexStore(blockIndex);
+			}
+		};
+		return new NiceIterator<>() {
+			RecordReader recordReader;
+			KvinRecord next;
+			PageReadStore pages;
+			long readRows;
 
-				@Override
-				public ColumnIndexStore getColumnIndexStore(int blockIndex) {
-					if (blocksField != null) {
-						try {
-							BlockMetaData block = (BlockMetaData) ((List<?>) blocksField.get(this)).get(blockIndex);
-							return indexCache.get(new Pair<>(fileInfo.path, block.getOrdinal()), () -> {
-								Map<ColumnPath, ColumnIndex> columnIndexes = new HashMap<>();
-								Map<ColumnPath, OffsetIndex> offsetIndexes = new HashMap<>();
-								for (ColumnChunkMetaData columnChunkMetaData : block.getColumns()) {
-									columnIndexes.put(columnChunkMetaData.getPath(), readColumnIndex(columnChunkMetaData));
-									offsetIndexes.put(columnChunkMetaData.getPath(), readOffsetIndex(columnChunkMetaData));
+			@Override
+			public boolean hasNext() {
+				if (next == null) {
+					try {
+						while (next == null) {
+							if (pages == null || readRows == pages.getRowCount()) {
+								readRows = 0;
+								recordReader = null;
+								if (pages != null) {
+									pages.close();
 								}
-								return new ColumnIndexStore() {
-									@Override
-									public ColumnIndex getColumnIndex(ColumnPath column) {
-										return columnIndexes.get(column);
-									}
-
-									@Override
-									public OffsetIndex getOffsetIndex(ColumnPath column) throws MissingOffsetIndexException {
-										return offsetIndexes.get(column);
-									}
-								};
-							});
-						} catch (IllegalAccessException | ExecutionException e) {
-							log.error("Error while creating index store", e);
-						}
-					}
-					return super.getColumnIndexStore(blockIndex);
-				}
-			};
-			return new NiceIterator<>() {
-				RecordReader recordReader;
-				KvinRecord next;
-				PageReadStore pages;
-				long readRows;
-
-				@Override
-				public boolean hasNext() {
-					if (next == null) {
-						try {
-							while (next == null) {
-								if (pages == null || readRows == pages.getRowCount()) {
-									readRows = 0;
-									recordReader = null;
-									if (pages != null) {
-										pages.close();
-									}
-									pages = r.readNextFilteredRowGroup();
-									if (pages != null && pages.getRowCount() > 0) {
-										recordReader = fileInfo.columnIO.getRecordReader(pages,
-												new KvinRecordConverter(), filter);
-									}
-								}
-								if (recordReader != null) {
-									while (readRows < pages.getRowCount()) {
-										next = (KvinRecord) recordReader.read();
-										readRows++;
-										if (!recordReader.shouldSkipCurrentRecord()) {
-											break;
-										}
-									}
-								} else {
-									r.close();
-									break;
+								pages = r.readNextFilteredRowGroup();
+								if (pages != null && pages.getRowCount() > 0) {
+									recordReader = fileInfo.columnIO.getRecordReader(pages,
+											new KvinRecordConverter(), filter);
 								}
 							}
-						} catch (IOException e) {
-							throw new UncheckedIOException(e);
-						} catch (Exception e) {
-							log.error("Error while reading next element", e);
-							close();
-							return false;
+							if (recordReader != null) {
+								while (readRows < pages.getRowCount()) {
+									next = (KvinRecord) recordReader.read();
+									readRows++;
+									if (!recordReader.shouldSkipCurrentRecord()) {
+										break;
+									}
+								}
+							} else {
+								r.close();
+								break;
+							}
 						}
-					}
-					return next != null;
-				}
-
-				@Override
-				public KvinRecord next() {
-					if (!hasNext()) {
-						throw new NoSuchElementException();
-					}
-					KvinRecord result = next;
-					next = null;
-					return result;
-				}
-
-				@Override
-				public void close() {
-					if (pages != null) {
-						pages.close();
-					}
-					try {
-						r.close();
 					} catch (IOException e) {
 						throw new UncheckedIOException(e);
+					} catch (Exception e) {
+						log.error("Error while reading next element", e);
+						close();
+						return false;
 					}
 				}
-			};
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
+				return next != null;
+			}
+
+			@Override
+			public KvinRecord next() {
+				if (!hasNext()) {
+					throw new NoSuchElementException();
+				}
+				KvinRecord result = next;
+				next = null;
+				return result;
+			}
+
+			@Override
+			public void close() {
+				if (pages != null) {
+					pages.close();
+				}
+				try {
+					r.close();
+				} catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			}
+		};
 	}
 
 	private IExtendedIterator<KvinTuple> fetchInternal(List<URI> items, List<URI> properties, URI context, Long end, Long begin, Long limit) throws IOException {
@@ -1074,17 +1066,13 @@ public class KvinParquet implements Kvin {
 				long lastItemId, lastPropertyId;
 
 				{
-					try {
-						nextReaders();
-						if (properties.isEmpty()) {
-							// directly load all relevant files if property is not given
-							// as data might be distributed over multiple files for one property
-							while (folderIndex < dataFolders.size() - 1) {
-								nextReaders();
-							}
+					nextReaders();
+					if (properties.isEmpty()) {
+						// directly load all relevant files if property is not given
+						// as data might be distributed over multiple files for one property
+						while (folderIndex < dataFolders.size() - 1) {
+							nextReaders();
 						}
-					} catch (IOException e) {
-						throw new UncheckedIOException(e);
 					}
 				}
 
@@ -1203,16 +1191,25 @@ public class KvinParquet implements Kvin {
 					return recordToTuple(lastItem, lastProperty, contextFinal, record);
 				}
 
-				void nextReaders() throws IOException {
+				void nextReaders() {
 					folderIndex++;
-					List<Path> currentFiles = getDataFiles(dataFolders.get(folderIndex).toString());
-					for (Path file : currentFiles) {
-						IExtendedIterator<KvinRecord> reader = createKvinRecordReader(getFile(file), FilterCompat.get(filterFinal));
-						if (reader.hasNext()) {
-							nextTuples.add(new Pair<>(reader.next(), reader));
-						} else {
-							reader.close();
+					String path = dataFolders.get(folderIndex).toString();
+					try {
+						List<Path> currentFiles = getDataFiles(path);
+						for (Path file : currentFiles) {
+							try {
+								IExtendedIterator<KvinRecord> reader = createKvinRecordReader(getFile(file), FilterCompat.get(filterFinal));
+								if (reader.hasNext()) {
+									nextTuples.add(new Pair<>(reader.next(), reader));
+								} else {
+									reader.close();
+								}
+							} catch (IOException e) {
+								log.warn("Error while loading data from parquet file {}", file);
+							}
 						}
+					} catch (IOException e) {
+						log.warn("Error while loading files from folder {}", path);
 					}
 				}
 			};
@@ -1334,14 +1331,22 @@ public class KvinParquet implements Kvin {
 			Set<Long> propertyIds = new LinkedHashSet<>();
 
 			for (java.nio.file.Path dataFolder : dataFolders) {
-				for (Path dataFile : getDataFiles(dataFolder.toString())) {
-					var reader = createKvinRecordReader(getFile(dataFile), FilterCompat.get(filter));
-					while (reader.hasNext()) {
-						var record = reader.next();
-						long currentPropertyId = record.propertyId;
-						propertyIds.add(currentPropertyId);
+				try {
+					for (Path dataFile : getDataFiles(dataFolder.toString())) {
+						try {
+							var reader = createKvinRecordReader(getFile(dataFile), FilterCompat.get(filter));
+							while (reader.hasNext()) {
+								var record = reader.next();
+								long currentPropertyId = record.propertyId;
+								propertyIds.add(currentPropertyId);
+							}
+							reader.close();
+						} catch (IOException e) {
+							log.warn("Error while loading data from parquet file {}", dataFile);
+						}
 					}
-					reader.close();
+				} catch (IOException e) {
+					log.warn("Error while loading files from folder {}", dataFolder);
 				}
 			}
 
