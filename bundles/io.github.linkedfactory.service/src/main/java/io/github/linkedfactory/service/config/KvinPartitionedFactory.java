@@ -19,7 +19,7 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 	@Override
 	public Kvin create() {
 		try {
-			File archivePath = getStorePAthOr("linkedfactory-partition");
+			File archivePath = getStorePathOr("linkedfactory-partition");
 			ILiteral archiveInterval = getArchiveInterval();
 			ILiteral retentionPeriod = getRetentionPeriod();
 			log.info("Using path: {} for archiving", archivePath);

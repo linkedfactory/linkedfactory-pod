@@ -974,45 +974,51 @@ public class KvinParquet implements Kvin {
 	}
 
 	private IExtendedIterator<KvinTuple> fetchInternal(List<URI> items, List<URI> properties, URI context, Long end, Long begin, Long limit) throws IOException {
-		if (items.size() == 1 && limit != null && limit > 0L) {
-			// this optimizes the case where data needs to be skipped due to a limit as this is currently not
-			// achievable with filters
-			if (properties.isEmpty()) {
-				properties = properties(items.get(0), context).toList();
-			}
-			IExtendedIterator<KvinTuple> it = NiceIterator.emptyIterator();
-			for (URI property : properties) {
-				// use lazy initialization for further iterators
-				it = it.andThen(new NiceIterator<>() {
-					IExtendedIterator<KvinTuple> base;
+		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
+		try {
+			Thread.currentThread().setContextClassLoader(KvinParquet.class.getClassLoader());
+			if (items.size() == 1 && limit != null && limit > 0L) {
+				// this optimizes the case where data needs to be skipped due to a limit as this is currently not
+				// achievable with filters
+				if (properties.isEmpty()) {
+					properties = properties(items.get(0), context).toList();
+				}
+				IExtendedIterator<KvinTuple> it = NiceIterator.emptyIterator();
+				for (URI property : properties) {
+					// use lazy initialization for further iterators
+					it = it.andThen(new NiceIterator<>() {
+						IExtendedIterator<KvinTuple> base;
 
-					@Override
-					public boolean hasNext() {
-						if (base == null) {
-							try {
-								base = doFetch(items, Collections.singletonList(property), context, end, begin, limit);
-							} catch (IOException e) {
-								throw new UncheckedIOException(e);
+						@Override
+						public boolean hasNext() {
+							if (base == null) {
+								try {
+									base = doFetch(items, Collections.singletonList(property), context, end, begin, limit);
+								} catch (IOException e) {
+									throw new UncheckedIOException(e);
+								}
 							}
+							return base.hasNext();
 						}
-						return base.hasNext();
-					}
 
-					@Override
-					public KvinTuple next() {
-						ensureHasNext();
-						return base.next();
-					}
+						@Override
+						public KvinTuple next() {
+							ensureHasNext();
+							return base.next();
+						}
 
-					@Override
-					public void close() {
-						base.close();
-					}
-				});
+						@Override
+						public void close() {
+							base.close();
+						}
+					});
+				}
+				return it;
+			} else {
+				return doFetch(items, properties, context, end, begin, limit);
 			}
-			return it;
-		} else {
-			return doFetch(items, properties, context, end, begin, limit);
+		} finally {
+			Thread.currentThread().setContextClassLoader(contextCl);
 		}
 	}
 
@@ -1314,12 +1320,12 @@ public class KvinParquet implements Kvin {
 
 	@Override
 	public IExtendedIterator<URI> descendants(URI item, URI context) {
-		return null;
+		return NiceIterator.emptyIterator();
 	}
 
 	@Override
 	public IExtendedIterator<URI> descendants(URI item, URI context, long limit) {
-		return null;
+		return NiceIterator.emptyIterator();
 	}
 
 	private List<URI> getProperties(long itemId, long contextId) {

@@ -18,12 +18,12 @@ public abstract class KvinLevelDbFactory implements IKvinFactory {
 
 	@Override
 	public Kvin create() {
-		File valueStorePath = getStorePAthOr("linkedfactory-valuestore");
+		File valueStorePath = getStorePathOr("linkedfactory-valuestore");
 		log.info("Using store path: {}", valueStorePath);
 		return new KvinLevelDb(valueStorePath);
 	}
 
-	protected File getStorePAthOr(String name) {
+	protected File getStorePathOr(String name) {
 		String dirName = getDirName();
 		if (dirName == null) {
 			dirName = name;
