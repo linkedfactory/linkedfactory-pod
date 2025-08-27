@@ -36,6 +36,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.InputMismatchException;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -48,6 +49,12 @@ public class CsvFormatParser {
 	protected CSVReader csvReader;
 	protected char separator;
 	protected URI context = Kvin.DEFAULT_CONTEXT;
+
+	// RFC 3986 path characters
+	private static final Pattern URI_REGEX = Pattern.compile(
+			"^(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\\s]+"
+					+ "|[a-zA-Z0-9._~!$&'()*+,;=:@/\\-]+)$"
+	);
 
 	public CsvFormatParser(URI base, char separator, InputStream content) throws IOException {
 		this.base = base;
@@ -77,15 +84,22 @@ public class CsvFormatParser {
 		if (uriOrName == null) {
 			uriOrName = "";
 		}
-		URI uri;
+		URI uri = null;
+		String uriString = null;
 		if (uriOrName.startsWith("<") && uriOrName.endsWith(">")) {
-			uri = URIs.createURI(uriOrName.substring(1, uriOrName.length() - 1));
+			uriString = uriOrName.substring(1, uriOrName.length() - 1);
 		} else if (uriOrName.isEmpty()) {
 			uri = base;
 		} else {
-			uri = URIs.createURI(uriOrName);
+			uriString = uriOrName;
+		}
+		if (uriString != null) {
+			if (!URI_REGEX.matcher(uriString).matches()) {
+				throw new InputMismatchException(String.format("Invalid URI: %s.", uriString));
+			}
+			uri = URIs.createURI(uriString);
 			if (uri.isRelative()) {
-				uri = base.appendLocalPart(uriOrName);
+				uri = base.appendLocalPart(uriString);
 			}
 		}
 		return uri;

@@ -18,9 +18,11 @@ package io.github.linkedfactory.core.kvin.util;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URIs;
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.InputMismatchException;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -58,5 +60,18 @@ public class CsvFormatParserTest {
 			}
 			assertEquals(36, count);
 		}
+	}
+
+	@Test
+	public void shouldFail() throws IOException {
+		try {
+			CsvFormatParser csvParser = new CsvFormatParser(URIs.createURI("urn:base:"), ';',
+					getClass().getResourceAsStream("/CsvFormatParserTestWrongContent.csv"));
+			csvParser.parse();
+		} catch (InputMismatchException e) {
+			Assert.assertEquals("Invalid URI: WKZ ID.", e.getMessage());
+			return;
+		}
+		Assert.fail("Expected Invalid URI: WKZ ID.");
 	}
 }
