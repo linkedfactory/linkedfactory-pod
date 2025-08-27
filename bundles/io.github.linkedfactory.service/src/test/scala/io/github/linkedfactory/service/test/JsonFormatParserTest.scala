@@ -18,10 +18,11 @@ package io.github.linkedfactory.service.test
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.service.util.JsonFormatParser
 import net.enilink.komma.core.URIs
-import net.liftweb.common.Full
+import net.liftweb.common.{Failure, Full}
 import net.liftweb.json.JsonAST._
 import net.liftweb.json.JsonDSL._
 import org.junit.{Assert, Test}
+import org.scalatest.Assertions.fail
 
 
 class JsonFormatParserTest {
@@ -96,5 +97,30 @@ class JsonFormatParserTest {
       )
     ))
     Assert.assertEquals(expected, parsed)
+  }
+
+  @Test
+  def shouldFail(): Unit = {
+    val context = Kvin.DEFAULT_CONTEXT
+    val time = System.currentTimeMillis
+    val root = URIs.createURI("http://example.root")
+    val itemError: JValue =
+      ("some item" -> ("http://example.org/property" -> "val"))
+    var result = JsonFormatParser.parseItem(root, context, itemError, time)
+    assert(result.isInstanceOf[Failure])
+    result match {
+      case Failure(msg, _, _) =>
+        assert(msg.contains("Invalid URI: some item"))
+      case _ => fail("Expected Invalid URI: some item, got " + result)
+    }
+
+    val propertyError = ("item" -> ("http://example.org/my property" -> "val"))
+    result = JsonFormatParser.parseItem(root, context, propertyError, time)
+    assert(result.isInstanceOf[Failure])
+    result match {
+      case Failure(msg, _, _) =>
+        assert(msg.contains("Invalid URI: http://example.org/my property"))
+      case _ => fail("Expected Invalid URI: http://example.org/my property, got " + result)
+    }
   }
 }

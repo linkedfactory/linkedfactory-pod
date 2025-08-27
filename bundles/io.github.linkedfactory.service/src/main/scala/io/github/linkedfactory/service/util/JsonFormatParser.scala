@@ -30,6 +30,14 @@ import javax.xml.datatype.DatatypeFactory
 object JsonFormatParser extends Loggable {
   val dtFactoryLocal = new ThreadLocal[DatatypeFactory]
 
+  // RFC 3986 path characters:
+  // ALPHA / DIGIT / "-" / "." / "_" / "~" / "!" / "$" / "&" / "'" /
+  // "(" / ")" / "*" / "+" / "," / ";" / "=" / ":" / "@" / "/"
+  private val uriRegex = (
+    """^(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s]+""" + // absolute URI (scheme + rest, no spaces)
+      """|[a-zA-Z0-9._~!$&'()*+,;=:@/\-]+)$""" // relative URI (RFC3986 path chars only)
+    ).r
+
   def datatypeFactory = {
     var factory = dtFactoryLocal.get
     if (factory == null) {
@@ -55,9 +63,12 @@ object JsonFormatParser extends Loggable {
     }
 
     def objectToRecord(o: JObject): Record = o.obj.foldLeft(Record.NULL) { case (e, field) =>
-      val property = resolveUri(field.name, activeContexts)
-      parseValue(field.value) match {
-        case Full(value) => e.append(new Record(property, value))
+      resolveUri(field.name, activeContexts) match {
+        case Full(property) =>
+          parseValue(field.value) match {
+            case Full(value) => e.append(new Record(property, value))
+            case _ => e
+          }
         case _ => e
       }
     }
@@ -124,29 +135,38 @@ object JsonFormatParser extends Loggable {
       }
     }
 
-    def resolveUri(uri: String, contexts: List[JValue]): URI = {
+    def getCandidateUri(uri: String, contexts: List[JValue]): String = {
       uri.split(":") match {
         // is a URI with scheme
-        case Array(_, suf, _*) if suf.startsWith("//") => URIs.createURI(uri)
+        case Array(_, suf, _*) if suf.startsWith("//") => uri
         // may be a CURIE
         case Array(pref, _*) => contexts match {
           case first :: rest =>
             first \ pref match {
               case JString(s) =>
-                val sufPref = resolveUri(s, contexts).toString
+                val sufPref = getCandidateUri(s, contexts)
                 if (pref.length < uri.length)
-                  URIs.createURI(sufPref.concat(uri.substring(pref.length + 1)))
+                  sufPref.concat(uri.substring(pref.length + 1))
                 else
-                  URIs.createURI(sufPref.concat(uri.substring(pref.length)))
-              case _ => resolveUri(uri, rest)
+                  sufPref.concat(uri.substring(pref.length))
+              case _ => getCandidateUri(uri, rest)
             }
           // no prefix defined, just use item as URI
-          case Nil => {
-            val result = URIs.createURI(uri)
-            if (result.isRelative) result.resolve(rootItem) else result
-          }
+          case Nil => uri
         }
       }
+    }
+
+
+    def resolveUri(uri: String, contexts: List[JValue]): Box[URI] = {
+      val returnedUri: String = getCandidateUri(uri, contexts)
+      if (uriRegex.pattern.matcher(returnedUri).matches) {
+        val result = URIs.createURI(returnedUri)
+        if (result.isRelative) Full(result.resolve(rootItem)) else Full(result)
+      } else {
+        Failure(s"Invalid URI: $returnedUri")
+      }
+
     }
 
     json match {
@@ -155,28 +175,38 @@ object JsonFormatParser extends Loggable {
         parseProperty(rootItem, URIs.createURI("value"), values, currentTime)
 
       // { "item" : { "property1" : [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "seqNr" : 5, "value" : 3.2 } ] } }
-      case JObject(fields) => fields.flatMap {
+      case JObject(fields) => fields.map[Box[List[KvinTuple]]] {
         case JField(item, itemData) if item.equals("@context") => activeContexts = itemData :: activeContexts; None
         // "item" : { ... }
         case JField(item, itemData) if !item.equals("@context") =>
           // resolve relative URIs
-          var itemUri = resolveUri(item, activeContexts)
-          if (itemUri.lastSegment == "") itemUri = itemUri.trimSegments(1)
-          itemData match {
-            // "property1" : [{ ... }]
-            case JObject(props) =>
-              props.map {
-                case JField(prop, propData) =>
-                  // support single and multiple values
-                  val values = propData match {
-                    case JArray(values) => values
-                    case other => List(other)
-                  }
-                  parseProperty(itemUri, resolveUri(prop, activeContexts), values, currentTime)
+          resolveUri(item, activeContexts) match {
+            case Full(uri) =>
+              var itemUri = uri
+              if (itemUri.lastSegment == "") itemUri = itemUri.trimSegments(1)
+              itemData match {
+                // "property1" : [{ ... }]
+                case JObject(props) =>
+                  props.map[Box[List[KvinTuple]]] {
+                    case JField(prop, propData) =>
+                      // support single and multiple values
+                      val values: List[JValue] = propData match {
+                        case JArray(vs) => vs
+                        case other => List(other)
+                      }
+                      resolveUri(prop, activeContexts) match {
+                        case Full(propUri) =>
+                          parseProperty(itemUri, propUri, values, currentTime)
+                        case e: Failure =>
+                          e: Box[List[KvinTuple]]
+                      }
+                  }.foldLeft(Full(Nil): Box[List[KvinTuple]])(collectErrors)
+                case _ => Failure("Invalid data: Expected an object with property keys.")
               }
-            case _ => Failure("Invalid data: Expected an object with property keys.")
+            case e: Failure => e: Box[List[KvinTuple]]
           }
-      }.foldRight(Empty: Box[List[KvinTuple]])(collectErrors _)
+
+      }.foldLeft(Full(Nil): Box[List[KvinTuple]])(collectErrors _)
       case _ => Failure("Invalid data")
     }
   }
