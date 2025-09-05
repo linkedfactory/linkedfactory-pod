@@ -53,7 +53,7 @@ public abstract class KvinPersistentModelSet extends PersistentModelSetSupport {
             throw new RepositoryException("Location service for workspace scheme not found");
         }
 
-        NotifyingSail store = new NativeStore(new File(repo.toFileString()));
+        NotifyingSail store = new NativeStore(new File(repo.toFileString()), "cspo,cpos,spoc,posc");
         if (! Boolean.FALSE.equals(getInference())) {
             store = new SchemaCachingRDFSInferencer(store);
         }
