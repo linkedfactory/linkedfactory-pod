@@ -23,6 +23,11 @@ public class KvinTupleGenerator {
 
 	private Random random = new Random(seed);
 
+	public KvinTupleGenerator setDataTypes(String... dataTypes) {
+		this.dataTypes = dataTypes;
+		return this;
+	}
+
 	public KvinTupleGenerator setStartTime(long startTime) {
 		this.startTime = startTime;
 		return this;
@@ -160,10 +165,9 @@ public class KvinTupleGenerator {
 	private String getRandomString(int stringLength) {
 		int leftLimit = 48; // numeral '0'
 		int rightLimit = 122; // letter 'z'
-		int targetStringLength = stringLength;
 		return random.ints(leftLimit, rightLimit + 1)
 				.filter(i -> (i <= 57 || i >= 65) && (i <= 90 || i >= 97))
-				.limit(targetStringLength)
+				.limit(stringLength)
 				.collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
 				.toString();
 	}

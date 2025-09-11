@@ -101,7 +101,7 @@ public class KvinHttp implements Kvin {
             for (Map.Entry<URI, Map<URI, List<KvinTuple>>> data : groupedData.entrySet()) {
                 ObjectNode predicateNode = mapper.createObjectNode();
                 for (Map.Entry<URI, List<KvinTuple>> property : data.getValue().entrySet()) {
-                    ArrayList<ObjectNode> objectList = new ArrayList<>();
+                    List<ObjectNode> objectList = new ArrayList<>();
                     for (KvinTuple tuple : property.getValue()) {
                         ObjectNode objectNode = mapper.createObjectNode();
                         objectNode.set("value", objectToJson(tuple.value));
@@ -135,14 +135,12 @@ public class KvinHttp implements Kvin {
             ObjectNode node = mapper.createObjectNode();
             node.set(((Record) object).getProperty().toString(), mapper.valueToTree(((Record) object).getValue()));
             rootNode = node;
+        } else if (object instanceof URI) {
+            ObjectNode node = mapper.createObjectNode();
+            node.put("@id", object.toString());
+            rootNode = node;
         } else {
             rootNode = mapper.valueToTree(object);
-        }
-        //handling id -> @id conversion
-        if (!rootNode.path("id").isMissingNode() && !rootNode.isTextual()) {
-            ObjectNode node = (ObjectNode) rootNode;
-            node.set("@id", rootNode.get("id"));
-            node.remove("id");
         }
         return rootNode;
     }
@@ -352,6 +350,10 @@ public class KvinHttp implements Kvin {
                     URI property = null;
                     try {
                         while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                            // check current token for null and throw exception
+                            if (jsonParser.getCurrentToken() == null) {
+                                throw new RuntimeException("JSON parsing error: current token is null");
+                            }
                             if (jsonParser.getCurrentToken() == JsonToken.VALUE_STRING) {
                                 property = URIs.createURI(jsonParser.getValueAsString());
                                 break;

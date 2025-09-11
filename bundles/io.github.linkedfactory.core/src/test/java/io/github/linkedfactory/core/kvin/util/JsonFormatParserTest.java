@@ -21,8 +21,10 @@ import net.enilink.commons.iterator.IExtendedIterator;
 
 import org.junit.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.Assert.*;
 import static org.junit.Assert.fail;
@@ -54,5 +56,60 @@ public class JsonFormatParserTest {
             index++;
         }
         assertEquals(index, 11);
+    }
+
+    @Test
+    public void shouldThrowOnMalformedJson() {
+        String malformedJson = "{ \"item1\": { \"prop1\": [ { \"value\": 123 } ] "; // missing closing braces
+        try {
+            JsonFormatParser parser = new JsonFormatParser(
+                new ByteArrayInputStream(malformedJson.getBytes(StandardCharsets.UTF_8)));
+            var it = parser.parse();
+			while (it.hasNext()) {
+				it.next();
+			}
+            fail("Expected RuntimeException due to malformed JSON");
+        } catch (Exception e) {
+            assertTrue(e.getCause() instanceof IOException);
+        }
+    }
+
+    @Test
+    public void shouldThrowOnMissingValueField() {
+        String missingValueJson = "{ \"item1\": { \"prop1\": [ { \"seqNr\": 1 } ] } }";
+        try {
+            JsonFormatParser parser = new JsonFormatParser(
+                new ByteArrayInputStream(missingValueJson.getBytes(StandardCharsets.UTF_8)));
+            parser.parse().hasNext();
+            fail("Expected RuntimeException due to missing 'value' field");
+        } catch (Exception e) {
+	        assertTrue(e.getCause() instanceof IOException);
+        }
+    }
+
+    @Test
+    public void shouldThrowOnEmptyItemName() {
+        String emptyItemNameJson = "{ \"\": { \"prop1\": [ { \"value\": 1 } ] } }";
+        try {
+            JsonFormatParser parser = new JsonFormatParser(
+                new ByteArrayInputStream(emptyItemNameJson.getBytes(StandardCharsets.UTF_8)));
+            parser.parse().hasNext();
+            fail("Expected RuntimeException due to empty item name");
+        } catch (Exception e) {
+	        assertTrue(e.getCause() instanceof IOException);
+        }
+    }
+
+    @Test
+    public void shouldThrowOnEmptyPropertyName() {
+        String emptyPropertyNameJson = "{ \"item1\": { \"\": [ { \"value\": 1 } ] } }";
+        try {
+            JsonFormatParser parser = new JsonFormatParser(
+                new ByteArrayInputStream(emptyPropertyNameJson.getBytes(StandardCharsets.UTF_8)));
+            parser.parse().hasNext();
+            fail("Expected RuntimeException due to empty property name");
+        } catch (Exception e) {
+	        assertTrue(e.getCause() instanceof IOException);
+        }
     }
 }

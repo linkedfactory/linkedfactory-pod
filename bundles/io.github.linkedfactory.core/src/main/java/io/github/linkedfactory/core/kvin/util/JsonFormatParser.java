@@ -57,43 +57,74 @@ public class JsonFormatParser {
                             case PARSE_ITEMS:
                                 while ((token = parser.nextToken()) != null) {
                                     if (token == JsonToken.FIELD_NAME) {
-                                        currentItem = URIs.createURI(parser.currentName());
+                                        try {
+                                            String itemName = parser.currentName();
+                                            if (itemName == null || itemName.isEmpty()) {
+                                                throw new IOException("Item name is missing or empty in JSON input.");
+                                            }
+                                            currentItem = URIs.createURI(itemName);
+                                        } catch (Exception e) {
+                                            throw new IOException("Invalid item URI in JSON input: " + parser.currentName(), e);
+                                        }
                                         state = State.PARSE_PROPERTIES;
                                         break;
+                                    } else if (token != JsonToken.START_OBJECT && token != JsonToken.END_OBJECT) {
+                                        throw new IOException("Expected FIELD_NAME or object delimiters at items level, got: " + token);
                                     }
                                 }
                                 break;
                             case PARSE_PROPERTIES:
                                 while ((token = parser.nextToken()) != null) {
                                     if (token == JsonToken.FIELD_NAME) {
-                                        currentProperty = URIs.createURI(parser.currentName());
+                                        try {
+                                            String propertyName = parser.currentName();
+                                            if (propertyName == null || propertyName.isEmpty()) {
+                                                throw new IOException("Property name is missing or empty in JSON input.");
+                                            }
+                                            currentProperty = URIs.createURI(propertyName);
+                                        } catch (Exception e) {
+                                            throw new IOException("Invalid property URI in JSON input: " + parser.currentName(), e);
+                                        }
                                         state = State.PARSE_VALUES;
                                         break;
                                     } else if (token == JsonToken.END_OBJECT) {
                                         state = State.PARSE_ITEMS;
                                         break;
+                                    } else if (token != JsonToken.START_ARRAY && token != JsonToken.START_OBJECT) {
+                                        throw new IOException("Expected FIELD_NAME or END_OBJECT at properties level, got: " + token);
                                     }
                                 }
                                 break;
                             case PARSE_VALUES:
+                                boolean foundValue = false;
                                 while ((token = parser.nextToken()) != JsonToken.END_ARRAY && token != null) {
                                     if (token == JsonToken.START_OBJECT) {
                                         JsonNode node = mapper.readTree(parser);
+                                        if (node == null || !node.has("value")) {
+                                            throw new IOException(String.format("Missing 'value' field for item %s and property %s", currentItem, currentProperty));
+                                        }
                                         Object value = nodeToValue(node.get("value"));
                                         Object seqNr = nodeToValue(node.get("seqNr"));
-                                        Number time = (Number) nodeToValue(node.get("time"));
+                                        JsonNode timeNode = node.get("time");
+                                        Number time = timeNode != null ? (Number) nodeToValue(timeNode) : null;
                                         if (value != null) {
                                             kvinTuple = new KvinTuple(currentItem, currentProperty, Kvin.DEFAULT_CONTEXT,
                                                     time != null ? time.longValue() : currentTime,
                                                     seqNr != null ? ((Number) seqNr).intValue() : 0, value);
+                                            foundValue = true;
                                             break;
                                         } else {
                                             throw new IOException(String.format("Invalid null value for item %s and property %s", currentItem, currentProperty));
                                         }
+                                    } else if (token != JsonToken.START_ARRAY) {
+                                       throw new IOException(String.format("Unexpected token %s in values array for item %s and property %s: %s", token, currentItem, currentProperty, token));
                                     }
                                 }
                                 if (token == JsonToken.END_ARRAY) {
                                     state = State.PARSE_PROPERTIES;
+                                }
+                                if (!foundValue && token == null) {
+                                    throw new IOException(String.format("Unexpected end of input while parsing values for item %s and property %s", currentItem, currentProperty));
                                 }
                                 break;
                         }
@@ -109,7 +140,7 @@ public class JsonFormatParser {
                         // ignore
                         logger.error("Exception while closing JSON parser", ioe);
                     }
-                    throw new RuntimeException(e);
+                    throw new RuntimeException("Error while parsing JSON input: " + e.getMessage(), e);
                 }
                 return kvinTuple != null;
             }
