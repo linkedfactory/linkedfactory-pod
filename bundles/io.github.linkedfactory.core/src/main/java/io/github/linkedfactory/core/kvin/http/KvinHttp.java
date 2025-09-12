@@ -40,8 +40,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class KvinHttp implements Kvin {
-    private static Logger logger = LoggerFactory.getLogger(KvinHttp.class);
-    private static int MAX_GET_URL_LENGTH = 6000; // the absolute maximum should be 8192 (8kb)
+    private static final Logger logger = LoggerFactory.getLogger(KvinHttp.class);
+    private static final int MAX_GET_URL_LENGTH = 6000; // the absolute maximum should be 8192 (8kb)
     String hostEndpoint;
     ArrayList<KvinListener> listeners = new ArrayList<>();
     ObjectMapper mapper = new ObjectMapper();

@@ -176,15 +176,15 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             val propertiesParam = S.param("properties").map(_.split("\\s+").toList)
 
             val itemProperties = valuesMap.map(v => {
-              (propertiesParam openOr v._2.map(_._1).toSet.toList.sorted).map((v._1, _))
+              (propertiesParam openOr v._2.keySet.toList.sorted).map((v._1, _))
             }).flatten.toList
 
             // print header row
             csvPrinter.printRecord(("time" :: itemProperties.map(p => s"<${p._1}>@<${p._2}>")).asJava)
 
             var itemData = valuesMap.flatMap(v => {
-              val ps = propertiesParam openOr v._2.map(_._1).toSet.toList.sorted
-              ps.flatMap(p => v._2.get(p).map(it => (if (it.hasNext()) it.next() else null, it)))
+              val ps = propertiesParam openOr v._2.keySet.toList.sorted
+              ps.flatMap(p => v._2.get(p).map(it => (if (it.hasNext) it.next() else null, it)))
             })
 
             val ordering: Ordering[KvinTuple] = (a: KvinTuple, b: KvinTuple) => {
@@ -194,7 +194,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             }
             var finished = false
             while (!finished) {
-              val nextTuples = itemData.map(_._1).filter(_ != null)
+              val nextTuples = itemData.keys.filter(_ != null)
               val maxTuple = if (nextTuples.isEmpty) null else nextTuples.max(ordering)
               if (maxTuple != null) {
                 // print the row, properties without values at row timestamp stay unset
@@ -206,7 +206,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
                 itemData = itemData.map(d => {
                   if (d._1 != null && ordering.compare(maxTuple, d._1) == 0) {
                     val it = d._2
-                    val next = if (it.hasNext()) it.next() else {
+                    val next = if (it.hasNext) it.next() else {
                       it.close()
                       null
                     }
@@ -248,7 +248,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       store.put(tuples)
       Empty
     } catch {
-      case e: Exception => new Failure(e.getMessage(), Full(e), Empty)
+      case e: Exception => new Failure(e.getMessage, Full(e), Empty)
     }
   }
 
@@ -265,7 +265,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       store.put(tuples)
       Empty
     } catch {
-      case e: Exception => new Failure(e.getMessage(), Full(e), Empty)
+      case e: Exception => new Failure(e.getMessage, Full(e), Empty)
     }
   }
 
@@ -293,7 +293,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     val interval = S.param("interval") flatMap (v => tryo(v.toDouble.longValue)) openOr 0L
     val op = S.param("op") map (_.trim)
 
-    val executorService = FederatedServiceComponent.getExecutorService()
+    val executorService = FederatedServiceComponent.getExecutorService
     val modelUri = contextModelUri
 
     val properties = (S.param("property") or S.param("properties")).map {
@@ -329,7 +329,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     val interval = S.param("interval") flatMap (v => tryo(v.toDouble.longValue)) openOr 0L
     val op = S.param("op") map (_.trim)
 
-    val executorService = FederatedServiceComponent.getExecutorService()
+    val executorService = FederatedServiceComponent.getExecutorService
     val modelUri = contextModelUri
 
     val properties = (S.param("property") or S.param("properties")).map {
