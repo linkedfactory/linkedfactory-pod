@@ -22,9 +22,12 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public class JsonFormatParser {
     final static Logger logger = LoggerFactory.getLogger(JsonFormatParser.class);
+
+	final static Pattern HAS_WHITESPACE = Pattern.compile("\\s+");
     final static JsonFactory jsonFactory = new JsonFactory().configure(Feature.AUTO_CLOSE_SOURCE, true);
     final static ObjectMapper mapper = new ObjectMapper()
             .configure(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN, true);
@@ -62,7 +65,7 @@ public class JsonFormatParser {
                                             if (itemName == null || itemName.isEmpty()) {
                                                 throw new IOException("Item name is missing or empty in JSON input.");
                                             }
-                                            currentItem = URIs.createURI(itemName);
+                                            currentItem = createURI(itemName);
                                         } catch (Exception e) {
                                             throw new IOException("Invalid item URI in JSON input: " + parser.currentName(), e);
                                         }
@@ -81,7 +84,7 @@ public class JsonFormatParser {
                                             if (propertyName == null || propertyName.isEmpty()) {
                                                 throw new IOException("Property name is missing or empty in JSON input.");
                                             }
-                                            currentProperty = URIs.createURI(propertyName);
+                                            currentProperty = createURI(propertyName);
                                         } catch (Exception e) {
                                             throw new IOException("Invalid property URI in JSON input: " + parser.currentName(), e);
                                         }
@@ -117,7 +120,7 @@ public class JsonFormatParser {
                                             throw new IOException(String.format("Invalid null value for item %s and property %s", currentItem, currentProperty));
                                         }
                                     } else if (token != JsonToken.START_ARRAY) {
-                                       throw new IOException(String.format("Unexpected token %s in values array for item %s and property %s: %s", token, currentItem, currentProperty, token));
+                                        throw new IOException(String.format("Unexpected token %s in values array for item %s and property %s: %s", token, currentItem, currentProperty, token));
                                     }
                                 }
                                 if (token == JsonToken.END_ARRAY) {
@@ -176,14 +179,14 @@ public class JsonFormatParser {
         if (node.isObject()) {
             JsonNode idNode = node.get("@id");
             if (idNode != null) {
-                return URIs.createURI(node.get("@id").textValue());
+                return createURI(node.get("@id").textValue());
             }
 
             Iterator<Map.Entry<String, JsonNode>> records = node.fields();
             value = Record.NULL;
             while (records.hasNext()) {
                 Map.Entry<String, JsonNode> recordNode = records.next();
-                value = value.append(new Record(URIs.createURI(recordNode.getKey()), nodeToValue(recordNode.getValue())));
+                value = value.append(new Record(createURI(recordNode.getKey()), nodeToValue(recordNode.getValue())));
             }
             return value;
         } else if (node.isDouble()) {
@@ -207,6 +210,17 @@ public class JsonFormatParser {
         } else {
             return node;
         }
+    }
+
+    static URI createURI(String uriString) {
+        if (uriString == null || uriString.isEmpty()) {
+            throw new IllegalArgumentException("URI string is null or empty");
+        }
+        if (HAS_WHITESPACE.matcher(uriString).find()) {
+            throw new IllegalArgumentException("URI string contains whitespace: '" + uriString + "'");
+        }
+        // Further URI validation can be added here if needed
+        return URIs.createURI(uriString);
     }
 
     enum State {

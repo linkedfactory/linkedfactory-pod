@@ -55,7 +55,7 @@ public class JsonFormatParserTest {
             }
             index++;
         }
-        assertEquals(index, 11);
+        assertEquals(11, index);
     }
 
     @Test
@@ -112,4 +112,17 @@ public class JsonFormatParserTest {
 	        assertTrue(e.getCause() instanceof IOException);
         }
     }
+
+	@Test
+	public void testUriWithSpaces() {
+		String jsonWithSpacesInUri = "{ \"http://example.com/item 1\": { \"http://example.com/prop 1\": [ { \"value\": 1 } ] } }";
+		try {
+			JsonFormatParser parser = new JsonFormatParser(
+				new ByteArrayInputStream(jsonWithSpacesInUri.getBytes(StandardCharsets.UTF_8)));
+			parser.parse().hasNext();
+			fail("Expected RuntimeException due to spaces in URI");
+		} catch (Exception e) {
+			assertTrue(e.getCause() instanceof IOException);
+		}
+	}
 }

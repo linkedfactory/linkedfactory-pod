@@ -79,11 +79,11 @@ public class CsvFormatParser {
 		}
 		URI uri;
 		if (uriOrName.startsWith("<") && uriOrName.endsWith(">")) {
-			uri = URIs.createURI(uriOrName.substring(1, uriOrName.length() - 1));
+			uri = JsonFormatParser.createURI(uriOrName.substring(1, uriOrName.length() - 1));
 		} else if (uriOrName.isEmpty()) {
 			uri = base;
 		} else {
-			uri = URIs.createURI(uriOrName);
+			uri = JsonFormatParser.createURI(uriOrName);
 			if (uri.isRelative()) {
 				uri = base.appendLocalPart(uriOrName);
 			}
