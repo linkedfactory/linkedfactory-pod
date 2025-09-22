@@ -89,9 +89,6 @@ class LiftModule {
       LiftRules.statelessDispatch.append(new KvinService("linkedfactory" :: Nil, kvin))
     }
 
-    // overwrite existing SparqlRest
-    LiftRules.dispatch.prepend(SparqlService)
-
     // ensure that the fixed data model is always used
     Globals.contextModelRules.append {
       case req if !S.param("model").isDefined && Globals.application.vend.exists(_.name == "linkedfactory") => Data.currentModel.map(_.getURI)
