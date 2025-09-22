@@ -20,8 +20,7 @@ import java.time.ZonedDateTime;
 import java.time.temporal.ChronoField;
 import java.time.temporal.ChronoUnit;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class ArchiveRetentionTest {
 	static String itemTemplate = "http://localhost:8080/linkedfactory/demofactory/{}";
@@ -49,7 +48,6 @@ public class ArchiveRetentionTest {
 	/**
 	 * Tests if data is cleaned up according to a particular retention period.
 	 *
-	 * @throws IOException
 	 */
 	@Test
 	public void testRetentionPeriod() throws IOException {
@@ -89,7 +87,6 @@ public class ArchiveRetentionTest {
 	 * Test the resiliency of {@link io.github.linkedfactory.core.kvin.parquet.KvinParquet} if an archive folder is
 	 * deleted from outside.
 	 *
-	 * @throws IOException
 	 */
 	@Test
 	public void testRemoveFilesResiliency() throws IOException {
@@ -116,7 +113,7 @@ public class ArchiveRetentionTest {
 
 		assertTrue(Files.exists(weekFolder));
 		FileUtils.deleteDirectory(weekFolder.toFile());
-		assertTrue(!Files.exists(weekFolder));
+		assertFalse(Files.exists(weekFolder));
 
 		assertEquals(10, kvinPartitioned.fetch(item3, property, Kvin.DEFAULT_CONTEXT,0).toList().size());
 		assertEquals(10, kvinPartitioned.properties(item3, Kvin.DEFAULT_CONTEXT).toList().size());

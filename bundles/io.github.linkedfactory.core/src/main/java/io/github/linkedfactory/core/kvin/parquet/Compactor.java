@@ -80,7 +80,7 @@ public class Compactor {
 			java.nio.file.Path destination = Paths.get(archiveLocation);
 			Files.walk(source)
 					.skip(1)
-					.filter(p -> Files.isRegularFile(p))
+					.filter(Files::isRegularFile)
 					.forEach(p -> {
 						java.nio.file.Path dest = destination.resolve(source.relativize(p));
 						try {
@@ -104,7 +104,7 @@ public class Compactor {
 		File[] yearFolders = new File(archiveLocation).listFiles((file, s) ->
 				!s.startsWith("meta") && !s.startsWith(".compaction"));
 		for (File yearFolder : yearFolders) {
-			File[] weekFolders = yearFolder.listFiles((file) -> file.isDirectory());
+			File[] weekFolders = yearFolder.listFiles(File::isDirectory);
 			for (File weekFolder : weekFolders) {
 				File[] dataFiles = weekFolder.listFiles((file, s) -> s.endsWith(".parquet"));
 				if (dataFiles.length >= dataFileCompactionTrigger) {
@@ -180,7 +180,7 @@ public class Compactor {
 							return 0;
 						}
 					}))
-					.collect(Collectors.toList());
+					.toList();
 
 			java.nio.file.Path targetFolder = compactionFolder.toPath().resolve(
 					Paths.get(archiveLocation).relativize(weekFolder.toPath()));
@@ -206,9 +206,8 @@ public class Compactor {
 					var tuple = pair.getFirst();
 					compactionFileWriter.write(tuple);
 					prevRecord = tuple;
-				} else if (prevRecord != null) {
-					// omit tuple as it is duplicate in terms of id, time, and seqNr
 				}
+				// else: omit tuple as it is duplicate in terms of id, time, and seqNr
 
 				if (pair.getSecond().hasNext()) {
 					nextRecords.add(new Pair<>(pair.getSecond().next(), pair.getSecond()));

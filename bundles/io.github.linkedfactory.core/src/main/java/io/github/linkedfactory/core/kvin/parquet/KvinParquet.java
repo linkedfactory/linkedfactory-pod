@@ -6,8 +6,8 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
-import io.github.linkedfactory.core.kvin.parquet.records.KvinRecordConverter;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
+import io.github.linkedfactory.core.kvin.parquet.records.KvinRecordConverter;
 import io.github.linkedfactory.core.kvin.parquet.records.SimpleGroupExt;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -60,13 +60,11 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.temporal.ChronoField;
-import java.time.temporal.IsoFields;
-import java.time.temporal.TemporalField;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
@@ -286,9 +284,9 @@ public class KvinParquet implements Kvin {
 			for (KvinTuple tuple : tuples) {
 				KvinRecord record = new KvinRecord();
 
-				Calendar tupleDate = getDate(tuple.time);
-				int year = tupleDate.get(Calendar.YEAR);
-				int week = tupleDate.get(Calendar.WEEK_OF_YEAR);
+				var tupleDate = getZonedDateTime(tuple.time);
+				int year = tupleDate.getYear();
+				int week = tupleDate.get(ChronoField.ALIGNED_WEEK_OF_YEAR);
 
 				String key = year + "_" + week;
 				if (!key.equals(prevKey)) {
@@ -551,12 +549,8 @@ public class KvinParquet implements Kvin {
 		contextIdCache.invalidateAll();
 	}
 
-	private Calendar getDate(long timestamp) {
-		Timestamp ts = new Timestamp(timestamp);
-		Date date = new java.sql.Date(ts.getTime());
-		Calendar calendar = Calendar.getInstance();
-		calendar.setTime(date);
-		return calendar;
+	private ZonedDateTime getZonedDateTime(long timestamp) {
+		return ZonedDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("UTC"));
 	}
 
 	private long[] generateIds(KvinTuple tuple,
@@ -1053,8 +1047,8 @@ public class KvinParquet implements Kvin {
 
 			final FilterPredicate filterFinal = filter;
 			List<java.nio.file.Path> dataFolders = getDataFolders(itemIds,
-					end != null ? getDate(end) : null,
-					begin != null ? getDate(begin) : null);
+					end != null ? getZonedDateTime(end) : null,
+					begin != null ? getZonedDateTime(begin) : null);
 			if (dataFolders.isEmpty()) {
 				// ensure read lock is freed
 				readLock.release();
@@ -1258,7 +1252,7 @@ public class KvinParquet implements Kvin {
 		return getDataFolders(itemIds, null, null);
 	}
 
-	private List<java.nio.file.Path> getDataFolders(long[] itemIds, Calendar end, Calendar begin) throws IOException {
+	private List<java.nio.file.Path> getDataFolders(long[] itemIds, ZonedDateTime end, ZonedDateTime begin) throws IOException {
 		java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
 		Properties meta;
 		try {
@@ -1275,8 +1269,8 @@ public class KvinParquet implements Kvin {
 		return meta.entrySet().stream().flatMap(entry -> {
 					// exclude year folders that are outside of begin and end time range
 					int year = begin != null || end != null ? Integer.parseInt(entry.getKey().toString()) : -1;
-					if (begin != null && year < begin.get(Calendar.YEAR) ||
-							end != null && year > end.get(Calendar.YEAR)) {
+					if (begin != null && year < begin.getYear()||
+							end != null && year > end.getYear()) {
 						return Stream.empty();
 					}
 
@@ -1297,8 +1291,8 @@ public class KvinParquet implements Kvin {
 								// exclude week folders that are outside of begin and end time range
 								if (begin != null || end != null) {
 									int week = Integer.parseInt(weekEntry.getKey().toString());
-									if (begin != null && year == begin.get(Calendar.YEAR) && week < begin.get(Calendar.WEEK_OF_YEAR) ||
-											end != null && year == end.get(Calendar.YEAR) && week > end.get(Calendar.WEEK_OF_YEAR)) {
+									if (begin != null && year == begin.getYear() && week < begin.get(ChronoField.ALIGNED_WEEK_OF_YEAR) ||
+											end != null && year == end.getYear() && week > end.get(ChronoField.ALIGNED_WEEK_OF_YEAR)) {
 										return false;
 									}
 								}
