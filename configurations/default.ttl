@@ -21,12 +21,24 @@ group:Administrators foaf:member user:admin .
                          acl:accessToClass <http://enilink.net/vocab/komma/models#Model> ;
                          acl:mode acl:Read, acl:Write, acl:Control .
 
-<urn:enilink:data> a models:KvinMemoryModelSet ;
-	models:inference false .
+#<urn:enilink:data> a models:KvinMemoryModelSet ;
+#	models:inference false .
 
 #<urn:enilink:data> a models:KvinPersistentModelSet ;
 #	models:inference false ;
 #	models:repository <workspace:/data/> .
+
+# <urn:enilink:metadata> a models:PersistentModelSet ;
+#    models:inference false ;
+#    models:repository <workspace:/scopeset/meta/> .
+
+<urn:enilink:metadata> a models:PersistentModelSet ;
+    models:inference false ;
+    models:repository <workspace:/dtsc-test/meta/> .
+
+<urn:enilink:data> a models:KvinPersistentModelSet ;
+    models:inference false ;
+    models:repository <workspace:/dtsc-test/data/> .
 
 @prefix login: <plugin://net.enilink.platform.core/Login/> .
 login: login:jaasConfigUrl <jaas.conf> ;

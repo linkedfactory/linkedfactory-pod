@@ -121,7 +121,7 @@ public class AasFederatedService implements FederatedService {
         }
 
         // for debugging purposes
-        // System.out.println(service);
+        System.out.println(service);
 
         Map<Value, Object> valueToData = new WeakHashMap<>();
         EvaluationStrategy strategy = new AasEvaluationStrategy(client, executorService, scanner, vf, null, null, valueToData);
