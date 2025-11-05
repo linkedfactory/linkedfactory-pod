@@ -4,6 +4,7 @@ import io.github.linkedfactory.core.kvin.DelegatingKvin;
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinSail;
 import net.enilink.composition.annotations.Iri;
+import net.enilink.komma.core.IReference;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import net.enilink.komma.model.MODELS;
@@ -30,30 +31,34 @@ public abstract class KvinPersistentModelSet extends PersistentModelSetSupport {
     static Kvin kvin;
 
     public Repository createRepository() throws RepositoryException {
-        URI repo = getRepository();
-        if (repo.scheme() == "workspace") {
-            try {
-                String instanceFilter = "(type=osgi.instance.area)";
-                BundleContext context = FrameworkUtil.getBundle(PersistentModelSetSupport.class).getBundleContext();
-                ServiceReference<?>[] refs = context
-                        .getServiceReferences("org.eclipse.osgi.service.datalocation.Location", instanceFilter);
-                if (refs.length > 0) {
-                    Object location = context.getService(refs[0]);
-                    URL loc = (URL) location.getClass().getMethod("getURL").invoke(location);
-                    URI workspace = URIs.createURI(FileLocator.resolve(loc).toString());
-                    if (workspace.lastSegment() == "") {
-                        workspace = workspace.trimSegments(1);
-                    }
-                    repo = workspace.appendSegments(repo.segments());
-                }
-            } catch (Exception e) {
-                throw new RepositoryException(e);
-            }
-        } else {
-            throw new RepositoryException("Location service for workspace scheme not found");
-        }
+	    final IReference repo = getRepository();
+	    if (repo == null || repo.getURI() == null) {
+		    throw new RepositoryException("No repository location specified");
+	    }
+	    URI repoUri = repo.getURI();
+	    if ("workspace".equals(repoUri.scheme())) {
+		    try {
+			    String instanceFilter = "(type=osgi.instance.area)";
+			    BundleContext context = FrameworkUtil.getBundle(PersistentModelSetSupport.class).getBundleContext();
+			    ServiceReference<?>[] refs = context
+					    .getServiceReferences("org.eclipse.osgi.service.datalocation.Location", instanceFilter);
+			    if (refs.length > 0) {
+				    Object location = context.getService(refs[0]);
+				    URL loc = (URL) location.getClass().getMethod("getURL").invoke(location);
+				    URI workspace = URIs.createURI(FileLocator.resolve(loc).toString());
+				    if ("".equals(workspace.lastSegment())) {
+					    workspace = workspace.trimSegments(1);
+				    }
+				    repoUri = workspace.appendSegments(repoUri.segments());
+			    }
+		    } catch (Exception e) {
+			    throw new RepositoryException(e);
+		    }
+	    } else {
+		    throw new RepositoryException("Location service for workspace scheme not found");
+	    }
 
-        NotifyingSail store = new NativeStore(new File(repo.toFileString()), "cspo,cpos,spoc,posc");
+        NotifyingSail store = new NativeStore(new File(repoUri.toFileString()), "cspo,cpos,spoc,posc");
         if (! Boolean.FALSE.equals(getInference())) {
             store = new SchemaCachingRDFSInferencer(store);
         }

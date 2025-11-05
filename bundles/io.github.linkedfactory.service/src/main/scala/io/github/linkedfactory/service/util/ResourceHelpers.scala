@@ -22,27 +22,27 @@ object ResourceHelpers {
   def withTransaction[E <: IEntityManager, R](manager: E)(block: E => R): R = {
     val transaction = manager.getTransaction
     if (transaction.isActive) block(manager) else {
-      transaction.begin
+      transaction.begin()
       try {
         val result = block(manager)
-        transaction.commit
+        transaction.commit()
         result
       } catch {
         case ex: Throwable if transaction.isActive => {
-          transaction.rollback
+          transaction.rollback()
           throw new RuntimeException(ex)
         }
       }
     }
   }
 
-  def doWith[C <: AutoCloseable, R](closeable: C)(block: C => R) {
+  def doWith[C <: AutoCloseable, R](closeable: C)(block: C => R): Unit = {
     try {
       block(closeable)
     } catch {
       case ex: Throwable => throw new RuntimeException(ex)
     } finally {
-      closeable.close
+      closeable.close()
     }
   }
 
