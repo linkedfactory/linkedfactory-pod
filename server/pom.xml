@@ -42,6 +42,13 @@
 			<classifier>features</classifier>
 			<type>xml</type>
 		</dependency>
+		<dependency>
+			<groupId>net.enilink.platform</groupId>
+			<artifactId>net.enilink.platform.workbench.karaf.feature</artifactId>
+			<version>${enilink.version}</version>
+			<classifier>features</classifier>
+			<type>xml</type>
+		</dependency>
 
 		<dependency>
 			<groupId>io.github.linkedfactory</groupId>
@@ -93,6 +100,7 @@
 						<feature>service-wrapper</feature>
 
 						<feature>net.enilink.platform.karaf.feature</feature>
+						<feature>net.enilink.platform.workbench.karaf.feature</feature>
 						<feature>io.github.linkedfactory.feature</feature>
 					</bootFeatures>
 				</configuration>
