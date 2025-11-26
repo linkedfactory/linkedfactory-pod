@@ -82,7 +82,7 @@ public class AasFederatedService implements FederatedService {
                 parsedServices.put(service, replacement);
             }
         }
-        return replacement;
+        return replacement.clone();
     }
 
     @Override
