@@ -90,7 +90,7 @@ public class KvinEvaluationUtil {
 		final Var contextVar = stmt.getContextVar();
 
 		final net.enilink.komma.core.URI[] finalContext = {context};
-		final Value contextValue[] = {null};
+		final Value[] contextValue = {null};
 		if (finalContext[0] == null && dataset.getDefaultGraphs().isEmpty()) {
 			finalContext[0] = Kvin.DEFAULT_CONTEXT;
 			contextValue[0] = vf.createIRI(finalContext[0].toString());
@@ -197,7 +197,7 @@ public class KvinEvaluationUtil {
 						index = -1;
 
 						currentProperty = tuple.property;
-						currentPropertyValue = (IRI) toRdfValue(currentProperty, vf);
+						currentPropertyValue = toRdfValue(currentProperty, vf);
 
 						// filters tuples by property if endpoint does not support the filtering by property
 						skipProperty = !properties.isEmpty() && !properties.contains(currentProperty);
@@ -278,10 +278,10 @@ public class KvinEvaluationUtil {
 		return new AbstractCloseableIteration<>() {
 			ParameterValues pv;
 			Value contextValue;
-			List<CloseableIteration<BindingSet, QueryEvaluationException>> iterators = new ArrayList<>(5);
+			final List<CloseableIteration<BindingSet, QueryEvaluationException>> iterators = new ArrayList<>(5);
 			CloseableIteration<BindingSet, QueryEvaluationException> it;
 			BindingSet last, savedNext;
-			Map<Value, Set<Value>> currentItems = new LinkedHashMap<>();
+			final Map<Value, Set<Value>> currentItems = new LinkedHashMap<>();
 
 			@Override
 			public boolean hasNext() throws QueryEvaluationException {

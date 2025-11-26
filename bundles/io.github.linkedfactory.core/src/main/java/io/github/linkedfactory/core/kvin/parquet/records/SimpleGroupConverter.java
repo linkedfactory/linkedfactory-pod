@@ -28,7 +28,7 @@ class SimpleGroupConverter extends GroupConverter {
   private final SimpleGroupConverter parent;
   private final int index;
   protected Group current;
-  private Converter[] converters;
+  private final Converter[] converters;
 
   SimpleGroupConverter(SimpleGroupConverter parent, int index, GroupType schema) {
     this.parent = parent;

@@ -278,7 +278,7 @@ public final class Varint {
 		} else if (a0 == 249) {
 			int a1 = ~bb.get() & 0xFF;
 			int a2 = ~bb.get() & 0xFF;
-			return 2288 + 256 * a1 + a2;
+			return 2288 + 256L * a1 + a2;
 		} else {
 			int bytes = a0 - 250 + 3;
 			return readSignificantBitsInverted(bb, bytes);

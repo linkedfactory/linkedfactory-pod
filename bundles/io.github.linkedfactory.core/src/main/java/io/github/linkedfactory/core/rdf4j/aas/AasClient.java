@@ -28,7 +28,7 @@ import java.util.*;
 import java.util.function.Supplier;
 
 public class AasClient implements Closeable {
-	private static Logger logger = LoggerFactory.getLogger(AasClient.class);
+	private static final Logger logger = LoggerFactory.getLogger(AasClient.class);
 
 	final String endpoint;
 	ObjectMapper mapper = new ObjectMapper();

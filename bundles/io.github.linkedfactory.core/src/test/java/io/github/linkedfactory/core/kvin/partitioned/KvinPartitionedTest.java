@@ -86,7 +86,7 @@ public class KvinPartitionedTest {
 		IExtendedIterator<KvinTuple> tuples = kvinPartitioned.fetch(item,
 				URIs.createURI("http://example.org/unknown-property"), Kvin.DEFAULT_CONTEXT, 0);
 		assertNotNull(tuples);
-		assertTrue(tuples.toList().size() == 0);
+		assertEquals(0, tuples.toList().size());
 
 		tuples = kvinPartitioned.fetch(item,
 				URIs.createURI("http://example.org/1"), Kvin.DEFAULT_CONTEXT, 0);

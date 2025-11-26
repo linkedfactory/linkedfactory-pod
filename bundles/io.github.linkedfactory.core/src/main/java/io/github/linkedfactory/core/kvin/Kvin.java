@@ -17,6 +17,7 @@ package io.github.linkedfactory.core.kvin;
 
 import java.io.Closeable;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -38,7 +39,7 @@ public interface Kvin extends Closeable {
 	 */
 	URI DEFAULT_CONTEXT = URIs.createURI(DEFAULT_CONTEXT_VALUE);
 
-	List<URI> NULL_PROPERTY = Arrays.asList((URI) null);
+	List<URI> NULL_PROPERTY = Collections.singletonList((URI) null);
 
 	/**
 	 * Add a listener to be notified of changes.

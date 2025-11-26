@@ -28,7 +28,7 @@ public class GroupRecordConverterExt extends RecordMaterializer<Group> {
 
   private final SimpleGroupExtFactory simpleGroupFactory;
 
-  private SimpleGroupConverter root;
+  private final SimpleGroupConverter root;
 
   public GroupRecordConverterExt(MessageType schema) {
     this.simpleGroupFactory = new SimpleGroupExtFactory(schema);

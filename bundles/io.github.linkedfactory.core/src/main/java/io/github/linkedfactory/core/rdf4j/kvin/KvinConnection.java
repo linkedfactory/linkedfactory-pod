@@ -25,10 +25,10 @@ public class KvinConnection extends SailConnectionWrapper {
 	final KvinSail kvinSail;
 	final RDF4JValueConverter valueConverter;
 	final LiteralConverter literalConverter;
-	private static String KVIN_NS = "kvin:";
+	private static final String KVIN_NS = "kvin:";
 	private final Pattern containerMembershipPredicatePattern =
 			Pattern.compile("^http://www.w3.org/1999/02/22-rdf-syntax-ns#_[1-9][0-9]*$");
-	private Map<Resource, List<Statement>> stmtsBySubject = new LinkedHashMap<>();
+	private final Map<Resource, List<Statement>> stmtsBySubject = new LinkedHashMap<>();
 
 	public KvinConnection(KvinSail sail, SailConnection baseConnection) {
 		super(baseConnection);
@@ -103,8 +103,7 @@ public class KvinConnection extends SailConnectionWrapper {
 		int seqNr = 0;
 		Object value = null;
 		if (rdfValue.isBNode()) {
-			if (rdfValue instanceof HasValue && ((HasValue) rdfValue).getValue() instanceof KvinTuple) {
-				KvinTuple t = (KvinTuple) ((HasValue) rdfValue).getValue();
+			if (rdfValue instanceof HasValue && ((HasValue) rdfValue).getValue() instanceof KvinTuple t) {
 				value = t.value;
 				time = t.time;
 				seqNr = t.seqNr;

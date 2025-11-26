@@ -29,9 +29,8 @@ public class AasFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException>
     public void meet(Filter node) throws RDF4JException {
         TupleExpr arg = node.getArg();
         // TODO check if this condition is really required
-        if (arg instanceof StatementPattern) {
-            StatementPattern stmt = (StatementPattern) arg;
-            Parameters params = scanner.getParameters(stmt.getObjectVar());
+        if (arg instanceof StatementPattern stmt) {
+	        Parameters params = scanner.getParameters(stmt.getObjectVar());
             if (params != null) {
                 node.setArg(new AasFetch(stmt, scanner.getParameters(stmt)));
             }
@@ -60,9 +59,8 @@ public class AasFetchOptimizer extends AbstractQueryModelVisitor<RDF4JException>
         collectJoinArgs(node, joinArgs);
         for (Iterator<TupleExpr> it = joinArgs.iterator(); it.hasNext(); ) {
             TupleExpr expr = it.next();
-            if (expr instanceof StatementPattern) {
-                StatementPattern stmt = (StatementPattern) expr;
-                Parameters params = scanner.getParameters(stmt);
+            if (expr instanceof StatementPattern stmt) {
+	            Parameters params = scanner.getParameters(stmt);
                 if (params != null) {
                     stmt.replaceWith(new SingletonSet());
                     fetches.add(new AasFetch(stmt, scanner.getParameters(stmt)));

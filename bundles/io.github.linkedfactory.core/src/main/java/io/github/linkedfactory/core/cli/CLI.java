@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.NoSuchElementException;
 
 @Command(name = "CLI",
@@ -123,7 +124,7 @@ public class CLI {
 					if ("*".equals(item)) {
 						items = store.descendants(URIs.createURI(""), contextUri);
 					} else {
-						items = WrappedIterator.create(Arrays.asList(URIs.createURI(item)).iterator());
+						items = WrappedIterator.create(Collections.singletonList(URIs.createURI(item)).iterator());
 					}
 
 					IExtendedIterator<KvinTuple> allTuples = new NiceIterator<>() {
@@ -207,7 +208,7 @@ public class CLI {
 				if ("*".equals(item)) {
 					items = store.descendants(URIs.createURI(""), contextUri);
 				} else {
-					items = WrappedIterator.create(Arrays.asList(URIs.createURI(item)).iterator());
+					items = WrappedIterator.create(Collections.singletonList(URIs.createURI(item)).iterator());
 				}
 				try {
 					for (URI itemUri : items) {

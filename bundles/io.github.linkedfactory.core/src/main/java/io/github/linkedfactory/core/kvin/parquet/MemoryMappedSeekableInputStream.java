@@ -33,11 +33,11 @@ public class MemoryMappedSeekableInputStream extends SeekableInputStream {
 		}
 		int bufferIndex = (int) (pos / BUFFER_SIZE);
 		buffer = buffers[bufferIndex];
-		int bufferSize = (int) Math.min(BUFFER_SIZE, size - bufferIndex * BUFFER_SIZE);
-		bufferStart = bufferIndex * BUFFER_SIZE;
+		int bufferSize = (int) Math.min(BUFFER_SIZE, size - (long) bufferIndex * BUFFER_SIZE);
+		bufferStart = (long) bufferIndex * BUFFER_SIZE;
 		bufferEnd = bufferStart + bufferSize;
 		if (buffer == null) {
-			buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, bufferIndex * BUFFER_SIZE, bufferSize);
+			buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, (long) bufferIndex * BUFFER_SIZE, bufferSize);
 			buffers[bufferIndex] = buffer;
 		}
 	}

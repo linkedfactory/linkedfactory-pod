@@ -214,8 +214,7 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 		}
 
 		protected <L extends List<TupleExpr>> L getJoinArgs(TupleExpr tupleExpr, L joinArgs) {
-			if (tupleExpr instanceof Join) {
-				Join join = (Join) tupleExpr;
+			if (tupleExpr instanceof Join join) {
 				getJoinArgs(join.getLeftArg(), joinArgs);
 				getJoinArgs(join.getRightArg(), joinArgs);
 			} else {
@@ -457,8 +456,7 @@ public class QueryJoinOptimizer implements QueryOptimizer {
 				// evaluated first
 				boolean subjectBound = true;
 				for (Var unboundVar : vars) {
-					if (unboundVar.getParentNode() instanceof StatementPattern) {
-						StatementPattern stmt = (StatementPattern) unboundVar.getParentNode();
+					if (unboundVar.getParentNode() instanceof StatementPattern stmt) {
 						if (unboundVar == stmt.getSubjectVar()) {
 							subjectBound = false;
 							break;

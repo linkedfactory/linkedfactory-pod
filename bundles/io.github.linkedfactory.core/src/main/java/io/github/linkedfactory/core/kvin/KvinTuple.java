@@ -75,8 +75,7 @@ public class KvinTuple {
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) return true;
-		if (!(o instanceof KvinTuple)) return false;
-		KvinTuple kvinTuple = (KvinTuple) o;
+		if (!(o instanceof KvinTuple kvinTuple)) return false;
 		return time == kvinTuple.time && seqNr == kvinTuple.seqNr && item.equals(kvinTuple.item) &&
 				property.equals(kvinTuple.property) && value.equals(kvinTuple.value) &&
 				context.equals(kvinTuple.context);

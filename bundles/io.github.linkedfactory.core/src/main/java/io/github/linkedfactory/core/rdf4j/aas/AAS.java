@@ -28,8 +28,7 @@ public interface AAS {
 	String SUBMODEL_PREFIX = "urn:aas:Submodel:";
 
 	static Value resolveReference(Object value, ValueFactory vf) {
-		if (value instanceof Record) {
-			Record r = (Record) value;
+		if (value instanceof Record r) {
 			String type = null;
 			String idStr = null;
 			URI keysProperty = URIs.createURI(AAS_NAMESPACE + "keys");

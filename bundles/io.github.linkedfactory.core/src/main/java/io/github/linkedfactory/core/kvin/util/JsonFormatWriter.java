@@ -10,6 +10,7 @@ import net.enilink.komma.core.URI;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 public class JsonFormatWriter implements AutoCloseable {
 	final JsonGenerator generator;
@@ -49,7 +50,7 @@ public class JsonFormatWriter implements AutoCloseable {
 		} catch (Exception e) {
 			throw (e instanceof IOException ? (IOException) e : new IOException(e));
 		}
-		return new String(baos.toByteArray(), "UTF-8");
+		return baos.toString(StandardCharsets.UTF_8);
 	}
 
 	public void writeTuple(KvinTuple tuple) throws IOException {

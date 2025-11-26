@@ -48,8 +48,7 @@ public class Records {
 	}
 
 	public static byte[] encodeRecord(Object record) throws IOException {
-		if (record instanceof Record) {
-			Record r = (Record) record;
+		if (record instanceof Record r) {
 			ByteArrayOutputStream baos = new ByteArrayOutputStream();
 			// marker for an object
 			baos.write('O');
@@ -81,8 +80,7 @@ public class Records {
 				baos.write(encodeRecord(v));
 			}
 			return baos.toByteArray();
-		} else if (record instanceof URI) {
-			URI uri = (URI) record;
+		} else if (record instanceof URI uri) {
 			byte[] content = uri.toString().getBytes(StandardCharsets.UTF_8);
 			int lengthBytes = Varint.calcLengthUnsigned(content.length);
 			byte[] uriBytes = new byte[1 + lengthBytes + content.length];

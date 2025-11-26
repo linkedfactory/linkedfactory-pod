@@ -236,8 +236,7 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) return true;
-		if (!(o instanceof Data)) return false;
-		Data<?> data = (Data<?>) o;
+		if (!(o instanceof Data<?> data)) return false;
 		return property.equals(data.property) && Objects.equals(next, data.next) && Objects.equals(value, data.value);
 	}
 

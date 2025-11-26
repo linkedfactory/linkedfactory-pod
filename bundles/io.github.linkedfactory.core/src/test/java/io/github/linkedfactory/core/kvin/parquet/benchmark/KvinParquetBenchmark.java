@@ -243,8 +243,8 @@ public class KvinParquetBenchmark {
 				boolean isGeneratingWorkPieceTuples = false;
 				int currentPropertyCount = 0;
 				int weekCount = 1;
-				String[] abschnittValues = {"anfang", "mitte", "end"};
-				Random random = new Random(200);
+				final String[] abschnittValues = {"anfang", "mitte", "end"};
+				final Random random = new Random(200);
 
 				@Override
 				public boolean hasNext() {
@@ -303,7 +303,7 @@ public class KvinParquetBenchmark {
 						currentPropertyCount = 0;
 						currentWorkPieceCount++;
 						if (currentWorkPieceCount % 100 == 0) {
-							currentTimestamp = currentTimestamp + (604800 * weekCount);
+							currentTimestamp = currentTimestamp + (604800L * weekCount);
 							weekCount++;
 						}
 						tuple = getAbschnittTuple();
@@ -333,11 +333,11 @@ public class KvinParquetBenchmark {
 			return new NiceIterator<>() {
 				int currentPartCount = 0;
 				Long currentTimestamp = 1653335520L;
-				int currentSeqNr = 0;
+				final int currentSeqNr = 0;
 				int currentPropertyCount = 0;
 				int weekCount = 1, channelCount = 0;
 				String currentChannelType = ".Angle";
-				Random random = new Random(200);
+				final Random random = new Random(200);
 
 				@Override
 				public boolean hasNext() {
@@ -356,7 +356,7 @@ public class KvinParquetBenchmark {
 						channelCount = 0;
 						currentPartCount++;
 						if (currentPartCount % 5 == 0) {
-							currentTimestamp = currentTimestamp + (604800 * weekCount);
+							currentTimestamp = currentTimestamp + (604800L * weekCount);
 							weekCount++;
 						}
 					}

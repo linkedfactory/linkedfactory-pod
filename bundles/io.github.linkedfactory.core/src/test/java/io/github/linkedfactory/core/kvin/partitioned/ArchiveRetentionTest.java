@@ -108,7 +108,7 @@ public class ArchiveRetentionTest {
 		assertEquals(10, kvinPartitioned.properties(item3, Kvin.DEFAULT_CONTEXT).toList().size());
 
 		var weekFolder = Paths.get(tempDir.toPath().toString(), "archive",
-				Integer.toString(zonedTime.get(ChronoField.YEAR)),
+				Integer.toString(zonedTime.getYear()),
 				Integer.toString(zonedTime.get(ChronoField.ALIGNED_WEEK_OF_YEAR)));
 
 		assertTrue(Files.exists(weekFolder));

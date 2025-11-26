@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class BNodeWithValue extends SimpleBNode implements HasValue {
 
-	private static WeakHashMap<Object, BNodeWithValue> cache = new WeakHashMap<>();
+	private static final WeakHashMap<Object, BNodeWithValue> cache = new WeakHashMap<>();
 
 	private static final String uniqueIdPrefix = UUID.randomUUID().toString().replace("-", "");
 	private static final AtomicLong uniqueIdSuffix = new AtomicLong();
