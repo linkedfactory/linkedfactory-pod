@@ -41,7 +41,8 @@ public class Conversions {
 		} else if (value instanceof BigInteger) {
 			rdfValue = vf.createLiteral((BigInteger) value);
 		} else if (value instanceof Record) {
-			return BNodeWithValue.create(value, useCache);
+			var uri = ((Record) value).first(IRIWithValue.PROPERTY).getValue();
+			return uri != null ? IRIWithValue.create(uri.toString(), value) : BNodeWithValue.create(value, useCache);
 		} else if (value instanceof Object[] || value instanceof List<?>) {
 			return BNodeWithValue.create(value, useCache);
 		} else {

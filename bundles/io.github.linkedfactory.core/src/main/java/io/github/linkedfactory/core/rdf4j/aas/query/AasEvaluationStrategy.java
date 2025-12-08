@@ -226,9 +226,7 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 					newBs.removeBinding(subjectVar.getName());
 					newBs.addBinding(subjectVar.getName(), toRdfValue(submodel));
 					return evaluate(stmt, newBs);
-				} catch (URISyntaxException e) {
-					throw new QueryEvaluationException(e);
-				} catch (IOException e) {
+				} catch (URISyntaxException | IOException e) {
 					throw new QueryEvaluationException(e);
 				}
 			}

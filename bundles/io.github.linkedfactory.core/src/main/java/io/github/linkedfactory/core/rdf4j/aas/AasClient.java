@@ -3,6 +3,7 @@ package io.github.linkedfactory.core.rdf4j.aas;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.linkedfactory.core.kvin.Record;
+import io.github.linkedfactory.core.rdf4j.common.IRIWithValue;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.commons.iterator.WrappedIterator;
@@ -70,6 +71,7 @@ public class AasClient implements Closeable {
 		uriBuilder.setPath(Optional.ofNullable(uriBuilder.getPath())
 				.map(p -> p.replaceFirst("/?$", "/"))
 				.orElse("") + path);
+		URI base = URIs.createURI(uriBuilder.toString());
 		if (params != null) {
 			params.forEach((k, v) -> uriBuilder.setParameter(k, v));
 		}
@@ -95,7 +97,8 @@ public class AasClient implements Closeable {
 				if (pagingMetaData != null) {
 					cursorNode = pagingMetaData.get("cursor");
 				}
-				IExtendedIterator<Record> it = WrappedIterator.create(result.iterator()).mapWith(n -> (Record) nodeToValue(n));
+				IExtendedIterator<Record> it = WrappedIterator.create(result.iterator())
+						.mapWith(n -> (Record) nodeToValue(n, base, "", ""));
 				if (cursorNode != null) {
 					String nextCursor = cursorNode.asText();
 					// use lazy iterator here to ensure that request is only executed when required
@@ -109,33 +112,56 @@ public class AasClient implements Closeable {
 				}
 				return it;
 			} else {
-				return WrappedIterator.create(Collections.singleton((Record) nodeToValue(node)).iterator());
+				return WrappedIterator.create(Collections.singleton((Record) nodeToValue(node, base, "", "")).iterator());
 			}
 		} finally {
-			if (response != null) {
-				try {
-					response.close();
-				} catch (IOException ioe) {
-					logger.error("Error while closing response", ioe);
-				}
+			try {
+				response.close();
+			} catch (IOException ioe) {
+				logger.error("Error while closing response", ioe);
 			}
 		}
 	}
 
-	private Object nodeToValue(JsonNode node) {
+	private Object nodeToValue(JsonNode node, URI rootUri, String shortIdPath, String genIdPath) {
 		if (node == null) {
 			return null;
 		}
 
 		if (node.isArray()) {
 			List<Object> values = new ArrayList<>();
+			int i = 0;
 			for (JsonNode element : node) {
-				values.add(nodeToValue(element));
+				values.add(nodeToValue(element, rootUri, shortIdPath, genIdPath + (genIdPath.isEmpty() ? "" : ".") + i));
+				i++;
 			}
 			return values;
 		} else if (node.isObject()) {
 			Record value = Record.NULL;
 			Iterator<Map.Entry<String, JsonNode>> records = node.fields();
+			String id = node.has("id") ? node.get("id").asText() : null;
+			if (id != null) {
+				try {
+					rootUri = URIs.createURI(id);
+				} catch (Exception e) {
+					rootUri = null;
+				}
+				if (rootUri == null || rootUri.isRelative()) {
+					// invalid URI, base64-encode id
+					rootUri = URIs.createURI("urn:base64:" +
+							Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)));
+				}
+				value = value.append(new Record(IRIWithValue.PROPERTY, rootUri));
+			} else if (rootUri != null) {
+				String idShort = node.has("idShort") ? node.get("idShort").asText() : null;
+				if (idShort != null) {
+					shortIdPath = shortIdPath.isEmpty() ? idShort : shortIdPath + "." + idShort;
+					genIdPath = shortIdPath;
+				}
+				value = value.append(new Record(IRIWithValue.PROPERTY, rootUri.appendFragment(genIdPath)));
+				// System.out.println("Generated URI: " + rootUri.appendFragment(genIdPath));
+			}
+
 			String modelType = null;
 			while (records.hasNext()) {
 				Map.Entry<String, JsonNode> recordNode = records.next();
@@ -150,15 +176,19 @@ public class AasClient implements Closeable {
 					// each element of the array is added as (unordered) property value
 					int i = 0;
 					for (JsonNode element : nodeValue) {
-						var converted = nodeToValue(element);
+						var converted = nodeToValue(element, rootUri,
+								shortIdPath,
+								genIdPath + (genIdPath.isEmpty() ? "" : ".") + recordNode.getKey() + "." + i);
 						if (addIndex && converted instanceof Record) {
-							converted = ((Record)converted).append(new Record(AAS_INDEX_PROPERTY, BigInteger.valueOf(i++)));
+							converted = ((Record) converted).append(new Record(AAS_INDEX_PROPERTY, BigInteger.valueOf(i++)));
 						}
 						value = value.append(new Record(property, converted));
 					}
 				} else {
 					// convert value as whole (object or ordered list/array)
-					value = value.append(new Record(property, nodeToValue(nodeValue)));
+					value = value.append(new Record(property, nodeToValue(nodeValue, rootUri,
+							shortIdPath,
+							genIdPath + (genIdPath.isEmpty() ? "" : ".") + recordNode.getKey())));
 				}
 			}
 			if (modelType != null) {

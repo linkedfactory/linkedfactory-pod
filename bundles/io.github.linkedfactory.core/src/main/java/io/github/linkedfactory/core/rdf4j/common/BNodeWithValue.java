@@ -26,7 +26,7 @@ public class BNodeWithValue extends SimpleBNode implements HasValue {
 	public static BNodeWithValue create(Object value, boolean useCache) {
 		if (useCache) {
 			synchronized (cache) {
-				return cache.computeIfAbsent(value, v -> new BNodeWithValue(v));
+				return cache.computeIfAbsent(value, BNodeWithValue::new);
 			}
 		} else {
 			return new BNodeWithValue(value);
