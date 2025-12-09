@@ -47,6 +47,7 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 	final ValueFactory vf;
 	final Map<Value, Object> valueCache = new HashMap<>();
 	final Supplier<ExecutorService> executorService;
+	final Set<Value> submodels = Collections.synchronizedSet(new HashSet<>());
 
 	public AasEvaluationStrategy(AasClient client, Supplier<ExecutorService> executorService, ParameterScanner scanner, ValueFactory vf, Dataset dataset,
 	                             FederatedServiceResolver serviceResolver, Map<Value, Object> valueToData) {
@@ -80,13 +81,17 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 
 			final Value predValue = getVarValue(stmt.getPredicateVar(), bs);
 			if (AAS.API_RESOLVED.equals(predValue)) {
-				Value resolved = AAS.resolveReference(data, vf);
-				if (resolved == null || objectValue != null && !objectValue.equals(resolved)) {
+				AAS.ResolvedValue resolved = AAS.resolveReference(data, vf);
+				if (resolved != null && resolved.type.equals("Submodel")) {
+					// mark as submodel
+					submodels.add(resolved.value);
+				}
+				if (resolved == null || objectValue != null && !objectValue.equals(resolved.value)) {
 					return new EmptyIteration<>();
 				}
 				CompositeBindingSet newBs = new CompositeBindingSet(bs);
 				if (objectValue == null) {
-					newBs.addBinding(objectVar.getName(), resolved);
+					newBs.addBinding(objectVar.getName(), resolved.value);
 				}
 				return new SingletonIteration<>(newBs);
 			}
@@ -163,8 +168,6 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 								newBs.addBinding(predVar.getName(), vf.createIRI(RDF.NAMESPACE, "_" + (++i)));
 								newBs.addBinding(stmt.getObjectVar().getName(), elementValue);
 								next = newBs;
-							} else {
-								continue;
 							}
 						}
 						return next != null;
@@ -210,17 +213,15 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 					newBs.removeBinding(subjectVar.getName());
 					newBs.addBinding(subjectVar.getName(), toRdfValue(shell));
 					return evaluate(stmt, newBs);
-				} catch (URISyntaxException e) {
-					throw new QueryEvaluationException(e);
-				} catch (IOException e) {
+				} catch (URISyntaxException | IOException e) {
 					throw new QueryEvaluationException(e);
 				}
 			}
 
-			// retrieve submodel if IRI starts with urn:aas:Submodel:
-			if (subjectValue.isIRI() && subjectValue.stringValue().startsWith(AAS.SUBMODEL_PREFIX)) {
-				String submodelId = subjectValue.stringValue().substring(AAS.SUBMODEL_PREFIX.length());
-				try (IExtendedIterator<Record> it = client.submodel(submodelId, false)) {
+			// retrieve submodel
+			if (subjectValue.isIRI() && submodels.contains(subjectValue)) {
+				String submodelId = AAS.decodeUri(subjectValue.stringValue());
+				try (IExtendedIterator<Record> it = client.submodel(submodelId, true)) {
 					Record submodel = it.next();
 					QueryBindingSet newBs = new QueryBindingSet(bs);
 					newBs.removeBinding(subjectVar.getName());

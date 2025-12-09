@@ -141,16 +141,7 @@ public class AasClient implements Closeable {
 			Iterator<Map.Entry<String, JsonNode>> records = node.fields();
 			String id = node.has("id") ? node.get("id").asText() : null;
 			if (id != null) {
-				try {
-					rootUri = URIs.createURI(id);
-				} catch (Exception e) {
-					rootUri = null;
-				}
-				if (rootUri == null || rootUri.isRelative()) {
-					// invalid URI, base64-encode id
-					rootUri = URIs.createURI("urn:base64:" +
-							Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)));
-				}
+				rootUri = AAS.stringToUri(id);
 				value = value.append(new Record(IRIWithValue.PROPERTY, rootUri));
 			} else if (rootUri != null) {
 				String idShort = node.has("idShort") ? node.get("idShort").asText() : null;
@@ -176,13 +167,13 @@ public class AasClient implements Closeable {
 					// each element of the array is added as (unordered) property value
 					int i = 0;
 					for (JsonNode element : nodeValue) {
-						var converted = nodeToValue(element, rootUri,
-								shortIdPath,
+						var converted = nodeToValue(element, rootUri, shortIdPath,
 								genIdPath + (genIdPath.isEmpty() ? "" : ".") + recordNode.getKey() + "." + i);
 						if (addIndex && converted instanceof Record) {
-							converted = ((Record) converted).append(new Record(AAS_INDEX_PROPERTY, BigInteger.valueOf(i++)));
+							converted = ((Record) converted).append(new Record(AAS_INDEX_PROPERTY, BigInteger.valueOf(i)));
 						}
 						value = value.append(new Record(property, converted));
+						i++;
 					}
 				} else {
 					// convert value as whole (object or ordered list/array)

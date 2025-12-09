@@ -25,9 +25,42 @@ public interface AAS {
 	IRI API_RESOLVED = SimpleValueFactory.getInstance().createIRI("aas-api:resolved");
 
 	String ASSETADMINISTRATIONSHELL_PREFIX = "urn:aas:AssetAdministrationShell:";
-	String SUBMODEL_PREFIX = "urn:aas:Submodel:";
 
-	static Value resolveReference(Object value, ValueFactory vf) {
+	class ResolvedValue {
+		public final Value value;
+		public final String type;
+
+		ResolvedValue(Value value, String type) {
+			this.value = value;
+			this.type = type;
+		}
+	}
+
+	static String decodeUri(String uri) {
+		if (uri.startsWith("urn:base64:")) {
+			// decode base64-encoded id
+			byte[] decodedBytes = Base64.getDecoder().decode(uri.substring("urn:base64:".length()));
+			return new String(decodedBytes, StandardCharsets.UTF_8);
+		}
+		return uri;
+	}
+
+	static URI stringToUri(String uriString) {
+		URI uri;
+		try {
+			uri = URIs.createURI(uriString);
+		} catch (Exception e) {
+			uri = null;
+		}
+		if (uri == null || uri.isRelative()) {
+			// invalid URI, base64-encode id
+			uri = URIs.createURI("urn:base64:" +
+					Base64.getEncoder().encodeToString(uriString.getBytes(StandardCharsets.UTF_8)));
+		}
+		return uri;
+	}
+
+	static ResolvedValue resolveReference(Object value, ValueFactory vf) {
 		if (value instanceof Record r) {
 			String type = null;
 			String idStr = null;
@@ -61,9 +94,7 @@ public interface AAS {
 
 				switch (type) {
 					case "Submodel":
-						String iriStr = "urn:aas:" + type + ":" +
-								Base64.getEncoder().encodeToString(idStr.getBytes(StandardCharsets.UTF_8));
-						return vf.createIRI(iriStr);
+						return new ResolvedValue(vf.createIRI(stringToUri(idStr).toString()), "Submodel");
 					default:
 						// do not convert the reference to an IRI
 				}
