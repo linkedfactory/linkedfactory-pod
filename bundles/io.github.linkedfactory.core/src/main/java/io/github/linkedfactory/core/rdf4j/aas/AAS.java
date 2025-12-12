@@ -5,14 +5,13 @@ import io.github.linkedfactory.core.rdf4j.common.Conversions;
 import io.github.linkedfactory.core.rdf4j.common.IRIWithValue;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
-import org.eclipse.rdf4j.model.IRI;
-import org.eclipse.rdf4j.model.Value;
-import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.*;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 
 public interface AAS {
 	String AAS_NAMESPACE = "https://admin-shell.io/aas/3/0/";
@@ -23,6 +22,11 @@ public interface AAS {
 	IRI API_SUBMODELS = SimpleValueFactory.getInstance().createIRI("aas-api:submodels");
 
 	IRI API_RESOLVED = SimpleValueFactory.getInstance().createIRI("aas-api:resolved");
+
+	IRI PROPERTY_KEYS = SimpleValueFactory.getInstance().createIRI(AAS_NAMESPACE + "keys");
+	IRI PROPERTY_TYPE = SimpleValueFactory.getInstance().createIRI(AAS_NAMESPACE + "type");
+	IRI PROPERTY_VALUE = SimpleValueFactory.getInstance().createIRI(AAS_NAMESPACE + "value");
+	IRI PROPERTY_MODELTYPE = SimpleValueFactory.getInstance().createIRI(AAS_NAMESPACE + "modelType");
 
 	String ASSETADMINISTRATIONSHELL_PREFIX = "urn:aas:AssetAdministrationShell:";
 
@@ -45,7 +49,7 @@ public interface AAS {
 		return uri;
 	}
 
-	static URI stringToUri(String uriString) {
+	static String stringToUri(String uriString) {
 		URI uri;
 		try {
 			uri = URIs.createURI(uriString);
@@ -57,47 +61,42 @@ public interface AAS {
 			uri = URIs.createURI("urn:base64:" +
 					Base64.getEncoder().encodeToString(uriString.getBytes(StandardCharsets.UTF_8)));
 		}
-		return uri;
+		return uri.toString();
 	}
 
-	static ResolvedValue resolveReference(Object value, ValueFactory vf) {
-		if (value instanceof Record r) {
-			String type = null;
-			String idStr = null;
-			URI keysProperty = URIs.createURI(AAS_NAMESPACE + "keys");
-			Record keys = r.first(keysProperty);
-			Record firstKey = null;
-			// there is exactly one aas:keys element
-			if (keys.getValue() instanceof Record && keys.next().first(keysProperty).getValue() == null) {
-				firstKey = (Record) keys.getValue();
-			} else if (keys.getValue() instanceof List<?> && ((List<?>) keys.getValue()).size() == 1) {
-				firstKey = (Record) ((List<?>) keys.getValue()).get(0);
+	static ResolvedValue resolveReference(Model data, Resource reference, ValueFactory vf) {
+		String type = null;
+		String idStr = null;
+
+		Set<Value> keys = data.filter(reference, PROPERTY_KEYS, null).objects();
+		Value firstKey = keys.size() == 1 ? keys.iterator().next() : null;
+		if (firstKey instanceof Resource) {
+			Value typeValue = data.filter((Resource) firstKey, PROPERTY_TYPE, null)
+					.objects().stream().findFirst().orElse(null);
+			if (typeValue != null) {
+				type = typeValue.stringValue();
 			}
-			if (firstKey != null) {
-				Object typeValue = firstKey.first(URIs.createURI(AAS_NAMESPACE + "type")).getValue();
-				if (typeValue != null) {
-					type = typeValue.toString();
-				}
-				Object keyValue = firstKey.first(URIs.createURI(AAS_NAMESPACE + "value")).getValue();
-				if (keyValue != null) {
-					idStr = keyValue.toString();
+			Value keyValue = data.filter((Resource) firstKey, PROPERTY_VALUE, null)
+					.objects().stream().findFirst().orElse(null);
+			if (keyValue != null) {
+				idStr = keyValue.stringValue();
+			}
+		}
+
+		if (idStr != null) {
+			if (type == null) {
+				Value modelTypeValue = data.filter((Resource) firstKey, PROPERTY_MODELTYPE, null)
+						.objects().stream().findFirst().orElse(null);
+				if (modelTypeValue != null) {
+					type = modelTypeValue.stringValue();
 				}
 			}
 
-			if (idStr != null) {
-				if (type == null) {
-					Object modelTypeValue = r.first(URIs.createURI(AAS_NAMESPACE + "modelType")).getValue();
-					if (modelTypeValue != null) {
-						type = modelTypeValue.toString();
-					}
-				}
-
-				switch (type) {
-					case "Submodel":
-						return new ResolvedValue(vf.createIRI(stringToUri(idStr).toString()), "Submodel");
-					default:
-						// do not convert the reference to an IRI
-				}
+			switch (type) {
+				case "Submodel":
+					return new ResolvedValue(vf.createIRI(stringToUri(idStr).toString()), "Submodel");
+				default:
+					// do not convert the reference to an IRI
 			}
 		}
 		return null;

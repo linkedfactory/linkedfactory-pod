@@ -5,6 +5,7 @@ import org.apache.http.StatusLine;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
+import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.repository.sail.SailRepository;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
@@ -41,7 +42,7 @@ public class AasServiceTest extends Mockito {
 		when(mockedHttpClient.execute(argThat(httpUriRequest ->
 				httpUriRequest != null && httpUriRequest.getURI().toString().contains("/submodels/")))).thenReturn(submodelResponse);
 
-		var client = new AasClient("http://example.org/") {
+		var client = new AasClient("http://example.org/", SimpleValueFactory.getInstance()) {
 			@Override
 			protected CloseableHttpClient createHttpClient() {
 				return mockedHttpClient;

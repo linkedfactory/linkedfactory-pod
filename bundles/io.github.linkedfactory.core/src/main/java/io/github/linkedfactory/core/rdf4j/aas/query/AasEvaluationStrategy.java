@@ -1,24 +1,16 @@
 package io.github.linkedfactory.core.rdf4j.aas.query;
 
-import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.rdf4j.aas.AAS;
 import io.github.linkedfactory.core.rdf4j.aas.AasClient;
-import io.github.linkedfactory.core.rdf4j.common.Conversions;
-import io.github.linkedfactory.core.rdf4j.common.HasValue;
 import io.github.linkedfactory.core.rdf4j.common.query.CompositeBindingSet;
 import io.github.linkedfactory.core.rdf4j.common.query.InnerJoinIteratorEvaluationStep;
 import io.github.linkedfactory.core.rdf4j.kvin.query.KvinFetch;
 import net.enilink.commons.iterator.IExtendedIterator;
-import net.enilink.commons.iterator.WrappedIterator;
-import net.enilink.vocab.rdf.RDF;
 import org.eclipse.rdf4j.common.iteration.AbstractCloseableIteration;
 import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.common.iteration.EmptyIteration;
 import org.eclipse.rdf4j.common.iteration.SingletonIteration;
-import org.eclipse.rdf4j.model.IRI;
-import org.eclipse.rdf4j.model.Resource;
-import org.eclipse.rdf4j.model.Value;
-import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.*;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
@@ -33,26 +25,26 @@ import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
-import java.util.*;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
-import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.compareAndBind;
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.findFirstFetch;
 
 public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 
+	static final Resource[] EMPTY_CONTEXTS = new Resource[0];
 	final AasClient client;
 	final ParameterScanner scanner;
 	final ValueFactory vf;
-	final Map<Value, Object> valueCache = new HashMap<>();
 	final Supplier<ExecutorService> executorService;
-	final Set<Value> submodels = Collections.synchronizedSet(new HashSet<>());
+	final Model cache;
 
-	public AasEvaluationStrategy(AasClient client, Supplier<ExecutorService> executorService, ParameterScanner scanner, ValueFactory vf, Dataset dataset,
-	                             FederatedServiceResolver serviceResolver, Map<Value, Object> valueToData) {
+	public AasEvaluationStrategy(AasClient client, Supplier<ExecutorService> executorService, ParameterScanner scanner,
+	                             ValueFactory vf, Dataset dataset, FederatedServiceResolver serviceResolver) {
 		super(new AasTripleSource(vf), dataset, serviceResolver);
 		this.client = client;
+		this.cache = client.getCache();
 		this.scanner = scanner;
 		this.vf = vf;
 		this.executorService = executorService;
@@ -64,66 +56,69 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 		// System.out.println("Stmt: " + stmt);
 		final Var subjectVar = stmt.getSubjectVar();
 		final Value subjectValue = getVarValue(subjectVar, bs);
+		final Var objectVar = stmt.getObjectVar();
+		final Value objectValue = getVarValue(objectVar, bs);
+		final Value predValue = getVarValue(stmt.getPredicateVar(), bs);
 
-		if (subjectValue == null) {
-			// this happens for patterns like (:subject :property [ <kvin:value> ?someValue ])
-			// where [ <kvin:value> ?someValue ] is evaluated first
-			// this case should be handled by correctly defining the evaluation order by reordering the SPARQL AST nodes
-			return new EmptyIteration<>();
-		} else if (!(subjectValue instanceof Resource)) {
+		if (AAS.API_RESOLVED.equals(predValue)) {
+			AAS.ResolvedValue resolved = AAS.resolveReference(cache, (Resource) subjectValue, vf);
+			if (resolved != null && resolved.type.equals("Submodel")) {
+				// retrieve submodel
+				String submodelId = AAS.decodeUri(resolved.value.stringValue());
+				try {
+					// ensure that submodel exists
+					client.submodel(submodelId, true).toList();
+				} catch (URISyntaxException | IOException e) {
+					throw new QueryEvaluationException(e);
+				}
+			}
+			if (resolved == null || objectValue != null && !objectValue.equals(resolved.value)) {
+				return new EmptyIteration<>();
+			}
+			CompositeBindingSet newBs = new CompositeBindingSet(bs);
+			if (objectValue == null) {
+				newBs.addBinding(objectVar.getName(), resolved.value);
+			}
+			return new SingletonIteration<>(newBs);
+		}
+
+		if (subjectValue != null && !subjectValue.isResource() || predValue != null && !predValue.isIRI()) {
 			return new EmptyIteration<>();
 		}
 
-		Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : valueCache.get(subjectValue);
-		if (data instanceof Record) {
-			Var objectVar = stmt.getObjectVar();
-			Value objectValue = getVarValue(objectVar, bs);
-
-			final Value predValue = getVarValue(stmt.getPredicateVar(), bs);
-			if (AAS.API_RESOLVED.equals(predValue)) {
-				AAS.ResolvedValue resolved = AAS.resolveReference(data, vf);
-				if (resolved != null && resolved.type.equals("Submodel")) {
-					// mark as submodel
-					submodels.add(resolved.value);
-				}
-				if (resolved == null || objectValue != null && !objectValue.equals(resolved.value)) {
-					return new EmptyIteration<>();
-				}
-				CompositeBindingSet newBs = new CompositeBindingSet(bs);
-				if (objectValue == null) {
-					newBs.addBinding(objectVar.getName(), resolved.value);
-				}
-				return new SingletonIteration<>(newBs);
-			}
-
-			final Iterator<Record> it;
-			if (predValue != null) {
-				String predValueStr = predValue.stringValue();
-				it = WrappedIterator.create(((Record) data).iterator())
-						.filterKeep(r -> predValueStr.equals(r.getProperty().toString()));
-			} else {
-				it = ((Record) data).iterator();
-			}
-
+		Value ctxValue = getVarValue(stmt.getContextVar(), bs);
+		var stmts = cache.filter((Resource) subjectValue, (IRI) predValue, objectValue,
+				ctxValue == null ? EMPTY_CONTEXTS : new Resource[] { (Resource) ctxValue }).iterator();
+		if (stmts.hasNext()) {
 			return new AbstractCloseableIteration<>() {
 				CompositeBindingSet next;
 
 				@Override
 				public boolean hasNext() throws QueryEvaluationException {
-					while (next == null && it.hasNext()) {
-						Record r = it.next();
-						Value newObjectValue = toRdfValue(r.getValue());
-						if (objectValue != null && !objectValue.equals(newObjectValue)) {
+					while (next == null && stmts.hasNext()) {
+						Statement s = stmts.next();
+						if (subjectValue != null && !subjectValue.equals(s.getSubject())) {
+							// try next value
+							continue;
+						}
+						if (predValue != null && !predValue.equals(s.getPredicate())) {
+							// try next value
+							continue;
+						}
+						if (objectValue != null && !objectValue.equals(s.getObject())) {
 							// try next value
 							continue;
 						}
 
 						CompositeBindingSet newBs = new CompositeBindingSet(bs);
+						if (subjectValue == null) {
+							newBs.addBinding(subjectVar.getName(), s.getSubject());
+						}
 						if (predValue == null) {
-							newBs.addBinding(stmt.getPredicateVar().getName(), toRdfValue(r.getProperty()));
+							newBs.addBinding(stmt.getPredicateVar().getName(), s.getPredicate());
 						}
 						if (objectValue == null) {
-							newBs.addBinding(objectVar.getName(), newObjectValue);
+							newBs.addBinding(objectVar.getName(), s.getObject());
 						}
 						next = newBs;
 					}
@@ -148,88 +143,20 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 					throw new UnsupportedOperationException();
 				}
 			};
-		} else if (data instanceof Object[] || data instanceof List<?>) {
-			List<?> list = data instanceof Object[] ? Arrays.asList((Object[]) data) : (List<?>) data;
-			Var predVar = stmt.getPredicateVar();
-			Value predValue = getVarValue(predVar, bs);
-			if (predValue == null) {
-				Iterator<?> it = list.iterator();
-				Value objValue = getVarValue(stmt.getObjectVar(), bs);
-				return new AbstractCloseableIteration<>() {
-					BindingSet next = null;
-					int i = 0;
+		}
 
-					@Override
-					public boolean hasNext() throws QueryEvaluationException {
-						while (next == null && it.hasNext()) {
-							Value elementValue = toRdfValue(it.next());
-							if (objValue == null || objValue.equals(elementValue)) {
-								QueryBindingSet newBs = new QueryBindingSet(bs);
-								newBs.addBinding(predVar.getName(), vf.createIRI(RDF.NAMESPACE, "_" + (++i)));
-								newBs.addBinding(stmt.getObjectVar().getName(), elementValue);
-								next = newBs;
-							}
-						}
-						return next != null;
-					}
-
-					@Override
-					public BindingSet next() throws QueryEvaluationException {
-						if (next == null) {
-							throw new QueryEvaluationException("No such element");
-						}
-						BindingSet result = next;
-						next = null;
-						return result;
-					}
-
-					@Override
-					public void remove() throws QueryEvaluationException {
-						throw new UnsupportedOperationException();
-					}
-				};
-			} else if (predValue.isIRI() && RDF.NAMESPACE.equals(((IRI) predValue).getNamespace())) {
-				String localName = ((IRI) predValue).getLocalName();
-				if (localName.matches("_[0-9]+")) {
-					int index = Integer.parseInt(localName.substring(1));
-					if (index > 0 && index <= list.size()) {
-						return compareAndBind(bs, stmt.getObjectVar(), toRdfValue(list.get(index - 1)));
-					}
-				}
-			}
-			return new EmptyIteration<>();
-		} else {
-			if (bs.hasBinding(stmt.getObjectVar().getName())) {
-				// bindings where already fully computed via scanner.referencedBy
-				return new SingletonIteration<>(bs);
-			}
-
-			// retrieve shell if IRI starts with urn:aas:AssetAdministrationShell:
-			if (subjectValue.isIRI() && subjectValue.stringValue().startsWith(AAS.ASSETADMINISTRATIONSHELL_PREFIX)) {
-				String shellId = subjectValue.stringValue().substring(AAS.ASSETADMINISTRATIONSHELL_PREFIX.length());
-				try (IExtendedIterator<Record> it = client.shell(shellId, false)) {
-					Record shell = it.next();
-					QueryBindingSet newBs = new QueryBindingSet(bs);
-					newBs.removeBinding(subjectVar.getName());
-					newBs.addBinding(subjectVar.getName(), toRdfValue(shell));
-					return evaluate(stmt, newBs);
-				} catch (URISyntaxException | IOException e) {
-					throw new QueryEvaluationException(e);
-				}
-			}
-
-			// retrieve submodel
-			if (subjectValue.isIRI() && submodels.contains(subjectValue)) {
-				String submodelId = AAS.decodeUri(subjectValue.stringValue());
-				try (IExtendedIterator<Record> it = client.submodel(submodelId, true)) {
-					Record submodel = it.next();
-					QueryBindingSet newBs = new QueryBindingSet(bs);
-					newBs.removeBinding(subjectVar.getName());
-					newBs.addBinding(subjectVar.getName(), toRdfValue(submodel));
-					return evaluate(stmt, newBs);
-				} catch (URISyntaxException | IOException e) {
-					throw new QueryEvaluationException(e);
-				}
+		// retrieve shell if IRI starts with urn:aas:AssetAdministrationShell:
+		if (subjectValue != null && subjectValue.isIRI() &&
+				subjectValue.stringValue().startsWith(AAS.ASSETADMINISTRATIONSHELL_PREFIX)) {
+			String shellId = subjectValue.stringValue().substring(AAS.ASSETADMINISTRATIONSHELL_PREFIX.length());
+			try (IExtendedIterator<IRI> it = client.shell(shellId, false)) {
+				IRI shell = it.next();
+				QueryBindingSet newBs = new QueryBindingSet(bs);
+				newBs.removeBinding(subjectVar.getName());
+				newBs.addBinding(subjectVar.getName(), shell);
+				return evaluate(stmt, newBs);
+			} catch (URISyntaxException | IOException e) {
+				throw new QueryEvaluationException(e);
 			}
 		}
 		return new EmptyIteration<>();
@@ -244,7 +171,7 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 
 		if (subjValue != null) {
 			final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<>() {
-				IExtendedIterator<?> it;
+				IExtendedIterator<IRI> it;
 
 				@Override
 				public boolean hasNext() throws QueryEvaluationException {
@@ -255,9 +182,7 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 							} else if (AAS.API_SUBMODELS.equals(predValue)) {
 								it = client.submodels();
 							}
-						} catch (URISyntaxException e) {
-							throw new QueryEvaluationException(e);
-						} catch (IOException e) {
+						} catch (URISyntaxException | IOException e) {
 							throw new QueryEvaluationException(e);
 						}
 					}
@@ -266,11 +191,10 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 
 				@Override
 				public BindingSet next() throws QueryEvaluationException {
-					Object value = it.next();
+					var value = it.next();
 					CompositeBindingSet newBs = new CompositeBindingSet(bs);
 					if (!objectVar.isConstant() && !bs.hasBinding(objectVar.getName())) {
-						Value objectValue = toRdfValue(value);
-						newBs.addBinding(objectVar.getName(), objectValue);
+						newBs.addBinding(objectVar.getName(), value);
 					}
 					return newBs;
 				}
@@ -383,13 +307,5 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 
 	public ValueFactory getValueFactory() {
 		return vf;
-	}
-
-	public Value toRdfValue(Object value) {
-		Value rdfValue = Conversions.toRdfValue(value, getValueFactory(), true);
-		if (rdfValue instanceof HasValue) {
-			valueCache.putIfAbsent(rdfValue, ((HasValue) rdfValue).getValue());
-		}
-		return rdfValue;
 	}
 }

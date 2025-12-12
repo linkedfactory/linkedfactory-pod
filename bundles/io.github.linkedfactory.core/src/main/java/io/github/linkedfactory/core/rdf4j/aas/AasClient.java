@@ -2,8 +2,6 @@ package io.github.linkedfactory.core.rdf4j.aas;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.linkedfactory.core.kvin.Record;
-import io.github.linkedfactory.core.rdf4j.common.IRIWithValue;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.commons.iterator.WrappedIterator;
@@ -15,6 +13,11 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.eclipse.rdf4j.model.IRI;
+import org.eclipse.rdf4j.model.Model;
+import org.eclipse.rdf4j.model.Value;
+import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.impl.LinkedHashModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,9 +40,12 @@ public class AasClient implements Closeable {
 	static URI AAS_INDEX_PROPERTY = URIs.createURI(AAS.AAS_NAMESPACE + "index");
 	static boolean USE_AAS_INDEX_PROPERTY = true;
 	static Set<String> orderedElements = Set.of("keys", "SubmodelElementList", "ValueList");
+	final Model cache = new LinkedHashModel();
+	final ValueFactory valueFactory;
 
-	public AasClient(String endpoint) {
+	public AasClient(String endpoint, ValueFactory valueFactory) {
 		this.endpoint = endpoint;
+		this.valueFactory = valueFactory;
 		this.httpClient = createHttpClient();
 	}
 
@@ -47,31 +53,35 @@ public class AasClient implements Closeable {
 		return new HttpGet(endpoint);
 	}
 
-	public IExtendedIterator<Record> shells() throws URISyntaxException, IOException {
+	public IExtendedIterator<IRI> shells() throws URISyntaxException, IOException {
 		return query(endpoint, "shells", null, null);
 	}
 
-	public IExtendedIterator<Record> shell(String id, boolean encodeBase64) throws URISyntaxException, IOException {
+	public IExtendedIterator<IRI> shell(String id, boolean encodeBase64) throws URISyntaxException, IOException {
 		return query(endpoint, "shells/" + (encodeBase64 ?
 				Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)) : id), null, null);
 	}
 
-	public IExtendedIterator<Record> submodels() throws URISyntaxException, IOException {
+	public IExtendedIterator<IRI> submodels() throws URISyntaxException, IOException {
 		return query(endpoint, "submodels", null, null);
 	}
 
-	public IExtendedIterator<Record> submodel(String id, boolean encodeBase64) throws URISyntaxException, IOException {
+	public IExtendedIterator<IRI> submodel(String id, boolean encodeBase64) throws URISyntaxException, IOException {
 		return query(endpoint, "submodels/" + (encodeBase64 ?
 				Base64.getEncoder().encodeToString(id.getBytes(StandardCharsets.UTF_8)) : id), null, null);
 	}
 
-	protected IExtendedIterator<Record> query(String endpoint, String path, Map<String, String> params, String cursor)
+	public Model getCache() {
+		return cache;
+	}
+
+	protected IExtendedIterator<IRI> query(String endpoint, String path, Map<String, String> params, String cursor)
 			throws URISyntaxException, IOException {
 		URIBuilder uriBuilder = new URIBuilder(endpoint);
 		uriBuilder.setPath(Optional.ofNullable(uriBuilder.getPath())
 				.map(p -> p.replaceFirst("/?$", "/"))
 				.orElse("") + path);
-		URI base = URIs.createURI(uriBuilder.toString());
+		IRI base = valueFactory.createIRI(uriBuilder.toString());
 		if (params != null) {
 			params.forEach((k, v) -> uriBuilder.setParameter(k, v));
 		}
@@ -97,8 +107,8 @@ public class AasClient implements Closeable {
 				if (pagingMetaData != null) {
 					cursorNode = pagingMetaData.get("cursor");
 				}
-				IExtendedIterator<Record> it = WrappedIterator.create(result.iterator())
-						.mapWith(n -> (Record) nodeToValue(n, base, "", ""));
+				IExtendedIterator<IRI> it = WrappedIterator.create(result.iterator())
+						.mapWith(n -> nodeToIRI(n, base, "", ""));
 				if (cursorNode != null) {
 					String nextCursor = cursorNode.asText();
 					// use lazy iterator here to ensure that request is only executed when required
@@ -112,7 +122,7 @@ public class AasClient implements Closeable {
 				}
 				return it;
 			} else {
-				return WrappedIterator.create(Collections.singleton((Record) nodeToValue(node, base, "", "")).iterator());
+				return WrappedIterator.create(Collections.singleton(nodeToIRI(node, base, "", "")).iterator());
 			}
 		} finally {
 			try {
@@ -123,90 +133,86 @@ public class AasClient implements Closeable {
 		}
 	}
 
-	private Object nodeToValue(JsonNode node, URI rootUri, String shortIdPath, String genIdPath) {
-		if (node == null) {
-			return null;
+	private IRI nodeToIRI(JsonNode node, IRI rootUri, String shortIdPath, String genIdPath) {
+		Iterator<Map.Entry<String, JsonNode>> records = node.fields();
+		String id = node.has("id") ? node.get("id").asText() : null;
+		IRI subject;
+		if (id != null) {
+			rootUri = valueFactory.createIRI(AAS.stringToUri(id));
+			subject = valueFactory.createIRI(rootUri.toString());
+		} else {
+			String idShort = node.has("idShort") ? node.get("idShort").asText() : null;
+			if (idShort != null) {
+				shortIdPath = shortIdPath.isEmpty() ? idShort : shortIdPath + "." + idShort;
+				genIdPath = shortIdPath;
+			}
+			subject = valueFactory.createIRI(rootUri.stringValue() + "#" + genIdPath);
 		}
 
-		if (node.isArray()) {
-			List<Object> values = new ArrayList<>();
-			int i = 0;
-			for (JsonNode element : node) {
-				values.add(nodeToValue(element, rootUri, shortIdPath, genIdPath + (genIdPath.isEmpty() ? "" : ".") + i));
-				i++;
-			}
-			return values;
-		} else if (node.isObject()) {
-			Record value = Record.NULL;
-			Iterator<Map.Entry<String, JsonNode>> records = node.fields();
-			String id = node.has("id") ? node.get("id").asText() : null;
-			if (id != null) {
-				rootUri = AAS.stringToUri(id);
-				value = value.append(new Record(IRIWithValue.PROPERTY, rootUri));
-			} else if (rootUri != null) {
-				String idShort = node.has("idShort") ? node.get("idShort").asText() : null;
-				if (idShort != null) {
-					shortIdPath = shortIdPath.isEmpty() ? idShort : shortIdPath + "." + idShort;
-					genIdPath = shortIdPath;
-				}
-				value = value.append(new Record(IRIWithValue.PROPERTY, rootUri.appendFragment(genIdPath)));
-				// System.out.println("Generated URI: " + rootUri.appendFragment(genIdPath));
+		String modelType = null;
+		while (records.hasNext()) {
+			Map.Entry<String, JsonNode> recordNode = records.next();
+			if ("modelType".equals(recordNode.getKey())) {
+				modelType = recordNode.getValue().asText();
 			}
 
-			String modelType = null;
-			while (records.hasNext()) {
-				Map.Entry<String, JsonNode> recordNode = records.next();
-				if ("modelType".equals(recordNode.getKey())) {
-					modelType = recordNode.getValue().asText();
-				}
-				URI property = URIs.createURI(AAS.AAS_NAMESPACE + recordNode.getKey());
-				JsonNode nodeValue = recordNode.getValue();
+			URI property = URIs.createURI(AAS.AAS_NAMESPACE + recordNode.getKey());
+			IRI predicate = valueFactory.createIRI(property.toString());
 
-				if (nodeValue.isArray() && (USE_AAS_INDEX_PROPERTY || !orderedElements.contains(recordNode.getKey()))) {
-					boolean addIndex = USE_AAS_INDEX_PROPERTY && orderedElements.contains(recordNode.getKey());
-					// each element of the array is added as (unordered) property value
-					int i = 0;
-					for (JsonNode element : nodeValue) {
-						var converted = nodeToValue(element, rootUri, shortIdPath,
-								genIdPath + (genIdPath.isEmpty() ? "" : ".") + recordNode.getKey() + "." + i);
-						if (addIndex && converted instanceof Record) {
-							converted = ((Record) converted).append(new Record(AAS_INDEX_PROPERTY, BigInteger.valueOf(i)));
-						}
-						value = value.append(new Record(property, converted));
-						i++;
+			JsonNode nodeValue = recordNode.getValue();
+			if (nodeValue.isArray() && (USE_AAS_INDEX_PROPERTY || !orderedElements.contains(recordNode.getKey()))) {
+				boolean addIndex = USE_AAS_INDEX_PROPERTY && orderedElements.contains(recordNode.getKey());
+				int i = 0;
+				for (JsonNode element : nodeValue) {
+					Value object = nodeToRdfValue(element, rootUri, shortIdPath,
+							genIdPath + (genIdPath.isEmpty() ? "" : ".") + recordNode.getKey() + "." + i);
+					cache.add(subject, predicate, object, rootUri);
+					if (addIndex) {
+						IRI indexPredicate = valueFactory.createIRI(AAS_INDEX_PROPERTY.toString());
+						cache.add(subject, indexPredicate, valueFactory.createLiteral(i), rootUri);
 					}
-				} else {
-					// convert value as whole (object or ordered list/array)
-					value = value.append(new Record(property, nodeToValue(nodeValue, rootUri,
-							shortIdPath,
-							genIdPath + (genIdPath.isEmpty() ? "" : ".") + recordNode.getKey())));
+					i++;
 				}
+			} else {
+				Value object = nodeToRdfValue(nodeValue, rootUri, shortIdPath,
+						genIdPath + (genIdPath.isEmpty() ? "" : ".") + recordNode.getKey());
+				cache.add(subject, predicate, object, rootUri);
 			}
-			if (modelType != null) {
-				Record newRecord = new Record(RDF.PROPERTY_TYPE, URIs.createURI(AAS.AAS_NAMESPACE + modelType));
-				value = value.append(newRecord);
-			}
-			return value;
+		}
+		if (modelType != null) {
+			IRI typePredicate = valueFactory.createIRI(RDF.PROPERTY_TYPE.toString());
+			IRI typeObject = valueFactory.createIRI(AAS.AAS_NAMESPACE + modelType);
+			cache.add(subject, typePredicate, typeObject);
+		}
+		return subject;
+	}
+
+	private Value nodeToRdfValue(JsonNode node, IRI rootUri, String shortIdPath, String genIdPath) {
+		if (node == null) {
+			return valueFactory.createLiteral("");
+		}
+		if (node.isObject()) {
+			return nodeToIRI(node, rootUri, shortIdPath, genIdPath);
 		} else if (node.isDouble()) {
-			return node.asDouble();
+			return valueFactory.createLiteral(node.asDouble());
 		} else if (node.isFloat()) {
-			return Float.parseFloat(node.asText());
+			return valueFactory.createLiteral(Float.parseFloat(node.asText()));
 		} else if (node.isInt()) {
-			return node.asInt();
+			return valueFactory.createLiteral(node.asInt());
 		} else if (node.isBigInteger()) {
-			return new BigInteger(node.asText());
+			return valueFactory.createLiteral(new BigInteger(node.asText()));
 		} else if (node.isBigDecimal()) {
-			return new BigDecimal(node.asText());
+			return valueFactory.createLiteral(new BigDecimal(node.asText()));
 		} else if (node.isLong()) {
-			return node.asLong();
+			return valueFactory.createLiteral(node.asLong());
 		} else if (node.isShort()) {
-			return Short.parseShort(node.asText());
+			return valueFactory.createLiteral(Short.parseShort(node.asText()));
 		} else if (node.isBoolean()) {
-			return node.asBoolean();
+			return valueFactory.createLiteral(node.asBoolean());
 		} else if (node.isTextual()) {
-			return node.textValue();
+			return valueFactory.createLiteral(node.textValue());
 		} else {
-			return node;
+			return valueFactory.createLiteral(node.toString());
 		}
 	}
 
