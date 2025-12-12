@@ -8,8 +8,10 @@ import io.github.linkedfactory.core.rdf4j.common.query.QueryJoinOptimizer;
 import io.github.linkedfactory.core.rdf4j.common.query.QueryModelPruner;
 import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.common.iteration.*;
+import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.impl.LinkedHashModel;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
@@ -37,7 +39,7 @@ public class AasFederatedService implements FederatedService {
     Supplier<ExecutorService> executorService;
 
     public AasFederatedService(String endpoint, Supplier<ExecutorService> executorService) {
-        this(new AasClient(endpoint), executorService);
+        this(new AasClient(endpoint, vf), executorService);
     }
 
     public AasFederatedService(AasClient client, Supplier<ExecutorService> executorService) {
@@ -123,8 +125,7 @@ public class AasFederatedService implements FederatedService {
         // for debugging purposes
         System.out.println(service);
 
-        Map<Value, Object> valueToData = new WeakHashMap<>();
-        EvaluationStrategy strategy = new AasEvaluationStrategy(client, executorService, scanner, vf, null, null, valueToData);
+        EvaluationStrategy strategy = new AasEvaluationStrategy(client, executorService, scanner, vf, null, null);
 
         List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
         while (bindings.hasNext()) {
