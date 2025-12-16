@@ -46,7 +46,27 @@ public class CsvFormatParserTest {
 	public void shouldParseCsv2() throws IOException {
 		for (String[] sepAndFile : List.of(
 				new String[]{",", "/CsvFormatParserTestContent-2a.csv"},
-				new String[]{";", "/CsvFormatParserTestContent-2b.csv"})) {
+				new String[]{";", "/CsvFormatParserTestContent-2b.csv"}
+		)) {
+			CsvFormatParser csvParser = new CsvFormatParser(URIs.createURI("urn:base:"), sepAndFile[0].charAt(0),
+					getClass().getResourceAsStream(sepAndFile[1]));
+			IExtendedIterator<KvinTuple> tuples = csvParser.parse();
+			assertNotNull(tuples);
+			int count = 0;
+			while (tuples.hasNext()) {
+				KvinTuple t = tuples.next();
+				count++;
+			}
+			assertEquals(36, count);
+		}
+	}
+
+	@Test
+	public void shouldParseCsvWithSeqNr() throws IOException {
+		for (String[] sepAndFile : List.of(
+				new String[]{",", "/CsvFormatParserTestContent-2a-seqNr-1.csv"},
+				new String[]{";", "/CsvFormatParserTestContent-2b-seqNr-5.csv"}
+		)) {
 			CsvFormatParser csvParser = new CsvFormatParser(URIs.createURI("urn:base:"), sepAndFile[0].charAt(0),
 					getClass().getResourceAsStream(sepAndFile[1]));
 			IExtendedIterator<KvinTuple> tuples = csvParser.parse();

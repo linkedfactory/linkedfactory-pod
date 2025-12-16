@@ -17,6 +17,7 @@ package io.github.linkedfactory.core.kvin.util;
 
 import com.google.common.math.DoubleMath;
 import com.google.common.primitives.Doubles;
+import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.opencsv.CSVParser;
 import com.opencsv.CSVParserBuilder;
@@ -48,6 +49,7 @@ public class CsvFormatParser {
 	protected CSVReader csvReader;
 	protected char separator;
 	protected URI context = Kvin.DEFAULT_CONTEXT;
+	protected int seqNrColumn = -1;
 
 	public CsvFormatParser(URI base, char separator, InputStream content) throws IOException {
 		this.base = base;
@@ -64,6 +66,7 @@ public class CsvFormatParser {
 		try {
 			String[] header = csvReader.readNext();
 			if (header != null) {
+				seqNrColumn = findSeqNrColumn(header);
 				itemProperties = parseHeader(header, 1);
 			} else {
 				itemProperties = null;
@@ -91,12 +94,28 @@ public class CsvFormatParser {
 		return uri;
 	}
 
+	int findSeqNrColumn(String[] header) {
+		// first column is time column
+		for (int i = 1; i < header.length; i++) {
+			if (header [i] != null && header[i].trim().equals("seqNr")) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
 	List<Pair<URI, URI>> parseHeader(String[] header, int startIndex) {
 		List<Pair<URI, URI>> itemProperties = new ArrayList<>(header.length);
 		for (int i = 0; i < startIndex; i++) {
 			itemProperties.add(null);
 		}
 		for (int i = startIndex; i < header.length; i++) {
+			// skip seqNr column
+			if (i == seqNrColumn) {
+				itemProperties.add(null);
+				continue;
+			}
+
 			Matcher m = itemProperty.matcher(header[i].trim());
 			if (m.matches()) {
 				URI itemUri = toUri(m.group(1));
@@ -114,6 +133,7 @@ public class CsvFormatParser {
 			String[] line;
 			KvinTuple tuple;
 			long time;
+			int seqNr;
 			int column;
 
 			void nextLine() throws CsvValidationException, IOException {
@@ -124,11 +144,22 @@ public class CsvFormatParser {
 						Long timeValue = Longs.tryParse(line[0]);
 						if (timeValue != null) {
 							time = timeValue;
+							if (seqNrColumn >= 0) {
+								Integer seqNrValue = Ints.tryParse(line[seqNrColumn]);
+								if (seqNrValue != null) {
+									seqNr = seqNrValue;
+								} else {
+									String value = line[seqNrColumn];
+									line = null;
+									throw new CsvValidationException(
+											String.format("Invalid seqNr format %s; expected integer", value));
+								}
+							}
 						} else {
-							String index = line[0];
+							String value = line[0];
 							line = null;
 							throw new CsvValidationException(
-									String.format("Invalid time format %s; expected long timestamp", index));
+									String.format("Invalid time format %s; expected long timestamp", value));
 						}
 					}
 				}
@@ -157,7 +188,7 @@ public class CsvFormatParser {
 								String valueStr = line[column].trim();
 								Object value = parseValue(valueStr);
 								tuple = new KvinTuple(itemProperty.getFirst(), itemProperty.getSecond(),
-										context, time, value);
+										context, time, seqNr, value);
 							}
 							column++;
 						}
