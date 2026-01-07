@@ -114,7 +114,7 @@ public class KvinTupleGenerator {
 					next = new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, time, 0, value);
 					time += timeDistancePerValue;
 				}
-				return next != null;
+				return true;
 			}
 
 			@Override

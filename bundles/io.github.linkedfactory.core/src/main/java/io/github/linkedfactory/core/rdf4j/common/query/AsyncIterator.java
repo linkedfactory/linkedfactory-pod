@@ -47,7 +47,7 @@ public class AsyncIterator<T> implements CloseableIteration<T, QueryEvaluationEx
 				try {
 					while (!nextElements.offer((T) NULL_ELEMENT, 10, TimeUnit.MILLISECONDS)) {
 						if (closed) {
-							return;
+							break;
 						}
 					}
 				} catch (InterruptedException e) {
