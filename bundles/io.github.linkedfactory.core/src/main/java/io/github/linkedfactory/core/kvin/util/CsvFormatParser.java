@@ -122,7 +122,7 @@ public class CsvFormatParser {
 				URI propertyUri = toUri(m.group(2));
 				itemProperties.add(new Pair<>(itemUri, propertyUri));
 			} else {
-				itemProperties.add(null);
+				itemProperties.add(new Pair<>(toUri(""), toUri(header[i].trim())));
 			}
 		}
 		return itemProperties;
