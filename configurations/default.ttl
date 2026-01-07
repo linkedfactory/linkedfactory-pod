@@ -6,6 +6,10 @@
 @prefix group: <enilink:group:> .
 @prefix auth: <http://enilink.net/vocab/auth#> .
 @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix config: <enilink:config/> .
+
+# set query timeout to 60 seconds
+config: config:queryTimeout 60000 .
 
 # import definition of administrators group
 <> owl:imports <platform:/plugin/net.enilink.platform.core/config/group-admin.ttl> .
