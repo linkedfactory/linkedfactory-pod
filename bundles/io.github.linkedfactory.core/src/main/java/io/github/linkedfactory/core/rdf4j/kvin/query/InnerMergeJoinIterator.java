@@ -46,22 +46,23 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 	private V currentLeftValue;
 	private V leftPeekValue;
 	private boolean closed = false;
+	private final boolean leftOuter; // new: emit left rows even when no matching right
 
-	InnerMergeJoinIterator(PeekMarkIterator<BindingSet> leftIterator, PeekMarkIterator<BindingSet> rightIterator,
-	                       Comparator<V> cmp, Function<BindingSet, V> valueFunction, QueryEvaluationContext context)
-			throws QueryEvaluationException {
+	InnerMergeJoinIterator(PeekMarkIterator<BindingSet> leftIterator, PeekMarkIterator<BindingSet> rightIterator, Comparator<V> cmp, Function<BindingSet, V> valueFunction, QueryEvaluationContext context, boolean leftOuter) throws QueryEvaluationException {
 
 		this.leftIterator = leftIterator;
 		this.rightIterator = rightIterator;
 		this.cmp = cmp;
 		this.valueFunction = valueFunction;
 		this.context = context;
+		this.leftOuter = leftOuter;
 	}
 
-	public static <V> CloseableIteration<BindingSet, QueryEvaluationException> getInstance(
-			QueryEvaluationStep leftPrepared,
-			QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp,
-			Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService) {
+	public static <V> CloseableIteration<BindingSet, QueryEvaluationException> getInstance(QueryEvaluationStep leftPrepared, QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp, Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService) {
+		return getInstance(leftPrepared, preparedRight, bindings, cmp, value, context, executorService, false);
+	}
+
+	public static <V> CloseableIteration<BindingSet, QueryEvaluationException> getInstance(QueryEvaluationStep leftPrepared, QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp, Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService, boolean leftOuter) {
 		CloseableIteration<BindingSet, QueryEvaluationException> leftIter = leftPrepared.evaluate(bindings);
 		if (leftIter == QueryEvaluationStep.EMPTY_ITERATION) {
 			return leftIter;
@@ -77,10 +78,19 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 			}
 		}
 
-		return new InnerMergeJoinIterator<>(new PeekMarkIterator<>(leftIter), new PeekMarkIterator<>(rightIter), cmp, value, context);
+		return new InnerMergeJoinIterator<>(new PeekMarkIterator<>(leftIter), new PeekMarkIterator<>(rightIter), cmp, value, context, leftOuter);
 	}
 
 	private BindingSet join(BindingSet left, BindingSet right, boolean createNewBindingSet) {
+		// allow right to be null which means "no bindings from right" (left-outer case)
+		if (right == null) {
+			if (!createNewBindingSet && left instanceof MutableBindingSet) {
+				return left;
+			} else {
+				return context.createBindingSet(left);
+			}
+		}
+
 		MutableBindingSet joined;
 		if (!createNewBindingSet && left instanceof MutableBindingSet) {
 			joined = (MutableBindingSet) left;
@@ -135,11 +145,24 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 					return;
 				} else if (compare < 0) {
 					// leftIterator is behind, or in other words, rightIterator is ahead
-					if (leftIterator.hasNext()) {
-						lessThan();
-					} else {
-						close();
+					if (leftOuter) {
+						// emit left row even though there's no matching right
+						next = join(currentLeft, null, true);
+						if (leftIterator.hasNext()) {
+							// advance left for subsequent processing (maintain duplicate handling)
+							lessThan();
+						} else {
+							// no more left rows, close after delivering this result
+							close();
+						}
 						return;
+					} else {
+						if (leftIterator.hasNext()) {
+							lessThan();
+						} else {
+							close();
+							return;
+						}
 					}
 				} else {
 					// rightIterator is behind, skip forward
@@ -154,6 +177,17 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 				leftPeekValue = null;
 				currentLeftValueAndPeekEquals = -1;
 			} else {
+				// if leftOuter is true we may still need to emit remaining left rows that have no matching right
+				if (leftOuter && currentLeft != null) {
+					// right is exhausted and not resettable; emit currentLeft and then advance through remaining left rows
+					next = join(currentLeft, null, true);
+					if (leftIterator.hasNext()) {
+						lessThan();
+					} else {
+						close();
+					}
+					return;
+				}
 				close();
 				return;
 			}
@@ -235,7 +269,6 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 		}
 
 		calculateNext();
-
 		return next != null;
 	}
 
