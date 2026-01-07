@@ -256,9 +256,7 @@ public class KvinPartitioned implements Kvin {
 						propertyValueCount = 1;
 					} else {
 						// omit duplicates in terms of id, time, and seqNr
-						isDuplicate = prevTuple != null
-								&& prevTuple.time == candidate.time
-								&& prevTuple.seqNr == candidate.seqNr;
+						isDuplicate = prevTuple.time == candidate.time && prevTuple.seqNr == candidate.seqNr;
 					}
 
 					if (min.getSecond().hasNext()) {

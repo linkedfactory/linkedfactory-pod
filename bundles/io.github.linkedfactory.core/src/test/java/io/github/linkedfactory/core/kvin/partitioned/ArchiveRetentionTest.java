@@ -1,6 +1,7 @@
 package io.github.linkedfactory.core.kvin.partitioned;
 
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.util.KvinTupleGenerator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -66,7 +67,7 @@ public class ArchiveRetentionTest {
 		kvinPartitioned.runArchival();
 
 		assertEquals(2, kvinPartitioned.fetch(item3, property, Kvin.DEFAULT_CONTEXT,
-				Long.MAX_VALUE, now, 2, 0, null).toList().size());
+				KvinTuple.TIME_MAX_VALUE, now, 2, 0, null).toList().size());
 		assertEquals(2, kvinPartitioned.fetch(item3, property, Kvin.DEFAULT_CONTEXT,
 				now - weekDuration * 2, 0, 2, 0, null).toList().size());
 
@@ -76,7 +77,7 @@ public class ArchiveRetentionTest {
 		kvinPartitioned.runArchival();
 
 		assertEquals(2, kvinPartitioned.fetch(item3, property, Kvin.DEFAULT_CONTEXT,
-				 Long.MAX_VALUE, now, 2, 0, null).toList().size());
+				KvinTuple.TIME_MAX_VALUE, now, 2, 0, null).toList().size());
 		assertEquals(0, kvinPartitioned.fetch(item3, property, Kvin.DEFAULT_CONTEXT,
 				now - weekDuration * 2, 0, 2, 0, null).toList().size());
 

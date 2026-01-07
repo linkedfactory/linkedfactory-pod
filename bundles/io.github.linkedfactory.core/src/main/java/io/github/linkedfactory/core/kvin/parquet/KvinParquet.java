@@ -1403,7 +1403,7 @@ public class KvinParquet implements Kvin {
 
 	protected void cleanUpInternal() throws IOException {
 		if (this.retentionPeriod != null && Files.exists(Paths.get(archiveLocation))) {
-			log.info("remove parquet files older than {} days", retentionPeriod.toDays());
+			log.info("Cleaning up archive files older than {} days", retentionPeriod.toDays());
 			var maxAge = Instant.now().minus(retentionPeriod).atZone(ZoneId.of("UTC"));
 
 			java.nio.file.Path metaPath = Paths.get(archiveLocation, "meta.properties");
@@ -1423,9 +1423,11 @@ public class KvinParquet implements Kvin {
 			var metaNew = new Properties();
 			var metaChanged = false;
 			for (var yearEntry : meta.entrySet()) {
-				// exclude year folders that newer than max age
+				// exclude year folders that are newer than max age
 				int year = Integer.parseInt(yearEntry.getKey().toString());
-				if (year > maxAge.get(ChronoField.YEAR)) {
+				if (year > maxAge.getYear()) {
+					// keep existing entry
+					metaNew.put(yearEntry.getKey(), yearEntry.getValue());
 					continue;
 				}
 
@@ -1453,7 +1455,7 @@ public class KvinParquet implements Kvin {
 						// exclude week folders that are newer than max age
 						int week = Integer.parseInt(weekEntry.getKey().toString());
 
-						if (year == maxAge.get(ChronoField.YEAR) && week > maxAge.get(ChronoField.ALIGNED_WEEK_OF_YEAR)) {
+						if (year == maxAge.getYear() && week > maxAge.get(ChronoField.ALIGNED_WEEK_OF_YEAR)) {
 							long[] minMaxWeek = splitRange((String) yearEntry.getValue());
 							minMaxYearNew[0] = Math.min(minMaxWeek[0], minMaxYearNew[0]);
 							minMaxYearNew[1] = Math.max(minMaxWeek[1], minMaxYearNew[1]);
@@ -1467,20 +1469,34 @@ public class KvinParquet implements Kvin {
 
 						var weekFolder = yearFolder.resolve(weekEntry.getKey().toString());
 						if (Files.exists(weekFolder)) {
+							log.info("Deleting archive week folder: {}", weekFolder);
+
 							// recursively delete all data files within week folder
 							try (var paths = Files.walk(weekFolder)) {
 								paths.sorted(Comparator.reverseOrder()).forEach(p -> {
 									try {
 										Files.delete(p);
 									} catch (IOException e) {
-										log.error("Error while deleting archive file or folder", p);
+										log.error("Error while deleting archive file or folder: {}", p);
 									}
 								});
 							}
 						}
 					}
-					if (yearMeta.isEmpty()) {
-						Files.delete(yearFolder);
+
+					if (yearMetaNew.isEmpty()) {
+						// delete year folder
+						log.info("Deleting archive year folder: {}", yearFolder);
+						// recursively delete all data files within year folder
+						try (var paths = Files.walk(yearFolder)) {
+							paths.sorted(Comparator.reverseOrder()).forEach(p -> {
+								try {
+									Files.delete(p);
+								} catch (IOException e) {
+									log.error("Error while deleting archive file or folder: {}", p);
+								}
+							});
+						}
 						metaChanged = true;
 					} else {
 						if (yearChanged) {
