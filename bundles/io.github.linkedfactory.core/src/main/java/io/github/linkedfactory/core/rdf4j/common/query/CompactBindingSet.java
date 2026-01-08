@@ -65,23 +65,6 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	}
 
 	/**
-	 * Appends another list to the end of this list and returns a (possibly new)
-	 * head representing the result. This does not mutate the current nodes; it
-	 * creates new nodes only when necessary.
-	 *
-	 * @param data the list to append
-	 * @return a new list with {@code data} appended to this list
-	 */
-	public CompactBindingSet append(CompactBindingSet data) {
-		if (this.name == null) {
-			return data;
-		} else if (this.next == null) {
-			return copy(data);
-		}
-		return next.append(data);
-	}
-
-	/**
 	 * Create a shallow copy of this node with a different {@code next} pointer.
 	 * The contained {@link Value} is not cloned.
 	 *
