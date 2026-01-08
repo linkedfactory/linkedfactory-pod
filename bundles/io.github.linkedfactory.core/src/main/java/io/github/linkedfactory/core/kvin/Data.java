@@ -144,8 +144,7 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 	 * @return Stream of the data elements.
 	 */
 	public Stream<T> stream() {
-		Iterable<T> iterable = () -> iterator();
-		return StreamSupport.stream(iterable.spliterator(), false);
+		return StreamSupport.stream(this.spliterator(), false);
 	}
 
 	/**
