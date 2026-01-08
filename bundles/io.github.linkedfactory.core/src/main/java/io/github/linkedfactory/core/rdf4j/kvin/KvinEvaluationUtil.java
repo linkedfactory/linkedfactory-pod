@@ -16,6 +16,7 @@ import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.impl.NumericLiteral;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.MutableBindingSet;
@@ -234,16 +235,16 @@ public class KvinEvaluationUtil {
 						newBs.addBinding(predVar.getName(), currentPropertyValue);
 					}
 					if (time != null && !time.isConstant() && !baseBindings.hasBinding(time.getName())) {
-						newBs.addBinding(time.getName(), toRdfValue(tuple.time, vf));
+						newBs.addBinding(time.getName(), vf.createLiteral(tuple.time));
 					}
 					if (contextVar != null && !contextVar.isConstant()) {
 						newBs.addBinding(contextVar.getName(), contextValue[0]);
 					}
 					if (params.seqNr != null && pv.seqNrValue == null) {
-						newBs.addBinding(params.seqNr.getName(), toRdfValue(tuple.seqNr, vf));
+						newBs.addBinding(params.seqNr.getName(), vf.createLiteral(tuple.seqNr));
 					}
 					if (params.index != null && pv.indexValue == null) {
-						newBs.addBinding(params.index.getName(), toRdfValue(index, vf));
+						newBs.addBinding(params.index.getName(), vf.createLiteral(index));
 					}
 
 					return newBs;

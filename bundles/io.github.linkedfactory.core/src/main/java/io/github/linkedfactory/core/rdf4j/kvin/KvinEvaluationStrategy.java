@@ -97,9 +97,8 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
         }
 
         Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : null;
-        if (data instanceof KvinTuple) {
-            KvinTuple tuple = (KvinTuple) data;
-            Value predValue = DefaultEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
+        if (data instanceof KvinTuple tuple) {
+	        Value predValue = DefaultEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
             if (predValue != null) {
                 if (KVIN.VALUE.equals(predValue)) {
                     Var valueVar = stmt.getObjectVar();
@@ -124,11 +123,11 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
                     return compareAndBind(bs, valueVar, rdfValue);
                 } else if (KVIN.TIME.equals(predValue)) {
                     Var timeVar = stmt.getObjectVar();
-                    Value timeValue = Conversions.toRdfValue(tuple.time, vf);
+                    Value timeValue = vf.createLiteral(tuple.time);
                     return compareAndBind(bs, timeVar, timeValue);
                 } else if (KVIN.SEQNR.equals(predValue)) {
                     Var seqNrVar = stmt.getObjectVar();
-                    Value seqNrValue = Conversions.toRdfValue(tuple.seqNr, vf);
+                    Value seqNrValue = vf.createLiteral(tuple.seqNr);
                     return compareAndBind(bs, seqNrVar, seqNrValue);
                 }
             }
