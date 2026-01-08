@@ -572,7 +572,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         val encodedValue = encode(entry.value)
         val lock = lockFor(entry.item)
         readLock(lock) {
-          val prefix = toId(entry.item, entry.property, entry.context, true, null)
+          val prefix = toId(entry.item, entry.property, entry.context, generate = true, null)
           val key = new Array[Byte](prefix.length + Varint.calcLengthUnsigned(entry.time) +
             Varint.calcLengthUnsigned(entry.seqNr))
           val bb = ByteBuffer.wrap(key).order(BYTE_ORDER)
@@ -599,14 +599,14 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
     }
 
     val idsBatch = ids.createWriteBatch()
-    val batch = values.createWriteBatch()
+    var batch = values.createWriteBatch()
     activeWrites.incrementAndGet()
     try {
       entries.asScala.foreach { entry => // encode value first to circumvent problems with locks
         val encodedValue = encode(entry.value)
         val lock = lockFor(entry.item)
         readLock(lock) {
-          val prefix = toId(entry.item, entry.property, entry.context, true, idsBatch)
+          val prefix = toId(entry.item, entry.property, entry.context, generate = true, idsBatch)
           val key = new Array[Byte](prefix.length + Varint.calcLengthUnsigned(entry.time) +
             Varint.calcLengthUnsigned(entry.seqNr))
           val bb = ByteBuffer.wrap(key).order(BYTE_ORDER)
@@ -615,20 +615,52 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
           writeVarint(bb, entry.seqNr)
 
           batch.put(key, encodedValue)
+          // buffer tuples if entries are given via iterator
+          notifyTuples.foreach {
+            _.addOne(entry)
+          }
+
+          val flush = batch.size() > 1000000
+          if (flush) {
+            var writeIds: Future[_] = null
+            if (idsBatch.size() > 0) {
+              writeIds = executor.submit(() => {
+                ids.write(idsBatch, new WriteOptions().sync(true))
+              })
+            }
+
+            values.write(batch)
+            batch.close()
+            batch = values.createWriteBatch()
+
+            if (writeIds != null) {
+              writeIds.get()
+            }
+
+            // send notifications
+            notifyTuples match {
+              case Some(tuples) =>
+                tuples.foreach { entry =>
+                  for (l <- listeners.asScala) l.valueAdded(entry.item, entry.property, entry.context, entry.time, entry.seqNr, entry.value)
+                }
+                tuples.clear()
+            }
+          }
 
           // remove timed-out entries
           ttl(entry.item) map (asyncRemoveByTtl(values, prefix, _))
         }
-        // buffer tuples if entries are given via iterator
-        notifyTuples.foreach(_.addOne(entry))
       }
+
       var writeIds: Future[_] = null
       if (idsBatch.size() > 0) {
         writeIds = executor.submit(() => {
           ids.write(idsBatch, new WriteOptions().sync(true))
         })
       }
-      values.write(batch)
+      if (batch.size() > 0) {
+        values.write(batch)
+      }
       if (writeIds != null) {
         writeIds.get()
       }
