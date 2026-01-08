@@ -1,18 +1,15 @@
 package io.github.linkedfactory.core.rdf4j.common.query;
 
+import com.google.common.collect.Streams;
 import net.enilink.commons.iterator.WrappedIterator;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Set;
-import java.util.stream.Collectors;
-
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.query.AbstractBindingSet;
 import org.eclipse.rdf4j.query.Binding;
 import org.eclipse.rdf4j.query.BindingSet;
-import org.eclipse.rdf4j.query.impl.SimpleBinding;
 
-import com.google.common.collect.Streams;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * A binding set that is based on a given binding set while adding additional bindings without copying the existing ones.
@@ -23,7 +20,7 @@ import com.google.common.collect.Streams;
 public class CompositeBindingSet extends AbstractBindingSet {
 
     private final BindingSet other;
-    private final LinkedHashMap<String, Value> bindings;
+    private CompactBindingSet bindings;
 
     public CompositeBindingSet(BindingSet other) {
         this(other, 2);
@@ -32,25 +29,22 @@ public class CompositeBindingSet extends AbstractBindingSet {
     public CompositeBindingSet(BindingSet other, int capacity) {
         if (other instanceof CompositeBindingSet) {
             // this ensures that not multiple levels are nested and some kind of linked list is build
-            this.bindings = (LinkedHashMap<String, Value>) ((CompositeBindingSet) other).bindings.clone();
+            this.bindings = ((CompositeBindingSet) other).bindings;
             this.other = ((CompositeBindingSet) other).other;
         } else {
-            this.bindings = new LinkedHashMap<>(capacity);
+            this.bindings = CompactBindingSet.NULL;
             this.other = other;
         }
     }
 
     public void addBinding(String name, Value value) {
         assert !other.hasBinding(name) : "variable already bound: " + name;
-        this.bindings.put(name, value);
+        this.bindings = new CompactBindingSet(name, value, this.bindings);
     }
 
     @Override
     public Iterator<Binding> iterator() {
-        return WrappedIterator.create(other.iterator()).andThen(
-            WrappedIterator.create(this.bindings.entrySet().iterator())
-                .filterKeep(entry -> entry.getValue() != null)
-                .mapWith(entry -> new SimpleBinding(entry.getKey(), entry.getValue())));
+        return WrappedIterator.create(other.iterator()).andThen(this.bindings.iterator());
     }
 
     @Override
@@ -58,31 +52,27 @@ public class CompositeBindingSet extends AbstractBindingSet {
         if (bindings.isEmpty()) {
             return other.getBindingNames();
         }
-        return Streams.concat(other.getBindingNames().stream(), bindings.keySet().stream())
+        return Streams.concat(other.getBindingNames().stream(), bindings.getBindingNames().stream())
             .collect(Collectors.toSet());
     }
 
     @Override
     public Binding getBinding(String s) {
-        Binding b = other.getBinding(s);
+        Binding b =  bindings.getBinding(s);
         if (b != null) {
             return b;
         }
-        Value v = bindings.get(s);
-        if (v != null) {
-            return new SimpleBinding(s, v);
-        }
-        return null;
+        return other.getBinding(s);
     }
 
     @Override
     public boolean hasBinding(String s) {
-        return bindings.containsKey(s) || other.hasBinding(s);
+        return bindings.hasBinding(s) || other.hasBinding(s);
     }
 
     @Override
     public Value getValue(String s) {
-        Value v = bindings.get(s);
+        Value v = bindings.getValue(s);
         if (v != null) {
             return v;
         }

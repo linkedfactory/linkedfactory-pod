@@ -55,7 +55,7 @@ public abstract class Data<T extends Data<T>> implements Iterable<T> {
 		} else if (this.next == null) {
 			return copy(data);
 		}
-		return copy(next.append(data));
+		return next.append(data);
 	}
 
 	/**
