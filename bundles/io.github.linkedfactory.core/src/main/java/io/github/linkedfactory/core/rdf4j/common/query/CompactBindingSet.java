@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 Fraunhofer IWU.
+ * Copyright (c) 2026 Fraunhofer IWU.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -9,7 +9,7 @@
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUCompactBindingSet WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -20,24 +20,44 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import net.enilink.komma.core.URI;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.query.AbstractBindingSet;
 import org.eclipse.rdf4j.query.Binding;
 
 /**
- * A linked list of (property, value) pairs where properties are {@link URI}s
- * and values are arbitrary objects. Duplicate properties are explicitly
- * permitted.
- * 
- * This is inspired by RDF and the scala.xml.MetaData implementation.
+ * A compact, immutable-style linked list of (name, value) binding pairs.
+ * Duplicate names are explicitly permitted (so a name may occur multiple
+ * times). The list is implemented as a small singly-linked structure where
+ * each element holds a name, a value and a reference to the next element.
+ * <p>
+ * This class is inspired by RDF and the scala.xml.MetaData implementation but
+ * optimized for a small-footprint representation of query result bindings.
+ * <p>
+ * Notes:
+ * - The sentinel value {@link #NULL} represents an empty list and has all
+ * fields set to {@code null}.
+ * - Most modifying operations return a new head for the (possibly modified)
+ * list rather than mutating the existing nodes.
  */
 public class CompactBindingSet extends AbstractBindingSet implements Binding {
-	protected static final CompactBindingSet NULL = new CompactBindingSet(null, null, null);
+	/**
+	 * A sentinel representing the empty list. It contains no name or value and
+	 * its {@code next} reference is {@code null}.
+	 */
+	public static final CompactBindingSet NULL = new CompactBindingSet(null, null, null);
+
 	protected final String name;
 	protected final CompactBindingSet next;
 	protected final Value value;
 
+	/**
+	 * Create a new list element.
+	 *
+	 * @param name  the binding name for this element, may be {@code null} for the
+	 *              sentinel/empty element
+	 * @param value the RDF4J value associated with the name
+	 * @param next  the next list element (may be {@code null})
+	 */
 	public CompactBindingSet(String name, Value value, CompactBindingSet next) {
 		this.name = name;
 		this.value = value;
@@ -45,11 +65,12 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	}
 
 	/**
-	 * Appends a data list to this list and returns a new copy.
-	 * 
-	 * @param data
-	 *            The data list that should be appended
-	 * @return A new list with <code>data</code> at the end
+	 * Appends another list to the end of this list and returns a (possibly new)
+	 * head representing the result. This does not mutate the current nodes; it
+	 * creates new nodes only when necessary.
+	 *
+	 * @param data the list to append
+	 * @return a new list with {@code data} appended to this list
 	 */
 	public CompactBindingSet append(CompactBindingSet data) {
 		if (this.name == null) {
@@ -61,34 +82,33 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	}
 
 	/**
-	 * Create a copy of this data element.
-	 * 
-	 * @param next
-	 *            The new next element
-	 * @return A copy of this data element with a new next element.
+	 * Create a shallow copy of this node with a different {@code next} pointer.
+	 * The contained {@link Value} is not cloned.
+	 *
+	 * @param next the new next element
+	 * @return a copy of this node that references {@code next}
 	 */
-	public CompactBindingSet copy(CompactBindingSet next) {
+	protected CompactBindingSet copy(CompactBindingSet next) {
 		return new CompactBindingSet(this.name, this.value, next);
 	}
 
 	/**
-	 * Find the first data element within this list for the given property.
-	 * 
-	 * @param name
-	 *            The name
-	 * @return The data element for the given name or an empty data element
-	 *         if it was not found.
+	 * Find the first list element with the given name.
+	 *
+	 * @param name the binding name to search for (null-safe)
+	 * @return the first matching element or {@link #NULL} if no element matches
 	 */
 	public CompactBindingSet first(String name) {
 		if (name != null) {
-			if (name.equals(this.name)) {
-				return this;
-			}
-			if (next != null) {
-				return next.first(name);
+			CompactBindingSet candidate = this;
+			while (candidate != null) {
+				if (name.equals(candidate.name)) {
+					return candidate;
+				}
+				candidate = candidate.next;
 			}
 		}
-		return NULL();
+		return NULL;
 	}
 
 	@Override
@@ -112,18 +132,20 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	}
 
 	/**
-	 * Returns the property of this data element.
-	 * 
-	 * @return The property
+	 * Returns the name of this element. May be {@code null} for the empty
+	 * sentinel element.
+	 *
+	 * @return the binding name or {@code null}
 	 */
 	public String getName() {
 		return name;
 	}
 
 	/**
-	 * Returns the value of this data element.
-	 * 
-	 * @return The value
+	 * Returns the RDF4J value of this element. May be {@code null} for the
+	 * empty sentinel element.
+	 *
+	 * @return the value or {@code null}
 	 */
 	public Value getValue() {
 		return value;
@@ -131,8 +153,11 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 
 	@Override
 	public Iterator<Binding> iterator() {
-		return new Iterator<Binding>() {
-			CompactBindingSet next = name != null ? CompactBindingSet.this : null;
+		if (name == null) {
+			return Collections.emptyIterator();
+		}
+		return new Iterator<>() {
+			CompactBindingSet next = CompactBindingSet.this;
 			CompactBindingSet current = null;
 
 			@Override
@@ -146,7 +171,11 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 					throw new NoSuchElementException();
 				}
 				current = next;
-				next = current.next;
+				if (current.next.name == null) {
+					next = null;
+				} else {
+					next = current.next;
+				}
 				return current;
 			}
 
@@ -161,30 +190,21 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	}
 
 	/**
-	 * Returns a stream of the contained elements.
+	 * Returns a sequential {@link Stream} of the contained {@link Binding}s.
 	 *
-	 * @return Stream of the data elements.
+	 * @return a stream over the list elements
 	 */
 	public Stream<Binding> stream() {
 		return StreamSupport.stream(this.spliterator(), false);
 	}
 
 	/**
-	 * Return the next element.
+	 * Remove the first element with the given name and return the new head.
+	 * This method does not modify existing nodes in place; it creates copies
+	 * when necessary and returns the head of the resulting list.
 	 *
-	 * @return The next element or {@link #NULL()}
-	 */
-	public CompactBindingSet next() {
-		return next == null ? NULL() : next;
-	}
-
-	/**
-	 * Remove the first element with the given name.
-	 * 
-	 * @param name
-	 *            The name whose element should be removed
-	 * @return A copy of this data list where the first corresponding has been
-	 *         removed.
+	 * @param name the binding name to remove
+	 * @return the new head of the list after removal
 	 */
 	public CompactBindingSet removeFirst(String name) {
 		if (this.name == null || name == null) {
@@ -197,36 +217,16 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 		return newNext != next ? copy(newNext) : this;
 	}
 
-	/**
-	 * Remove the first element with the given name and value.
-	 * 
-	 * @param name
-	 *            The name whose element should be removed
-	 * @param value
-	 *            The value whose element should be removed
-	 * @return A copy of this data list where the first corresponding element has been
-	 *         removed.
-	 */
-	public CompactBindingSet removeFirst(String name, Object value) {
-		if (this.name == null || name == null || value == null) {
-			return this;
-		}
-		if (name.equals(this.name) && value.equals(this.value)) {
-			return next;
-		}
-		CompactBindingSet newNext = next == null ? null : next.removeFirst(name, value);
-		return newNext != next ? copy(newNext) : this;
-	}
-
 	@Override
 	public Set<String> getBindingNames() {
 		return stream().map(Binding::getName).collect(Collectors.toSet());
 	}
 
 	/**
-	 * Returns the size of this list.
-	 * 
-	 * @return The size of this list
+	 * Returns the number of elements in this list. The sentinel/empty element
+	 * has size 0.
+	 *
+	 * @return the size of the list
 	 */
 	public int size() {
 		if (name == null) {
@@ -238,7 +238,7 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	@Override
 	public String toString() {
 		StringBuilder sb = new StringBuilder("[");
-		for (Iterator<Binding> it = this.iterator(); it.hasNext();) {
+		for (Iterator<Binding> it = this.iterator(); it.hasNext(); ) {
 			Binding d = it.next();
 			sb.append("(").append(d.getName()).append(", ");
 			Object value = d.getValue();
@@ -249,9 +249,5 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 			}
 		}
 		return sb.append("]").toString();
-	}
-
-	protected CompactBindingSet NULL() {
-		return NULL;
 	}
 }

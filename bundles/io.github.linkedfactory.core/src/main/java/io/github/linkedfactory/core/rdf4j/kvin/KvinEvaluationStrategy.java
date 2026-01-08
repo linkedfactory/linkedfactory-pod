@@ -27,9 +27,9 @@ import org.eclipse.rdf4j.query.algebra.*;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryBindingSet;
 import org.eclipse.rdf4j.query.algebra.evaluation.QueryEvaluationStep;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolver;
+import org.eclipse.rdf4j.query.algebra.evaluation.impl.DefaultEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
 import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext.Minimal;
-import org.eclipse.rdf4j.query.algebra.evaluation.impl.StrictEvaluationStrategy;
 import org.eclipse.rdf4j.query.algebra.evaluation.iterator.HashJoinIteration;
 
 import java.io.ByteArrayOutputStream;
@@ -45,7 +45,7 @@ import java.util.stream.Stream;
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.compareAndBind;
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.findFirstFetch;
 
-public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
+public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
     static class InternalJsonFormatWriter extends JsonFormatWriter {
         InternalJsonFormatWriter(OutputStream outputStream) throws IOException {
             super(outputStream);
@@ -87,7 +87,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
 //        System.out.println("Stmt: " + stmt);
 
         final Var subjectVar = stmt.getSubjectVar();
-        final Value subjectValue = StrictEvaluationStrategy.getVarValue(subjectVar, bs);
+        final Value subjectValue = DefaultEvaluationStrategy.getVarValue(subjectVar, bs);
 
         if (subjectValue == null) {
             // this happens for patterns like (:subject :property [ <kvin:value> ?someValue ])
@@ -99,7 +99,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
         Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : null;
         if (data instanceof KvinTuple) {
             KvinTuple tuple = (KvinTuple) data;
-            Value predValue = StrictEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
+            Value predValue = DefaultEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
             if (predValue != null) {
                 if (KVIN.VALUE.equals(predValue)) {
                     Var valueVar = stmt.getObjectVar();
@@ -114,8 +114,6 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                             var writer = new InternalJsonFormatWriter(baos);
                             writer.writeValue(tuple.value);
                             writer.close();
-                        } catch (IOException e) {
-                            throw new QueryEvaluationException(e);
                         } catch (Exception e) {
                             throw new QueryEvaluationException(e);
                         }
@@ -135,7 +133,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
                 }
             }
         } else if (data instanceof Record) {
-            Value predValue = StrictEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
+            Value predValue = DefaultEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
             net.enilink.komma.core.URI predicate = KvinEvaluationUtil.toKommaUri(predValue);
             if (predicate != null) {
                 Record r = ((Record) data).first(predicate);
@@ -171,10 +169,10 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
         } else if (data instanceof Object[] || data instanceof List<?>) {
             List<?> list = data instanceof Object[] ? Arrays.asList((Object[]) data) : (List<?>) data;
             Var predVar = stmt.getPredicateVar();
-            Value predValue = StrictEvaluationStrategy.getVarValue(predVar, bs);
+            Value predValue = DefaultEvaluationStrategy.getVarValue(predVar, bs);
             if (predValue == null) {
                 Iterator<?> it = list.iterator();
-                Value objValue = StrictEvaluationStrategy.getVarValue(stmt.getObjectVar(), bs);
+                Value objValue = DefaultEvaluationStrategy.getVarValue(stmt.getObjectVar(), bs);
                 return new AbstractCloseableIteration<>() {
                     BindingSet next = null;
                     int i = 0;
@@ -283,7 +281,7 @@ public class KvinEvaluationStrategy extends StrictEvaluationStrategy {
             }
 
             if (!compareParams.isEmpty()) {
-                return bindingSet -> InnerMergeJoinIterator.getInstance(leftPrepared, rightPrepared, bindingSet,
+                return bindingSet -> MergeJoinIterator.getInstance(leftPrepared, rightPrepared, bindingSet,
                         new LongArrayComparator(compareSigns),
                         bs -> {
                             long[] values = new long[compareParams.size()];

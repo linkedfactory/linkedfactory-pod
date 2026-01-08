@@ -32,7 +32,7 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
  * @author Håvard M. Ottestad
  */
 @Experimental
-public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet, QueryEvaluationException> {
+public class MergeJoinIterator<V> implements CloseableIteration<BindingSet, QueryEvaluationException> {
 
 	private final PeekMarkIterator<BindingSet> leftIterator;
 	private final PeekMarkIterator<BindingSet> rightIterator;
@@ -48,7 +48,7 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 	private boolean closed = false;
 	private final boolean leftOuter; // new: emit left rows even when no matching right
 
-	InnerMergeJoinIterator(PeekMarkIterator<BindingSet> leftIterator, PeekMarkIterator<BindingSet> rightIterator, Comparator<V> cmp, Function<BindingSet, V> valueFunction, QueryEvaluationContext context, boolean leftOuter) throws QueryEvaluationException {
+	MergeJoinIterator(PeekMarkIterator<BindingSet> leftIterator, PeekMarkIterator<BindingSet> rightIterator, Comparator<V> cmp, Function<BindingSet, V> valueFunction, QueryEvaluationContext context, boolean leftOuter) throws QueryEvaluationException {
 
 		this.leftIterator = leftIterator;
 		this.rightIterator = rightIterator;
@@ -78,7 +78,12 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 			}
 		}
 
-		return new InnerMergeJoinIterator<>(new PeekMarkIterator<>(leftIter), new PeekMarkIterator<>(rightIter), cmp, value, context, leftOuter);
+		return new MergeJoinIterator<>(new PeekMarkIterator<>(leftIter), new PeekMarkIterator<>(rightIter), cmp, value, context, leftOuter);
+	}
+
+	private MutableBindingSet createBindingSet(BindingSet base) {
+		return context.createBindingSet(base);
+		// return new MutableCompositeBindingSet(base);
 	}
 
 	private BindingSet join(BindingSet left, BindingSet right, boolean createNewBindingSet) {
@@ -87,7 +92,7 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 			if (!createNewBindingSet && left instanceof MutableBindingSet) {
 				return left;
 			} else {
-				return context.createBindingSet(left);
+				return createBindingSet(left);
 			}
 		}
 
@@ -95,7 +100,7 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 		if (!createNewBindingSet && left instanceof MutableBindingSet) {
 			joined = (MutableBindingSet) left;
 		} else {
-			joined = context.createBindingSet(left);
+			joined = createBindingSet(left);
 		}
 
 		for (Binding binding : right) {
@@ -116,7 +121,6 @@ public class InnerMergeJoinIterator<V> implements CloseableIteration<BindingSet,
 			currentLeftValue = null;
 			leftPeekValue = null;
 			currentLeftValueAndPeekEquals = -1;
-
 		}
 
 		if (currentLeft == null) {

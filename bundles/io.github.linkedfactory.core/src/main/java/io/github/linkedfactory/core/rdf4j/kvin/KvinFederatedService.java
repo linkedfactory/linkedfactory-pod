@@ -163,7 +163,7 @@ public class KvinFederatedService implements FederatedService {
                 // it is important to keep incoming bindings as KvinService expects subject variables to be bound
                 // if only projected vars are returned, then nested joins of multiple service calls might fail
                 // as bindings are "lost"
-                CompositeBindingSet projected = new CompositeBindingSet(bindings, projectionVars.size());
+                CompositeBindingSet projected = new CompositeBindingSet(bindings);
                 BindingSet result = iter.next();
                 for (String var : projectionVars) {
                     Value v = result.getValue(var);
