@@ -47,8 +47,9 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	public static final CompactBindingSet NULL = new CompactBindingSet(null, null, null);
 
 	protected final String name;
-	protected final CompactBindingSet next;
 	protected final Value value;
+	protected final int size;
+	protected final CompactBindingSet next;
 
 	/**
 	 * Create a new list element.
@@ -62,17 +63,7 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 		this.name = name;
 		this.value = value;
 		this.next = next;
-	}
-
-	/**
-	 * Create a shallow copy of this node with a different {@code next} pointer.
-	 * The contained {@link Value} is not cloned.
-	 *
-	 * @param next the new next element
-	 * @return a copy of this node that references {@code next}
-	 */
-	protected CompactBindingSet copy(CompactBindingSet next) {
-		return new CompactBindingSet(this.name, this.value, next);
+		this.size = (name == null ? 0 : 1) + (next == null ? 0 : next.size);
 	}
 
 	/**
@@ -81,14 +72,21 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	 * @param name the binding name to search for (null-safe)
 	 * @return the first matching element or {@link #NULL} if no element matches
 	 */
-	public CompactBindingSet first(String name) {
+	public final CompactBindingSet first(String name) {
+		if (this.name == null) {
+			return NULL;
+		}
 		if (name != null) {
-			CompactBindingSet candidate = this;
-			while (candidate != null) {
-				if (name.equals(candidate.name)) {
-					return candidate;
+			if (name.equals(this.name)) {
+				return this;
+			}
+
+			CompactBindingSet next = this.next;
+			while (next != NULL) {
+				if (name.equals(next.name)) {
+					return next;
 				}
-				candidate = candidate.next;
+				next = next.next;
 			}
 		}
 		return NULL;
@@ -197,7 +195,7 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 			return next;
 		}
 		CompactBindingSet newNext = next == null ? null : next.removeFirst(name);
-		return newNext != next ? copy(newNext) : this;
+		return newNext != next ? new CompactBindingSet(this.name, this.value, newNext) : this;
 	}
 
 	@Override
@@ -211,11 +209,8 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	 *
 	 * @return the size of the list
 	 */
-	public int size() {
-		if (name == null) {
-			return 0;
-		}
-		return 1 + (next == null ? 0 : next.size());
+	public final int size() {
+		return size;
 	}
 
 	@Override
