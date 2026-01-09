@@ -12,6 +12,8 @@ public class Parameters implements Cloneable {
     public Var time;
     public Var seqNr;
     public Var index;
+	public Var value;
+	public Var valueJson;
 
     public static Parameters combine(Parameters params, Parameters defaultParams) {
         Parameters result = new Parameters();
@@ -23,6 +25,8 @@ public class Parameters implements Cloneable {
         result.time = valueOrDefault(params.time, defaultParams.time);
         result.seqNr = valueOrDefault(params.seqNr, defaultParams.seqNr);
         result.index = valueOrDefault(params.index, defaultParams.index);
+		result.value = valueOrDefault(params.value, defaultParams.value);
+		result.valueJson = valueOrDefault(params.valueJson, defaultParams.valueJson);
         return result;
     }
 

@@ -30,8 +30,7 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
-import static io.github.linkedfactory.core.rdf4j.common.Conversions.getLongValue;
-import static io.github.linkedfactory.core.rdf4j.common.Conversions.toRdfValue;
+import static io.github.linkedfactory.core.rdf4j.common.Conversions.*;
 import static io.github.linkedfactory.core.rdf4j.kvin.KvinEvaluationStrategy.getVarValue;
 
 public class KvinEvaluationUtil {
@@ -58,7 +57,7 @@ public class KvinEvaluationUtil {
 	}
 
 	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
-			ValueFactory vf,
+			KvinEvaluationStrategy strategy,
 			BindingSet bs, Parameters params, StatementPattern stmt, Dataset dataset) {
 		net.enilink.komma.core.URI item = toKommaUri(getVarValue(stmt.getSubjectVar(), bs));
 		if (item == null) {
@@ -76,13 +75,14 @@ public class KvinEvaluationUtil {
 		final Value predValue = getVarValue(predVar, bs);
 		final Var contextVar = stmt.getContextVar();
 		final Value contextValue = contextVar != null ? getVarValue(contextVar, bs) : null;
-		return evaluate(vf, List.of(item), predValue == null ? Collections.emptyList() : List.of(toKommaUri(predValue)),
+		return evaluate(strategy, List.of(item), predValue == null ? Collections.emptyList() : List.of(toKommaUri(predValue)),
 				toKommaUri(contextValue), pv, params, bs, stmt, dataset);
 	}
 
 	protected CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
-			ValueFactory vf, List<URI> items, List<URI> properties, URI context,
+			KvinEvaluationStrategy strategy, List<URI> items, List<URI> properties, URI context,
 			ParameterValues pv, Parameters params, BindingSet baseBindings, StatementPattern stmt, Dataset dataset) {
+		final ValueFactory vf = strategy.getValueFactory();
 		// the value of item is already known at this point
 		// if item is null then it would have to be fetched from the
 		// value store, i.e. all available items must be traversed
@@ -223,11 +223,29 @@ public class KvinEvaluationUtil {
 					}
 
 					CompositeBindingSet newBs = new CompositeBindingSet(baseBindings);
+					if (params.value != null) {
+						Value rdfValue = toRdfValue(tuple.value, vf);
+						if (pv.valueValue == null) {
+							newBs.addBinding(params.value.getName(), rdfValue);
+						} else if (!pv.valueValue.equals(rdfValue)) {
+							continue;
+						}
+					}
+					if (params.valueJson != null) {
+						Value rdfValue = toJsonRdfValue(tuple.value, vf);
+						if (pv.valueJsonValue == null) {
+							newBs.addBinding(params.valueJson.getName(), rdfValue);
+						} else if (!pv.valueJsonValue.equals(rdfValue)) {
+							continue;
+						}
+					}
 					if (!subjectVar.isConstant() && !baseBindings.hasBinding(subjectVar.getName())) {
 						Value subjectValue = toRdfValue(tuple.item, vf);
 						newBs.addBinding(subjectVar.getName(), subjectValue);
 					}
-					if (!objectVar.isConstant() && !baseBindings.hasBinding(objectVar.getName())) {
+					if (!objectVar.isConstant() && !baseBindings.hasBinding(objectVar.getName()) &&
+					// only create binding if var is named or it is referenced somewhere
+					(!objectVar.isAnonymous() || strategy.getScanner().hasReferences(objectVar))) {
 						Value objectValue = BNodeWithValue.create(tuple, false);
 						newBs.addBinding(objectVar.getName(), objectValue);
 					}
@@ -246,7 +264,6 @@ public class KvinEvaluationUtil {
 					if (params.index != null && pv.indexValue == null) {
 						newBs.addBinding(params.index.getName(), vf.createLiteral(index));
 					}
-
 					return newBs;
 				}
 				close();
@@ -271,7 +288,7 @@ public class KvinEvaluationUtil {
 	}
 
 	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
-			ValueFactory vf, List<BindingSet> bindingSets, Parameters params,
+			KvinEvaluationStrategy strategy, List<BindingSet> bindingSets, Parameters params,
 			StatementPattern stmt, Dataset dataset) {
 		final Var subjectVar = stmt.getSubjectVar();
 		final Var predVar = stmt.getPredicateVar();
@@ -356,11 +373,11 @@ public class KvinEvaluationUtil {
 							}
 
 							if (it == null) {
-								it = evaluate(vf, items, properties,
+								it = evaluate(strategy, items, properties,
 										toKommaUri(contextValue), pv, params, baseBindings, stmt, dataset);
 							} else {
 								final ParameterValues finalPv = pv;
-								iterators.add(new AsyncIterator<>(() -> evaluate(vf, items, properties,
+								iterators.add(new AsyncIterator<>(() -> evaluate(strategy, items, properties,
 										toKommaUri(contextValue), finalPv, params, baseBindings, stmt, dataset),
 										executorService));
 							}
@@ -404,6 +421,8 @@ public class KvinEvaluationUtil {
 		final Value seqNrValue;
 		final Value indexValue;
 		final Value timeValue;
+		final Value valueValue;
+		final Value valueJsonValue;
 
 		ParameterValues(Parameters params, BindingSet bs) {
 			fromValue = getVarValue(params.from, bs);
@@ -414,6 +433,8 @@ public class KvinEvaluationUtil {
 			seqNrValue = getVarValue(params.seqNr, bs);
 			indexValue = getVarValue(params.index, bs);
 			timeValue = getVarValue(params.time, bs);
+			valueValue = getVarValue(params.value, bs);
+			valueJsonValue = getVarValue(params.valueJson, bs);
 		}
 
 		boolean hasRequiredParameters(Parameters params) {

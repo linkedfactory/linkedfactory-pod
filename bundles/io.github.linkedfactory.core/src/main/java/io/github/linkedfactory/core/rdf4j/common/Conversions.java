@@ -1,22 +1,65 @@
 package io.github.linkedfactory.core.rdf4j.common;
 
 import io.github.linkedfactory.core.kvin.Record;
+import io.github.linkedfactory.core.kvin.util.JsonFormatWriter;
+import io.github.linkedfactory.core.rdf4j.kvin.KvinEvaluationStrategy;
 import net.enilink.komma.core.URI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.query.QueryEvaluationException;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public class Conversions {
+	static class InternalJsonFormatWriter extends JsonFormatWriter {
+		InternalJsonFormatWriter(OutputStream outputStream) throws IOException {
+			super(outputStream);
+		}
+
+		@Override
+		protected void initialStartObject() {
+			// do nothing
+		}
+
+		@Override
+		protected void writeValue(Object value) throws IOException {
+			super.writeValue(value);
+		}
+
+		@Override
+		public void end() throws IOException {
+			// do nothing
+		}
+	}
 
 	public static long getLongValue(Value v, long defaultValue) {
 		if (v instanceof Literal) {
 			return ((Literal) v).longValue();
 		}
 		return defaultValue;
+	}
+
+	public static Value toJsonRdfValue(Object value, ValueFactory vf) throws QueryEvaluationException {
+		if (value instanceof Record || value instanceof Object[] || value instanceof URI) {
+			var baos = new ByteArrayOutputStream();
+			try {
+				var writer = new InternalJsonFormatWriter(baos);
+				writer.writeValue(value);
+				writer.close();
+			} catch (Exception e) {
+				throw new QueryEvaluationException(e);
+			}
+			return vf.createLiteral(baos.toString(StandardCharsets.UTF_8));
+		} else {
+			return Conversions.toRdfValue(value, vf);
+		}
 	}
 
 	public static Value toRdfValue(Object value, ValueFactory vf) {

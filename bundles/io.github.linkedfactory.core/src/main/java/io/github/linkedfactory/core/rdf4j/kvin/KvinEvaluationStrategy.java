@@ -46,27 +46,6 @@ import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.compareAnd
 import static io.github.linkedfactory.core.rdf4j.common.query.Helpers.findFirstFetch;
 
 public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
-    static class InternalJsonFormatWriter extends JsonFormatWriter {
-        InternalJsonFormatWriter(OutputStream outputStream) throws IOException {
-            super(outputStream);
-        }
-
-        @Override
-        protected void initialStartObject() {
-            // do nothing
-        }
-
-        @Override
-        protected void writeValue(Object value) throws IOException {
-            super.writeValue(value);
-        }
-
-        @Override
-        public void end() throws IOException {
-            // do nothing
-        }
-    }
-
     final Kvin kvin;
     final ParameterScanner scanner;
     final ValueFactory vf;
@@ -106,20 +85,7 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
                     return compareAndBind(bs, valueVar, rdfValue);
                 } else if (KVIN.VALUE_JSON.equals(predValue)) {
                     Var valueVar = stmt.getObjectVar();
-                    Value rdfValue;
-                    if (tuple.value instanceof Record || tuple.value instanceof Object[] || tuple.value instanceof URI) {
-                        var baos = new ByteArrayOutputStream();
-                        try {
-                            var writer = new InternalJsonFormatWriter(baos);
-                            writer.writeValue(tuple.value);
-                            writer.close();
-                        } catch (Exception e) {
-                            throw new QueryEvaluationException(e);
-                        }
-                        rdfValue = vf.createLiteral(baos.toString(StandardCharsets.UTF_8));
-                    } else {
-                        rdfValue = Conversions.toRdfValue(tuple.value, vf);
-                    }
+                    Value rdfValue = Conversions.toJsonRdfValue(tuple.value, vf);
                     return compareAndBind(bs, valueVar, rdfValue);
                 } else if (KVIN.TIME.equals(predValue)) {
                     Var timeVar = stmt.getObjectVar();
@@ -225,7 +191,7 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
 
             if (subjectValue != null && subjectValue.isIRI()) {
                 Parameters params = scanner.getParameters(stmt.getObjectVar());
-                return new KvinEvaluationUtil(kvin, executorService).evaluate(vf, bs, params == null ? new Parameters() : params, stmt, dataset);
+                return new KvinEvaluationUtil(kvin, executorService).evaluate(KvinEvaluationStrategy.this, bs, params == null ? new Parameters() : params, stmt, dataset);
             }
         }
         return new EmptyIteration<>();
@@ -400,18 +366,18 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
             }
         }
 
-        @Override
-        public int compare(long[] a, long[] b) {
-            for (int i = 0; i < a.length; i++) {
-                if (i >= b.length) {
-                    return 1;
-                }
-                int diff = signs[i] * Long.compare(a[i], b[i]);
-                if (diff != 0) {
-                    return diff;
-                }
-            }
-            return 0;
-        }
+	    @Override
+	    public final int compare(long[] a, long[] b) {
+		    int max = Math.min(Math.min(a.length, b.length), signs.length);
+		    for (int i = 0; i < max; i++) {
+			    long av = a[i];
+			    long bv = b[i];
+			    if (av == bv) continue;
+			    // s == 1 => ascending, s == -1 => descending
+			    int s = signs[i];
+			    return av < bv ? -s : s;
+		    }
+		    return 0;
+	    }
     }
 }

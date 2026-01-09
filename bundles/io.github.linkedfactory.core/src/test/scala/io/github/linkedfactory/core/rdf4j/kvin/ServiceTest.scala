@@ -17,7 +17,8 @@ package io.github.linkedfactory.core.rdf4j.kvin
 
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
-import net.enilink.komma.core.URIs
+import io.github.linkedfactory.core.rdf4j.common.Conversions
+import net.enilink.komma.core.{URI, URIs}
 import net.enilink.vocab.rdf.RDF
 import org.eclipse.rdf4j.model.Literal
 import org.eclipse.rdf4j.query.QueryLanguage
@@ -44,7 +45,7 @@ class ServiceTest {
   var repository: Repository = _
 
   @Test
-  def basicTest {
+  def basicTest() {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
@@ -73,14 +74,14 @@ class ServiceTest {
         Assert.assertEquals(itemValue.asInstanceOf[Double],
           bs.getValue("value").asInstanceOf[Literal].doubleValue, 0.001)
       }
-      r.close
+      r.close()
     } finally {
-      conn.close
+      conn.close()
     }
   }
 
   @Test
-  def recordTest {
+  def recordTest() {
     val data = addRecords(2, 10)
 
     val conn = repository.getConnection
@@ -113,14 +114,14 @@ class ServiceTest {
           .first(URIs.createURI("p:nested")).getValue.asInstanceOf[Double],
           bs.getValue("value").asInstanceOf[Literal].doubleValue, 0.001)
       }
-      r.close
+      r.close()
     } finally {
-      conn.close
+      conn.close()
     }
   }
 
   @Test
-  def jsonTest {
+  def jsonTest() {
     val data = addRecords(2, 10)
 
     val conn = repository.getConnection
@@ -147,22 +148,17 @@ class ServiceTest {
 
         val itemValue = dataByItemAndTime(item)(time).head.value
 
-        val baos = new ByteArrayOutputStream();
-        val writer = new KvinEvaluationStrategy.InternalJsonFormatWriter(baos);
-        writer.writeValue(itemValue)
-        writer.close()
-
-        Assert.assertEquals(baos.toString(StandardCharsets.UTF_8),
-          bs.getValue("record").asInstanceOf[Literal].getLabel())
+        val expected = Conversions.toJsonRdfValue(itemValue, vf)
+        Assert.assertEquals(expected, bs.getValue("record"))
       }
-      r.close
+      r.close()
     } finally {
-      conn.close
+      conn.close()
     }
   }
 
   @Test
-  def arrayTest {
+  def arrayTest() {
     val data = addArrays(2, 10)
 
     val conn = repository.getConnection
@@ -198,14 +194,14 @@ class ServiceTest {
           .first(URIs.createURI("p:nested")).getValue.asInstanceOf[Double],
           bs.getValue("v3").asInstanceOf[Literal].doubleValue, 0.001)
       }
-      r.close
+      r.close()
     } finally {
-      conn.close
+      conn.close()
     }
   }
 
   @Test
-  def testLimit {
+  def testLimit() {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
@@ -238,16 +234,16 @@ class ServiceTest {
           }
           Assert.assertFalse(r.hasNext)
         } finally {
-          r.close
+          r.close()
         }
       }
     } finally {
-      conn.close
+      conn.close()
     }
   }
 
   @Test
-  def testJoin {
+  def testJoin() {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
@@ -279,12 +275,12 @@ class ServiceTest {
           bs.getValue("v2_value").asInstanceOf[Literal].doubleValue, 0.001)
       }
     } finally {
-      conn.close
+      conn.close()
     }
   }
 
   @Test
-  def testJoinPreviousValue {
+  def testJoinPreviousValue() {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
@@ -323,11 +319,11 @@ class ServiceTest {
       Assert.assertTrue("Expected values should all be returned by query",
         expectedItem1Values.isEmpty)
     } finally {
-      conn.close
+      conn.close()
     }
   }
 
-  def itemUri(nr: Int) = URIs.createURI("http://example.org/item-" + nr)
+  def itemUri(nr: Int): URI = URIs.createURI("http://example.org/item-" + nr)
 
   def addData(items: Int, values: Int): List[KvinTuple] = {
     val rand = new Random(seed)
@@ -380,18 +376,18 @@ class ServiceTest {
   }
 
   @Before
-  def init {
+  def init() {
     createStore
     createRepository
   }
 
-  def createStore {
+  def createStore() {
     storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis + "-" + Random.nextInt(1000) + "/")
-    storeDirectory.deleteOnExit
+    storeDirectory.deleteOnExit()
     store = new KvinLevelDb(storeDirectory)
   }
 
-  def createRepository {
+  def createRepository() {
     val memoryStore = new MemoryStore
     val sailRepository = new SailRepository(memoryStore)
 
@@ -409,23 +405,23 @@ class ServiceTest {
       }
     })
 
-    sailRepository.init
+    sailRepository.init()
     this.repository = sailRepository
   }
 
   @After
-  def closeRepository {
-    repository.shutDown
+  def closeRepository() {
+    repository.shutDown()
   }
 
   @After
-  def closeStore {
-    store.close
+  def closeStore() {
+    store.close()
     store = null
     deleteDirectory(storeDirectory.toPath)
   }
 
-  def deleteDirectory(dir: Path) {
+  def deleteDirectory(dir: Path) : Unit = {
     // delete store directory
     Files.walkFileTree(dir, new SimpleFileVisitor[Path]() {
       override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = {

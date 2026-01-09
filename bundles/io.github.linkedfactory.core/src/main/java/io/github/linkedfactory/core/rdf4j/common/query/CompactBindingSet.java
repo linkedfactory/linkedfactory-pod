@@ -72,16 +72,26 @@ public class CompactBindingSet extends AbstractBindingSet implements Binding {
 	 * @param name the binding name to search for (null-safe)
 	 * @return the first matching element or {@link #NULL} if no element matches
 	 */
+	@SuppressWarnings("StringEquality")
 	public final CompactBindingSet first(String name) {
 		if (this.name == null) {
 			return NULL;
 		}
 		if (name != null) {
-			if (name.equals(this.name)) {
+			if (name == this.name || name.equals(this.name)) {
 				return this;
 			}
 
 			CompactBindingSet next = this.next;
+			while (next != NULL) {
+				// try to optimize for the common case of string identity first
+				if (name == next.name) {
+					return next;
+				}
+				next = next.next;
+			}
+
+			next = this.next;
 			while (next != NULL) {
 				if (name.equals(next.name)) {
 					return next;

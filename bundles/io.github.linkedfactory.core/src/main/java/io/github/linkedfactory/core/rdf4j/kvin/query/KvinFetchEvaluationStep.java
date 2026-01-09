@@ -29,12 +29,12 @@ public class KvinFetchEvaluationStep implements QueryEvaluationStep, BatchQueryE
 	@Override
 	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bs) {
 		return evalUtil
-				.evaluate(strategy.getValueFactory(), bs, fetch.params, fetch.getStatement(), context.getDataset());
+				.evaluate(strategy, bs, fetch.params, fetch.getStatement(), context.getDataset());
 	}
 
 	@Override
 	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
 		return evalUtil
-				.evaluate(strategy.getValueFactory(), bindingSets, fetch.params, fetch.getStatement(), context.getDataset());
+				.evaluate(strategy, bindingSets, fetch.params, fetch.getStatement(), context.getDataset());
 	}
 }

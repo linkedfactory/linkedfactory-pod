@@ -122,12 +122,11 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 			if (sp.getSubjectVar().hasValue() && KVIN.KVIN_IRI.equals(sp.getSubjectVar().getValue())) {
 				index.put(KVIN_GLOBAL_VAR, params);
 			}
+		} else if (KVIN.VALUE.equals(pValue)) {
+			createParameters(sp.getSubjectVar()).value = o;
+		} else if (KVIN.VALUE_JSON.equals(pValue)) {
+			createParameters(sp.getSubjectVar()).valueJson = o;
 		} else {
-			if (KVIN.VALUE.equals(pValue) || KVIN.VALUE_JSON.equals(pValue)) {
-				// ensure that parameters are created if only kvin:value or kvin:valueJson is present
-				createParameters(sp.getSubjectVar());
-			}
-
 			// normal statement
 			remove = false;
 			referencedBy.computeIfAbsent(sp.getObjectVar(), v -> new ArrayList<>()).add(sp);
@@ -137,5 +136,9 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 		if (remove) {
 			sp.replaceWith(new SingletonSet());
 		}
+	}
+
+	public boolean hasReferences(Var v) {
+		return referencedBy.containsKey(v);
 	}
 }

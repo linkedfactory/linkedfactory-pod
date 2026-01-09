@@ -34,7 +34,7 @@ public class CompositeBindingSet extends AbstractBindingSet {
 		}
 	}
 
-	public void addBinding(String name, Value value) {
+	public final void addBinding(String name, Value value) {
 		this.bindings = new CompactBindingSet(name, value, this.bindings);
 	}
 
