@@ -5,6 +5,8 @@ import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 
 public interface KVIN {
 	String KVIN = "kvin:";
+	IRI KVIN_IRI = SimpleValueFactory.getInstance().createIRI(KVIN);
+
 	IRI FROM = SimpleValueFactory.getInstance().createIRI(KVIN + "from");
 	IRI TO = SimpleValueFactory.getInstance().createIRI(KVIN + "to");
 	IRI LIMIT = SimpleValueFactory.getInstance().createIRI(KVIN + "limit");

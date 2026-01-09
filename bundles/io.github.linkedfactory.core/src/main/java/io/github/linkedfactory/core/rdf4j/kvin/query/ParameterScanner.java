@@ -4,12 +4,15 @@ import io.github.linkedfactory.core.rdf4j.kvin.KVIN;
 import net.enilink.commons.util.Pair;
 import org.eclipse.rdf4j.common.exception.RDF4JException;
 import org.eclipse.rdf4j.model.Value;
+import org.eclipse.rdf4j.model.impl.SimpleIRI;
+import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.query.algebra.*;
 import org.eclipse.rdf4j.query.algebra.helpers.AbstractQueryModelVisitor;
 
 import java.util.*;
 
 public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> {
+	protected final static Var KVIN_GLOBAL_VAR = new Var("kvin:", KVIN.KVIN_IRI);
 
 	protected final Map<VariableScopeChange, Map<Var, Parameters>> parameterIndex = new IdentityHashMap<>();
 	protected final Map<Var, List<StatementPattern>> referencedBy = new HashMap<>();
@@ -58,25 +61,25 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 	}
 
 	public Parameters getParameters(StatementPattern pattern) {
+		Parameters globalParams = indexFor(pattern.getObjectVar(), false).get(KVIN_GLOBAL_VAR);
+		if (globalParams == null) {
+			globalParams = indexFor(pattern.getSubjectVar(), false).get(KVIN_GLOBAL_VAR);
+		}
 		Parameters subjectParams = indexFor(pattern.getSubjectVar(), false).get(pattern.getSubjectVar());
 		Parameters objectParams = indexFor(pattern.getObjectVar(), false).get(pattern.getObjectVar());
 		if (subjectParams == null) {
-			return objectParams;
+			return globalParams == null ? objectParams : Parameters.combine(objectParams, globalParams);
 		} else if (objectParams == null) {
-			return subjectParams;
+			return globalParams == null ? subjectParams : Parameters.combine(subjectParams, globalParams);
 		} else {
-			return Parameters.combine(objectParams, subjectParams);
+			var combined = Parameters.combine(objectParams, subjectParams);
+			return globalParams == null ? combined : Parameters.combine(combined, globalParams);
 		}
 	}
 
 	protected Parameters createParameters(Var subject) {
 		var index = indexFor(subject, true);
-		Parameters params = index.get(subject);
-		if (params == null) {
-			params = new Parameters();
-			index.put(subject, params);
-		}
-		return params;
+		return index.computeIfAbsent(subject, k -> new Parameters());
 	}
 
 	private void processGraphPattern(StatementPattern sp) throws RDF4JException {
@@ -114,9 +117,14 @@ public class ParameterScanner extends AbstractQueryModelVisitor<RDF4JException> 
 			Parameters params = createParameters(sp.getObjectVar());
 			var index = indexFor(sp.getSubjectVar(), true);
 			index.put(sp.getSubjectVar(), params);
+
+			// also index as global parameters if subject is kvin:
+			if (sp.getSubjectVar().hasValue() && KVIN.KVIN_IRI.equals(sp.getSubjectVar().getValue())) {
+				index.put(KVIN_GLOBAL_VAR, params);
+			}
 		} else {
 			if (KVIN.VALUE.equals(pValue) || KVIN.VALUE_JSON.equals(pValue)) {
-				// ensure that parameters are created if only kvin:value or kivn:valueJson is present
+				// ensure that parameters are created if only kvin:value or kvin:valueJson is present
 				createParameters(sp.getSubjectVar());
 			}
 
