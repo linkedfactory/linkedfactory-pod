@@ -629,12 +629,11 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
             }
 
             // send notifications
-            notifyTuples match {
-              case Some(tuples) =>
-                tuples.foreach { entry =>
-                  for (l <- listeners.asScala) l.valueAdded(entry.item, entry.property, entry.context, entry.time, entry.seqNr, entry.value)
-                }
-                tuples.clear()
+            notifyTuples.foreach { tuples =>
+              tuples.foreach { entry =>
+                for (l <- listeners.asScala) l.valueAdded(entry.item, entry.property, entry.context, entry.time, entry.seqNr, entry.value)
+              }
+              tuples.clear()
             }
           }
 
