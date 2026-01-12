@@ -16,6 +16,8 @@ import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.base.CoreDatatype;
+import org.eclipse.rdf4j.model.impl.NumericLiteral;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.Dataset;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
@@ -31,6 +33,20 @@ import static io.github.linkedfactory.core.rdf4j.common.Conversions.*;
 import static io.github.linkedfactory.core.rdf4j.kvin.KvinEvaluationStrategy.getVarValue;
 
 public class KvinEvaluationUtil {
+	/** Efficient long literal implementation for time field */
+	static class LongLiteral extends NumericLiteral {
+		final long value;
+
+		LongLiteral(long value) {
+			super(value, CoreDatatype.XSD.LONG);
+			this.value = value;
+		}
+
+		@Override
+		public final long longValue() {
+			return value;
+		}
+	}
 
 	private final Kvin kvin;
 	private final Supplier<ExecutorService> executorService;
@@ -250,7 +266,7 @@ public class KvinEvaluationUtil {
 						newBs.addBinding(predVar.getName(), currentPropertyValue);
 					}
 					if (time != null && !time.isConstant() && !baseBindings.hasBinding(time.getName())) {
-						newBs.addBinding(time.getName(), vf.createLiteral(tuple.time));
+						newBs.addBinding(time.getName(), new LongLiteral(tuple.time));
 					}
 					if (contextVar != null && !contextVar.isConstant()) {
 						newBs.addBinding(contextVar.getName(), contextValue[0]);
