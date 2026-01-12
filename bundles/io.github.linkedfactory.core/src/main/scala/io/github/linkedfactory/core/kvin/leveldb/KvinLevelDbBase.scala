@@ -32,33 +32,19 @@ import scala.util.matching.Regex
 trait KvinLevelDbBase {
   val LONG_BYTES: Int = java.lang.Long.SIZE / 8
   val BYTE_ORDER: ByteOrder = ByteOrder.BIG_ENDIAN
-  val ID_POOL_SIZE = 1000L
 
   val waitingForTTL: util.Set[ByteBuffer] = Collections.newSetFromMap[ByteBuffer](new ConcurrentHashMap[ByteBuffer, java.lang.Boolean])
   val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor
 
   abstract class StoreIterator[T](base: DBIterator) extends NiceIterator[T] {
     var open = true
-    var current: Option[T] = None
-    var initialized: Boolean = false
-
-    def init(): Unit = {}
+    var current: T = _
 
     override def hasNext: Boolean = {
-      if (!initialized) {
-        // prepare this iterator
-        try {
-          init()
-        } catch {
-          case t: Throwable => close(); throw t
-        }
-        initialized = true
-      }
-
-      if (current.isDefined) true
+      if (current != null) true
       else if (open && base.hasNext) {
         current = computeNext
-        if (current.isDefined) true else {
+        if (current != null) true else {
           close()
           false
         }
@@ -69,12 +55,12 @@ trait KvinLevelDbBase {
     }
 
     override def next: T = if (hasNext) {
-      val result = current.get
-      current = None
+      val result = current
+      current = null.asInstanceOf[T]
       result
     } else throw new NoSuchElementException
 
-    def computeNext: Option[T]
+    def computeNext: T
 
     override def close(): Unit = {
       if (open) {
