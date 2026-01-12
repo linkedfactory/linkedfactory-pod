@@ -6,6 +6,7 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.http.KvinHttp;
 import io.github.linkedfactory.core.rdf4j.aas.AasFederatedService;
 import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver;
+import io.github.linkedfactory.core.rdf4j.io.SPARQLResultsParquetWriterFactory;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinFederatedService;
 import io.github.linkedfactory.core.rdf4j.kvin.functions.DateTimeFunction;
 import net.enilink.komma.model.IModelSet;
@@ -14,6 +15,7 @@ import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedSe
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceResolverClient;
 import org.eclipse.rdf4j.query.algebra.evaluation.function.FunctionRegistry;
+import org.eclipse.rdf4j.query.resultio.TupleQueryResultWriterRegistry;
 import org.eclipse.rdf4j.repository.Repository;
 import org.osgi.service.component.annotations.*;
 
@@ -44,6 +46,9 @@ public class FederatedServiceComponent {
 
 	@Activate
 	void activate() {
+		// register Parquet SPARQL result writer
+		TupleQueryResultWriterRegistry.getInstance().add(new SPARQLResultsParquetWriterFactory());
+
 		// add custom SPARQL functions
 		FunctionRegistry.getInstance().add(new DateTimeFunction());
 
@@ -57,15 +62,15 @@ public class FederatedServiceComponent {
 					protected FederatedService createService(String serviceUrl)
 							throws QueryEvaluationException {
 						if (serviceUrl.startsWith("aas-api:")) {
-							return new AasFederatedService(serviceUrl.replaceFirst("^aas-api:", ""), () -> getExecutorService());
+							return new AasFederatedService(serviceUrl.replaceFirst("^aas-api:", ""), this::getExecutorService);
 						} else if (serviceUrl.equals("kvin:")) {
 							return new KvinFederatedService(kvin,
-									() -> getExecutorService(),
+									this::getExecutorService,
 									() -> contextProvider == null ? Kvin.DEFAULT_CONTEXT : contextProvider.getContext(),
 									false);
 						} else if (getKvinServiceUrl(serviceUrl).isPresent()) {
 							String url = getKvinServiceUrl(serviceUrl).get();
-							return new KvinFederatedService(new KvinHttp(url), () -> getExecutorService(),
+							return new KvinFederatedService(new KvinHttp(url), this::getExecutorService,
 									() -> contextProvider == null ? Kvin.DEFAULT_CONTEXT : contextProvider.getContext(),
 									true);
 						}
