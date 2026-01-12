@@ -1,6 +1,7 @@
 package io.github.linkedfactory.core.rdf4j.kvin.query;
 
 import java.util.LinkedHashSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -9,6 +10,7 @@ import io.github.linkedfactory.core.rdf4j.common.query.Fetch;
 import org.eclipse.rdf4j.query.algebra.QueryModelVisitor;
 import org.eclipse.rdf4j.query.algebra.StatementPattern;
 import org.eclipse.rdf4j.query.algebra.UnaryTupleOperator;
+import org.eclipse.rdf4j.query.algebra.Var;
 
 public class KvinFetch extends UnaryTupleOperator implements Fetch {
     final Parameters params;
@@ -30,6 +32,12 @@ public class KvinFetch extends UnaryTupleOperator implements Fetch {
         if (params.index != null) {
             names.add(params.index.getName());
         }
+        if (params.value != null) {
+            names.add(params.value.getName());
+        }
+        if (params.valueJson != null) {
+            names.add(params.valueJson.getName());
+        }
         if (! assured) {
             if (params.from != null) {
                 names.add(params.from.getName());
@@ -42,7 +50,7 @@ public class KvinFetch extends UnaryTupleOperator implements Fetch {
 
     @Override
     public Set<String> getBindingNames() {
-        Set<String> bindingNames = new LinkedHashSet(16);
+        Set<String> bindingNames = new LinkedHashSet<>(16);
         bindingNames.addAll(getArg().getBindingNames());
         addAdditionalBindingNames(bindingNames, false);
         return bindingNames;
@@ -50,7 +58,7 @@ public class KvinFetch extends UnaryTupleOperator implements Fetch {
 
     @Override
     public Set<String> getAssuredBindingNames() {
-        Set<String> assuredBindingNames = new LinkedHashSet(16);
+        Set<String> assuredBindingNames = new LinkedHashSet<>(16);
         assuredBindingNames.add(getStatement().getPredicateVar().getName());
         assuredBindingNames.add(getStatement().getObjectVar().getName());
         addAdditionalBindingNames(assuredBindingNames, true);
@@ -67,8 +75,7 @@ public class KvinFetch extends UnaryTupleOperator implements Fetch {
 
     Set<String> computeRequiredBindings() {
         return Stream.of(getStatement().getSubjectVar(), params.from, params.to, params.interval, params.aggregationFunction)
-            .filter(p -> p != null).map(p -> p.getName()).collect(
-            Collectors.toSet());
+            .filter(Objects::nonNull).map(Var::getName).collect(Collectors.toSet());
     }
 
     @Override

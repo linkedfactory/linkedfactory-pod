@@ -77,7 +77,7 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
 
         Object data = subjectValue instanceof HasValue ? ((HasValue) subjectValue).getValue() : null;
         if (data instanceof KvinTuple tuple) {
-	        Value predValue = DefaultEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
+            Value predValue = DefaultEvaluationStrategy.getVarValue(stmt.getPredicateVar(), bs);
             if (predValue != null) {
                 if (KVIN.VALUE.equals(predValue)) {
                     Var valueVar = stmt.getObjectVar();
@@ -298,7 +298,8 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
     }
 
     boolean useHashJoin(TupleExpr leftArg, TupleExpr rightArg) {
-        if (findFirstFetch(leftArg) != null) {
+        KvinFetch leftFetch = (KvinFetch) findFirstFetch(leftArg);
+        if (leftFetch != null) {
             KvinFetch rightFetch = rightArg instanceof KvinFetch ? (KvinFetch) rightArg : null;
             while (rightArg instanceof Join && rightFetch == null) {
                 if (((Join) rightArg).getLeftArg() instanceof KvinFetch) {
@@ -312,7 +313,13 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
                 // in case of projections with aggregates we just use the projected binding names
                 Set<String> leftAssured = leftArg instanceof Projection ? leftArg.getBindingNames() :
                         leftArg.getAssuredBindingNames();
-                return !rightFetch.getRequiredBindings().stream().anyMatch(required -> leftAssured.contains(required));
+                boolean useHashJoin = rightFetch.getRequiredBindings().stream().noneMatch(leftAssured::contains);
+
+                // join order could be also switched
+                if (useHashJoin) {
+                    Set<String> rightAssured = rightArg.getAssuredBindingNames();
+                    return leftFetch.getRequiredBindings().stream().noneMatch(rightAssured::contains);
+                }
             }
         }
         return false;
@@ -366,18 +373,18 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
             }
         }
 
-	    @Override
-	    public final int compare(long[] a, long[] b) {
-		    int max = Math.min(Math.min(a.length, b.length), signs.length);
-		    for (int i = 0; i < max; i++) {
-			    long av = a[i];
-			    long bv = b[i];
-			    if (av == bv) continue;
-			    // s == 1 => ascending, s == -1 => descending
-			    int s = signs[i];
-			    return av < bv ? -s : s;
-		    }
-		    return 0;
-	    }
+        @Override
+        public final int compare(long[] a, long[] b) {
+            int max = Math.min(Math.min(a.length, b.length), signs.length);
+            for (int i = 0; i < max; i++) {
+                long av = a[i];
+                long bv = b[i];
+                if (av == bv) continue;
+                // s == 1 => ascending, s == -1 => descending
+                int s = signs[i];
+                return av < bv ? -s : s;
+            }
+            return 0;
+        }
     }
 }

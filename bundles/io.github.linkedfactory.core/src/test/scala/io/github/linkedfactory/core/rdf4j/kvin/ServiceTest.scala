@@ -377,8 +377,8 @@ class ServiceTest {
 
   @Before
   def init() {
-    createStore
-    createRepository
+    createStore()
+    createRepository()
   }
 
   def createStore() {
