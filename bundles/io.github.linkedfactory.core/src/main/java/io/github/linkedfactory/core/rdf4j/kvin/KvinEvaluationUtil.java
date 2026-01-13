@@ -142,6 +142,10 @@ public class KvinEvaluationUtil {
 		Integer seqNrValueInt = pv.seqNrValue == null ? null : ((Literal) pv.seqNrValue).intValue();
 
 		final Var subjectVar = stmt.getSubjectVar();
+		final boolean addSubjectBinding = !subjectVar.isConstant() && !baseBindings.hasBinding(subjectVar.getName());
+		final boolean addObjectBinding = !objectVar.isConstant() && !baseBindings.hasBinding(objectVar.getName()) &&
+				// only create binding if var is named or it is referenced somewhere
+				(!objectVar.isAnonymous() || strategy.getScanner().hasReferences(objectVar));
 		final Var predVar = stmt.getPredicateVar();
 		final long beginFinal = begin, endFinal = end, limitFinal = limit;
 		final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<BindingSet, QueryEvaluationException>() {
@@ -252,13 +256,11 @@ public class KvinEvaluationUtil {
 							continue;
 						}
 					}
-					if (!subjectVar.isConstant() && !baseBindings.hasBinding(subjectVar.getName())) {
+					if (addSubjectBinding) {
 						Value subjectValue = toRdfValue(tuple.item, vf);
 						newBs.addBinding(subjectVar.getName(), subjectValue);
 					}
-					if (!objectVar.isConstant() && !baseBindings.hasBinding(objectVar.getName()) &&
-					// only create binding if var is named or it is referenced somewhere
-					(!objectVar.isAnonymous() || strategy.getScanner().hasReferences(objectVar))) {
+					if (addObjectBinding) {
 						Value objectValue = BNodeWithValue.create(tuple, false);
 						newBs.addBinding(objectVar.getName(), objectValue);
 					}
