@@ -84,7 +84,7 @@ public class BindingSetParquetWriter  {
 				PrimitiveType[] types = new PrimitiveType[this.bindingNames.size()];
 				for (int i = 0; i < this.bindingNames.size(); i++) {
 					Value value = this.bindingSet.getValue(this.bindingNames.get(i));
-					if (value.isLiteral()) {
+					if (value != null && value.isLiteral()) {
 						Literal literal = (Literal) value;
 						CoreDatatype datatype = literal.getCoreDatatype();
 						if (datatype.isXSDDatatype()) {

@@ -13,8 +13,9 @@ import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.base.CoreDatatype;
 import org.eclipse.rdf4j.query.BindingSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 
@@ -22,6 +23,8 @@ import java.util.List;
  * Parquet WriteSupport for RDF4J BindingSets.
  */
 public class BindingSetWriteSupport extends WriteSupport<BindingSet> {
+	private static final Logger log = LoggerFactory.getLogger(BindingSetWriteSupport.class);
+
 	final List<String> bindingNames;
 	final MessageType schema;
 	final PrimitiveType.PrimitiveTypeName[] fieldTypes;
@@ -58,7 +61,6 @@ public class BindingSetWriteSupport extends WriteSupport<BindingSet> {
 		rc.startMessage();
 		for (int i = 0; i < this.bindingNames.size(); i++) {
 			String name = this.bindingNames.get(i);
-			rc.startField(name, i);
 
 			PrimitiveType.PrimitiveTypeName fieldType = this.fieldTypes[i];
 
@@ -66,59 +68,92 @@ public class BindingSetWriteSupport extends WriteSupport<BindingSet> {
 			if (value != null) {
 				if (value.isLiteral()) {
 					Literal literal = (Literal) value;
+					boolean valueWritten = false;
 					CoreDatatype datatype = literal.getCoreDatatype();
 					if (datatype.isXSDDatatype()) {
 						switch ((CoreDatatype.XSD) datatype) {
 							case INTEGER:
 							case INT:
 								if (fieldType == PrimitiveType.PrimitiveTypeName.INT32) {
+									rc.startField(name, i);
 									rc.addInteger(literal.intValue());
+									rc.endField(name, i);
+									valueWritten = true;
+									break;
 								}
-								break;
+								// if the field is not INT32, we can still try LONG
 							case LONG:
 								if (fieldType == PrimitiveType.PrimitiveTypeName.INT64) {
+									rc.startField(name, i);
 									rc.addLong(literal.longValue());
+									rc.endField(name, i);
+									valueWritten = true;
+								} else if (fieldType == PrimitiveType.PrimitiveTypeName.DOUBLE) {
+									// LONG can also be stored as DOUBLE
+									rc.startField(name, i);
+									rc.addDouble(literal.doubleValue());
+									rc.endField(name, i);
+									valueWritten = true;
 								}
 								break;
 							case FLOAT:
 								if (fieldType == PrimitiveType.PrimitiveTypeName.FLOAT) {
+									rc.startField(name, i);
 									rc.addFloat(literal.floatValue());
+									rc.endField(name, i);
+									valueWritten = true;
+									break;
 								}
-								break;
+								// if the field is not FLOAT, we can still try DOUBLE
 							case DOUBLE:
 								if (fieldType == PrimitiveType.PrimitiveTypeName.DOUBLE) {
+									rc.startField(name, i);
 									rc.addDouble(literal.doubleValue());
+									rc.endField(name, i);
+									valueWritten = true;
 								}
 								break;
 							case BOOLEAN:
 								if (fieldType == PrimitiveType.PrimitiveTypeName.BOOLEAN) {
+									rc.startField(name, i);
 									rc.addBoolean(literal.booleanValue());
+									rc.endField(name, i);
+									valueWritten = true;
 								}
 								break;
 							case STRING:
 							default:
 								if (fieldType == PrimitiveType.PrimitiveTypeName.BINARY) {
-									rc.addBinary(Binary.fromReusedByteBuffer(
-											ByteBuffer.wrap(literal.stringValue().getBytes())));
+									rc.startField(name, i);
+									rc.addBinary(Binary.fromConstantByteArray(value.stringValue().getBytes()));
+									rc.endField(name, i);
+									valueWritten = true;
 								}
 								break;
 						}
-					} else {
+					}
+
+					if (! valueWritten) {
+						// fallback: store the string representation
 						if (fieldType == PrimitiveType.PrimitiveTypeName.BINARY) {
-							rc.addBinary(Binary.fromReusedByteBuffer(
-									ByteBuffer.wrap(literal.stringValue().getBytes())));
+							rc.startField(name, i);
+							rc.addBinary(Binary.fromConstantByteArray(value.stringValue().getBytes()));
+							rc.endField(name, i);
+						} else {
+							log.info("Can't store literal {} in field '{}' of type {}", value, name, fieldType.name());
 						}
 					}
 				} else {
 					// for IRIs, BNodes, and non-literal values, we just store the string representation
 					if (fieldType == PrimitiveType.PrimitiveTypeName.BINARY) {
-						rc.addBinary(Binary.fromReusedByteBuffer(
-								ByteBuffer.wrap(value.stringValue().getBytes())));
+						rc.startField(name, i);
+						rc.addBinary(Binary.fromConstantByteArray(value.stringValue().getBytes()));
+						rc.endField(name, i);
+					} else {
+						log.info("Can't store resource {} in field '{}' of type {}", value, name, fieldType.name());
 					}
 				}
 			}
-
-			rc.endField(name, i);
 		}
 		rc.endMessage();
 	}
