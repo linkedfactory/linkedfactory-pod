@@ -22,9 +22,9 @@ import java.util.List;
  * A SPARQL Results writer that writes results in Parquet format.
  */
 public class SPARQLResultsParquetWriter extends AbstractQueryResultWriter implements TupleQueryResultWriter {
-	static final long ROW_GROUP_SIZE_DATA = 1048576L; // 1 MB - 134217728L is Parquet Java default
-	static final int PAGE_SIZE = 8192; // 8 KB
-	static final int DICT_PAGE_SIZE = 1048576; // 1 MB
+	static final long ROW_GROUP_SIZE = 2 * 1024 * 1024; // 2 MB - 128 MB is Parquet Java default
+	static final int PAGE_SIZE = 1024 * 1024; // 1 MB
+	static final int DICT_PAGE_SIZE = 1024 * 1024; // 1 MB
 
 	final OutputStream out;
 	final OutputFile outFile;
@@ -67,7 +67,7 @@ public class SPARQLResultsParquetWriter extends AbstractQueryResultWriter implem
 				this.parquetWriter = BindingSetParquetWriter.builder(this.outFile)
 						.withBindingNames(this.bindingNames)
 						.withBindingSet(bindings)
-						.withRowGroupSize(ROW_GROUP_SIZE_DATA)
+						.withRowGroupSize(ROW_GROUP_SIZE)
 						.withPageSize(PAGE_SIZE)
 						.withDictionaryPageSize(DICT_PAGE_SIZE)
 						.withCompressionCodec(CompressionCodecName.SNAPPY)
