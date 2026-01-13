@@ -235,13 +235,16 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
             Parameters params = fetch.getParams();
             final List<String> compareParams = new ArrayList<>();
             final List<Integer> compareSigns = new ArrayList<>();
-            Var[] sortParams = new Var[]{params.index, params.time, params.seqNr};
-            for (int i = 0; i < sortParams.length; i++) {
-                var v = sortParams[i];
-                if (v != null && joinAttributesSet.contains(v.getName())) {
-                    compareParams.add(v.getName());
-                    // index is ascending, time and seqNr are descending
-                    compareSigns.add(i == 0 ? 1 : -1);
+            if ((params.value == null || !joinAttributesSet.contains(params.value.getName())
+                    && params.valueJson == null || !joinAttributesSet.contains(params.valueJson.getName()))) {
+                Var[] sortParams = new Var[]{params.index, params.time, params.seqNr};
+                for (int i = 0; i < sortParams.length; i++) {
+                    var v = sortParams[i];
+                    if (v != null && joinAttributesSet.contains(v.getName())) {
+                        compareParams.add(v.getName());
+                        // index is ascending, time and seqNr are descending
+                        compareSigns.add(i == 0 ? 1 : -1);
+                    }
                 }
             }
 
