@@ -263,7 +263,7 @@ public class CsvFormatParser {
 			doubleValue = Doubles.tryParse(cleanedValueStr);
 		}
 		if (doubleValue != null) {
-			if (DoubleMath.isMathematicalInteger(doubleValue)) {
+			if (DoubleMath.isMathematicalInteger(doubleValue) && !valueStr.contains(".")) {
 				value = doubleValue.longValue();
 			} else {
 				value = doubleValue;

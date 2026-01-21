@@ -116,4 +116,36 @@ public class CsvFormatParserTest {
 		assertFalse(tuples.hasNext());
 	}
 
+	@Test
+	public void shouldParseCsvDoubleValues() throws IOException {
+		String baseStr = "urn:base:";
+		// header: time,prop -> values 0.0 and 3.0 should be parsed as Double
+		String csv = String.join("\n",
+				"time,prop",
+				"123,0.0",
+				"124,3.0"
+		);
+		ByteArrayInputStream in = new ByteArrayInputStream(csv.getBytes());
+		CsvFormatParser csvParser = new CsvFormatParser(URIs.createURI(baseStr), ',', in);
+		IExtendedIterator<KvinTuple> tuples = csvParser.parse();
+		assertNotNull(tuples);
+
+		// first tuple -> value 0.0 as Double
+		assertTrue(tuples.hasNext());
+		KvinTuple t1 = tuples.next();
+		assertNotNull(t1);
+		assertTrue(t1.value instanceof Double);
+		assertEquals(0.0, ((Double) t1.value), 0.0);
+
+		// second tuple -> value 3.0 as Double
+		assertTrue(tuples.hasNext());
+		KvinTuple t2 = tuples.next();
+		assertNotNull(t2);
+		assertTrue(t2.value instanceof Double);
+		assertEquals(3.0, ((Double) t2.value), 0.0);
+
+		// no more tuples
+		assertFalse(tuples.hasNext());
+	}
+
 }
