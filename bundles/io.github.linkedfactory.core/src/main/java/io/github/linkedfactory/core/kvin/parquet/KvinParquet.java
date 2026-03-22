@@ -1204,11 +1204,11 @@ public class KvinParquet implements Kvin {
 								} else {
 									reader.close();
 								}
-							} catch (IOException e) {
-								log.warn("Error while loading data from parquet file {}", file);
+							} catch (Exception e) {
+								log.warn("Error while loading data. File {} will be omitted from results.", file);
 							}
 						}
-					} catch (IOException e) {
+					} catch (Exception e) {
 						log.warn("Error while loading files from folder {}", path);
 					}
 				}
@@ -1341,11 +1341,11 @@ public class KvinParquet implements Kvin {
 								propertyIds.add(currentPropertyId);
 							}
 							reader.close();
-						} catch (IOException e) {
-							log.warn("Error while loading data from parquet file {}", dataFile);
+						} catch (Exception e) {
+							log.warn("Error while loading data. File {} will be omitted from results.", dataFile);
 						}
 					}
-				} catch (IOException e) {
+				} catch (Exception e) {
 					log.warn("Error while loading files from folder {}", dataFolder);
 				}
 			}

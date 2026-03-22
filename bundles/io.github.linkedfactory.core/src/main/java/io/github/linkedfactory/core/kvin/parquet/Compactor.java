@@ -191,11 +191,15 @@ public class Compactor {
 			PriorityQueue<Pair<KvinRecord, IExtendedIterator<KvinRecord>>> nextRecords =
 					new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
 			for (java.nio.file.Path dataFile : dataFiles) {
-				IExtendedIterator<KvinRecord> it = createKvinRecordReader(new Path(dataFile.toString()), null);
-				if (it.hasNext()) {
-					nextRecords.add(new Pair<>(it.next(), it));
-				} else {
-					it.close();
+				try {
+					IExtendedIterator<KvinRecord> it = createKvinRecordReader(new Path(dataFile.toString()), null);
+					if (it.hasNext()) {
+						nextRecords.add(new Pair<>(it.next(), it));
+					} else {
+						it.close();
+					}
+				} catch (Exception e) {
+					log.error("Error while reading data file {}. Content is omitted from compaction.", dataFile, e);
 				}
 			}
 
