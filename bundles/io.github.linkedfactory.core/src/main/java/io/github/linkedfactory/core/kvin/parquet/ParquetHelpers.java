@@ -28,7 +28,6 @@ import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.apache.parquet.io.ColumnIOFactory;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.io.RecordReader;
-import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type.Repetition;
@@ -148,10 +147,8 @@ public class ParquetHelpers {
 									break;
 								}
 							}
-						} catch (IOException e) {
-							throw new UncheckedIOException(e);
 						} catch (Exception e) {
-							log.error("Error while reading next element", e);
+							log.error("Error while reading file {}. Data elements may be incomplete.", path, e);
 							close();
 							return false;
 						}
@@ -177,7 +174,7 @@ public class ParquetHelpers {
 					try {
 						r.close();
 					} catch (IOException e) {
-						throw new UncheckedIOException(e);
+						log.error("Closing file reader failed", e);
 					}
 				}
 			};
