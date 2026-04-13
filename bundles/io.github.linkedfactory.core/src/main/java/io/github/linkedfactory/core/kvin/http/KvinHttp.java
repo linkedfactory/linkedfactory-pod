@@ -30,12 +30,14 @@ import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.util.EntityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -202,8 +204,13 @@ public class KvinHttp implements Kvin {
             }
             response = this.httpClient.execute(request);
             HttpEntity entity = response.getEntity();
-            if (response.getStatusLine().getStatusCode() != 200) {
-                return NiceIterator.emptyIterator();
+            int status = response.getStatusLine().getStatusCode();
+            if (status != 200) {
+                if (status == 404) {
+                    return NiceIterator.emptyIterator();
+                }
+                String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
+                throw new RuntimeException("HTTP " + status + " while fetching values: " + body);
             }
             // converting json to kvin tuples
             // TODO directly read from stream with pooled HTTP client
@@ -262,8 +269,13 @@ public class KvinHttp implements Kvin {
             HttpGet httpGet = createHttpGet(getRequestUri.toString());
             HttpResponse response = this.httpClient.execute(httpGet);
             HttpEntity entity = response.getEntity();
-            if (response.getStatusLine().getStatusCode() != 200) {
-                return NiceIterator.emptyIterator();
+            int status = response.getStatusLine().getStatusCode();
+            if (status != 200) {
+                if (status == 404) {
+                    return NiceIterator.emptyIterator();
+                }
+                String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
+                throw new RuntimeException("HTTP " + status + " while fetching descendants: " + body);
             }
             // converting json to URI
             return new NiceIterator<>() {
@@ -329,8 +341,13 @@ public class KvinHttp implements Kvin {
             HttpGet httpGet = createHttpGet(getRequestUri.toString());
             HttpResponse response = this.httpClient.execute(httpGet);
             HttpEntity entity = response.getEntity();
-            if (response.getStatusLine().getStatusCode() != 200) {
-                return NiceIterator.emptyIterator();
+            int status = response.getStatusLine().getStatusCode();
+            if (status != 200) {
+                if (status == 404) {
+                    return NiceIterator.emptyIterator();
+                }
+                String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
+                throw new RuntimeException("HTTP " + status + " while fetching properties: " + body);
             }
             // converting json to URI
             return new NiceIterator<>() {

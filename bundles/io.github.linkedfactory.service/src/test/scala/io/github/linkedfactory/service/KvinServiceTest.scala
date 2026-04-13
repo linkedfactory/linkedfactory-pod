@@ -106,6 +106,23 @@ class KvinServiceTest {
     kvinService(req)
   }
 
+  private def responseBody(response: LiftResponse): String = response match {
+    case r: OutputStreamResponse =>
+      val rStream = new ByteArrayOutputStream()
+      r.out(rStream)
+      rStream.toString()
+    case r: InMemoryResponse =>
+      new String(r.data)
+    case _ =>
+      throw new RuntimeException("Invalid response type")
+  }
+
+  private def responseContentType(response: LiftResponse): String = response.toResponse match {
+    case r: OutputStreamResponse => r.headers.find(_._1.equalsIgnoreCase("Content-Type")).map(_._2).getOrElse("")
+    case r: InMemoryResponse => r.headers.find(_._1.equalsIgnoreCase("Content-Type")).map(_._2).getOrElse("")
+    case _ => ""
+  }
+
   val baseUrl = "http://foo.com/linkedfactory/values"
 
   def toReq(httpRequest: HttpServletRequest): Req = {
@@ -128,7 +145,12 @@ class KvinServiceTest {
       method = "POST"
       body_=(TestData.item1, "application/json")
     }
-    assertEquals(Full(200), kvinRest(toReq(postReq))().map(_.toResponse.code))
+    val postResponse = kvinRest(toReq(postReq))().map(_.toResponse).openOr(null)
+    assertEquals(200, postResponse.code)
+    val postBody = responseBody(postResponse)
+    assertTrue(postBody.contains("\"success\":true"))
+    assertTrue(postBody.contains("\"code\":\"OK\""))
+    assertTrue(postBody.contains("Values stored"))
 
     // support get request
     val getReq = new MockHttpServletRequest(baseUrl) {
@@ -139,13 +161,90 @@ class KvinServiceTest {
   }
 
   @Test
+  def explicitEnvelopeResponsesUseJsonContentType(): Unit = {
+    val postReq = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      body_=(TestData.item1, "application/json")
+    }
+    val postResponse = kvinRest(toReq(postReq))().map(_.toResponse).openOr(null)
+    assertEquals(200, postResponse.code)
+    assertTrue(responseContentType(postResponse).toLowerCase.contains("application/json"))
+
+    val invalidPostReq = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      body_=("""{ "item" : [false, 1]} }""", "application/json")
+    }
+    val invalidResponse = kvinRest(toReq(invalidPostReq))().map(_.toResponse).openOr(null)
+    assertEquals(400, invalidResponse.code)
+    assertTrue(responseContentType(invalidResponse).toLowerCase.contains("application/json"))
+  }
+
+  @Test
+  def deleteValuesReturnsExplicitSuccessEnvelope(): Unit = {
+    val postReq = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      body_=(TestData.itemSet, "application/json")
+    }
+    assertEquals(200, kvinRest(toReq(postReq))().map(_.toResponse).openOr(null).code)
+
+    val deleteReq = new MockHttpServletRequest(baseUrl) {
+      method = "DELETE"
+      parameters = List(("item", "http://example.org/item2"), ("property", "http://example.org/properties/p2"))
+      headers = (("Accept", "application/json" :: Nil) :: Nil).toMap
+    }
+
+    val response = kvinRest(toReq(deleteReq))().map(_.toResponse).openOr(null)
+    assertEquals(200, response.code)
+
+    val body = responseBody(response)
+    assertTrue(body.contains("\"success\":true"))
+    assertTrue(body.contains("\"code\":\"OK\""))
+    assertTrue(body.contains("\"deleted\":"))
+  }
+
+  @Test
   def postRequestInvalidData(): Unit = {
     // reject post request with invalid data
     val invalidPostReq = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       body_=("""{ "item" : [false, 1]} }""", "application/json")
     }
-    assertEquals(Full(400), kvinRest(toReq(invalidPostReq))().map(_.toResponse.code))
+    val response = kvinRest(toReq(invalidPostReq))().map(_.toResponse).openOr(null)
+    assertEquals(400, response.code)
+
+    val body = responseBody(response)
+    assertTrue(body.contains("\"code\":\"INVALID_PAYLOAD\""))
+    assertTrue(body.contains("\"message\":"))
+  }
+
+  @Test
+  def queryDataWithTooLargeLimitReturnsExplicitError(): Unit = {
+    val getReq = new MockHttpServletRequest(baseUrl) {
+      method = "GET"
+      parameters = List(("limit", "500001"))
+      headers = (("Accept", "application/json" :: Nil) :: Nil).toMap
+    }
+
+    val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
+    assertEquals(400, response.code)
+
+    val body = responseBody(response)
+    assertTrue(body.contains("\"code\":\"LIMIT_TOO_LARGE\""))
+    assertTrue(body.contains("maximum limit"))
+  }
+
+  @Test
+  def queryDataWithUnsupportedResponseTypeReturnsExplicitError(): Unit = {
+    val getReq = new MockHttpServletRequest(baseUrl) {
+      method = "GET"
+      headers = (("Accept", "application/xml" :: Nil) :: Nil).toMap
+    }
+
+    val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
+    assertEquals(400, response.code)
+
+    val body = responseBody(response)
+    assertTrue(body.contains("\"code\":\"UNSUPPORTED_RESPONSE_TYPE\""))
   }
 
   @Test
@@ -165,16 +264,7 @@ class KvinServiceTest {
 
     //var response = kvinRest(toReq(getReq))().toList.map((response) => response.toString)
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
-    val stringResponse: String = response match {
-      case r: OutputStreamResponse =>
-        val rStream = new ByteArrayOutputStream()
-        r.out(rStream)
-        rStream.toString()
-      case r: InMemoryResponse =>
-        r.data.toString
-      case _ =>
-        throw new RuntimeException("Invalid response type")
-    }
+    val stringResponse: String = responseBody(response)
 
     val kvinTuples: NiceIterator[KvinTuple] = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
     while (kvinTuples.hasNext) {
@@ -202,16 +292,7 @@ class KvinServiceTest {
     }
 
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
-    val stringResponse: String = response match {
-      case r: OutputStreamResponse =>
-        val rStream = new ByteArrayOutputStream()
-        r.out(rStream)
-        rStream.toString()
-      case r: InMemoryResponse =>
-        r.data.toString
-      case _ =>
-        throw new RuntimeException("Invalid response type")
-    }
+    val stringResponse: String = responseBody(response)
 
     val kvinTuples: NiceIterator[KvinTuple] = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
     assertEquals(kvinTuples.toList.size(), 2)
@@ -234,16 +315,7 @@ class KvinServiceTest {
 
     //var response = kvinRest(toReq(getReq))().toList.map((response) => response.toString)
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
-    val stringResponse: String = response match {
-      case r: OutputStreamResponse =>
-        val rStream = new ByteArrayOutputStream()
-        r.out(rStream)
-        rStream.toString()
-      case r: InMemoryResponse =>
-        r.data.toString
-      case _ =>
-        throw new RuntimeException("Invalid response type")
-    }
+    val stringResponse: String = responseBody(response)
 
     val kvinTuples: NiceIterator[KvinTuple] = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
     var count = 0
@@ -276,16 +348,7 @@ class KvinServiceTest {
     }
 
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
-    val stringResponse: String = response match {
-      case r: OutputStreamResponse =>
-        val rStream = new ByteArrayOutputStream()
-        r.out(rStream)
-        rStream.toString()
-      case r: InMemoryResponse =>
-        new String(r.data)
-      case _ =>
-        throw new RuntimeException("Invalid response type")
-    }
+    val stringResponse: String = responseBody(response)
 
     val mapper: ObjectMapper = new ObjectMapper()
     val node: JsonNode = mapper.readTree(stringResponse)

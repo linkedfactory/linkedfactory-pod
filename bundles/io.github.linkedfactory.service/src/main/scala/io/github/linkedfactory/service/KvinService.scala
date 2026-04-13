@@ -24,7 +24,7 @@ import net.enilink.komma.core.{URI, URIs}
 import net.liftweb.common.Box.box2Iterable
 import net.liftweb.common._
 import net.liftweb.http.rest.RestHelper
-import net.liftweb.http.{BadRequestResponse, InMemoryResponse, JsonResponse, LiftResponse, OkResponse, OutputStreamResponse, PlainTextResponse, Req, S}
+import net.liftweb.http.{InMemoryResponse, JsonResponse, LiftResponse, OutputStreamResponse, Req, S}
 import net.liftweb.json.Extraction.decompose
 import net.liftweb.json.JsonAST._
 import net.liftweb.json.JsonDSL._
@@ -48,7 +48,35 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   def responseHeaders: List[(String, String)] = CORS_HEADERS ::: S.getResponseHeaders(Nil)
 
   object FailureResponse {
-    def apply(msg: String): PlainTextResponse = PlainTextResponse(msg, Nil, 400)
+    def apply(msg: String): LiftResponse = createErrorResponse(400, "INVALID_PAYLOAD", msg)
+  }
+
+  def createErrorResponse(status: Int, code: String, message: String, details: Box[String] = Empty): LiftResponse = {
+    val body = details.filter(_.nonEmpty).map { d =>
+      ("status" -> status) ~ ("code" -> code) ~ ("message" -> message) ~ ("details" -> d)
+    } openOr {
+      ("status" -> status) ~ ("code" -> code) ~ ("message" -> message)
+    }
+    JsonResponse(body, responseHeaders, S.responseCookies, status)
+  }
+
+  def createSuccessResponse(code: String = "OK", message: Box[String] = Empty, data: JObject = JObject(Nil)): LiftResponse = {
+    val baseFields = List(
+      JField("success", JBool(true)),
+      JField("status", JInt(200)),
+      JField("code", JString(code))
+    ) ::: message.map(m => JField("message", JString(m))).toList
+    JsonResponse(JObject(baseFields ::: data.obj), responseHeaders, S.responseCookies, 200)
+  }
+
+  private def withServerErrorResponse(code: String)(f: => LiftResponse): LiftResponse = {
+    try {
+      f
+    } catch {
+      case e: Exception =>
+        logger.error(s"Request failed with code $code", e)
+        createErrorResponse(500, code, "Internal server error", Full(Option(e.getMessage).getOrElse(e.getClass.getSimpleName)))
+    }
   }
 
   protected def csvResponse_?(r: Req): Boolean = {
@@ -87,12 +115,21 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       }
       result match {
         case Failure(msg, _, _) => FailureResponse(msg)
-        case _ => OkResponse()
+        case _ => createSuccessResponse(message = Full("Values stored."))
       }
-    case list Get _ if list.endsWith("properties" :: Nil) => createJsonResponse(getProperties(path ++ list.dropRight(1)))
-    case list Get _ if list.endsWith("**" :: Nil) => createJsonResponse(getDescendants(path ++ list.dropRight(1)))
+    case list Get _ if list.endsWith("properties" :: Nil) =>
+      withServerErrorResponse("PROPERTIES_QUERY_FAILED") {
+        createJsonResponse(getProperties(path ++ list.dropRight(1)))
+      }
+    case list Get _ if list.endsWith("**" :: Nil) =>
+      withServerErrorResponse("DESCENDANTS_QUERY_FAILED") {
+        createJsonResponse(getDescendants(path ++ list.dropRight(1)))
+      }
 
-    case list Delete _ if list.endsWith("values" :: Nil) => createJsonResponse(deleteValues(path ++ list.dropRight(1)))
+    case list Delete _ if list.endsWith("values" :: Nil) =>
+      withServerErrorResponse("DELETE_VALUES_FAILED") {
+        createSuccessResponse(data = deleteValues(path ++ list.dropRight(1)))
+      }
     // case list Get _ => // TODO return RDF description
   })
 
@@ -100,7 +137,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     val limit = S.param("limit") flatMap (v => tryo(v.toLong)) filter (_ > 0) openOr 10000L
 
     if (limit > MAX_LIMIT) {
-      FailureResponse("The maximum limit is " + MAX_LIMIT + ". Please use multiple request if you require more data points.")
+      createErrorResponse(400, "LIMIT_TOO_LARGE", "The maximum limit is " + MAX_LIMIT + ". Please use multiple request if you require more data points.")
     } else {
       def filename(defaultExt: String) = S.param("filename") openOr "values." + defaultExt
 
@@ -222,8 +259,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           }
           OutputStreamResponse(streamer, -1, ("Content-Type", "text/csv; charset=utf-8") ::
             ("Content-Disposition", s"""inline; filename=${filename("csv")}""") :: responseHeaders, S.responseCookies, 200)
-        case _ => BadRequestResponse()
-      } openOr BadRequestResponse()
+        case _ => createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json or text/csv.")
+      } openOr createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json or text/csv.")
       response
     }
   }
