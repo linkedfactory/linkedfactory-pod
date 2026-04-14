@@ -51,6 +51,7 @@ import scala.collection.immutable.Nil$;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -278,6 +279,27 @@ public class KvinHttpTest extends Mockito {
 			URI expectedProperty = URIs.createURI("http://example.org/property" + i);
 			Assert.assertTrue(properties.contains(expectedProperty));
 		}
+	}
+
+	@Test
+	public void shouldThrowOnNon404FetchError() throws Exception {
+		doReturn(mockedResponse("{\"code\":\"INTERNAL\"}", 500)).when(httpClient).execute(any());
+
+		try {
+			kvinHttp.fetch(URIs.createURI("http://example.org/item1"), null, null, 10).toList();
+			Assert.fail("Expected UncheckedIOException for non-404 HTTP error");
+		} catch (UncheckedIOException e) {
+			String message = e.getMessage() != null ? e.getMessage() : String.valueOf(e.getCause());
+			Assert.assertTrue(message.contains("500") || (e.getCause() != null && String.valueOf(e.getCause().getMessage()).contains("500")));
+		}
+	}
+
+	@Test
+	public void shouldReturnEmptyOn404Properties() throws Exception {
+		doReturn(mockedResponse("", 404)).when(httpClient).execute(any());
+
+		var properties = kvinHttp.properties(URIs.createURI("http://example.org/item1"), null).toList();
+		Assert.assertTrue(properties.isEmpty());
 	}
 
 	private static List<KvinTuple> generateTuples(int numberOfItems, int numberOfProperties, int numberOfValues) {
