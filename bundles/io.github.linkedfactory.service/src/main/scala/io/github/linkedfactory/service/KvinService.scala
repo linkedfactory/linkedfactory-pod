@@ -24,7 +24,7 @@ import net.enilink.komma.core.{URI, URIs}
 import net.liftweb.common.Box.box2Iterable
 import net.liftweb.common._
 import net.liftweb.http.rest.RestHelper
-import net.liftweb.http.{InMemoryResponse, JsonResponse, LiftResponse, OutputStreamResponse, Req, S}
+import net.liftweb.http.{InMemoryResponse, JsonResponse, LiftResponse, OkResponse, OutputStreamResponse, Req, S}
 import net.liftweb.json.Extraction.decompose
 import net.liftweb.json.JsonAST._
 import net.liftweb.json.JsonDSL._
@@ -53,9 +53,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
   def createErrorResponse(status: Int, code: String, message: String, details: Box[String] = Empty): LiftResponse = {
     val body = details.filter(_.nonEmpty).map { d =>
-      ("status" -> status) ~ ("code" -> code) ~ ("message" -> message) ~ ("details" -> d)
+      ("code" -> code) ~ ("message" -> message) ~ ("details" -> d)
     } openOr {
-      ("status" -> status) ~ ("code" -> code) ~ ("message" -> message)
+      ("code" -> code) ~ ("message" -> message)
     }
     JsonResponse(body, responseHeaders, S.responseCookies, status)
   }
@@ -115,7 +115,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       }
       result match {
         case Failure(msg, _, _) => FailureResponse(msg)
-        case _ => createSuccessResponse(message = Full("Values stored."))
+        case _ => OkResponse()
       }
     case list Get _ if list.endsWith("properties" :: Nil) =>
       withServerErrorResponse("PROPERTIES_QUERY_FAILED") {
@@ -128,7 +128,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
     case list Delete _ if list.endsWith("values" :: Nil) =>
       withServerErrorResponse("DELETE_VALUES_FAILED") {
-        createSuccessResponse(data = deleteValues(path ++ list.dropRight(1)))
+        createJsonResponse(deleteValues(path ++ list.dropRight(1)))
       }
     // case list Get _ => // TODO return RDF description
   })

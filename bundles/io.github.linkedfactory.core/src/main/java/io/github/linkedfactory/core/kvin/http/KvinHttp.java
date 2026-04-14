@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -210,13 +211,15 @@ public class KvinHttp implements Kvin {
                     return NiceIterator.emptyIterator();
                 }
                 String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
-                throw new RuntimeException("HTTP " + status + " while fetching values: " + body);
+                throw new UncheckedIOException(new IOException("HTTP " + status + " while fetching values: " + body));
             }
             // converting json to kvin tuples
             // TODO directly read from stream with pooled HTTP client
             content = entity.getContent();
             JsonFormatParser jsonParser = new JsonFormatParser(new ByteArrayInputStream(ByteStreams.toByteArray(content)));
             return jsonParser.parse();
+        } catch (UncheckedIOException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {
@@ -275,7 +278,7 @@ public class KvinHttp implements Kvin {
                     return NiceIterator.emptyIterator();
                 }
                 String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
-                throw new RuntimeException("HTTP " + status + " while fetching descendants: " + body);
+                throw new UncheckedIOException(new IOException("HTTP " + status + " while fetching descendants: " + body));
             }
             // converting json to URI
             return new NiceIterator<>() {
@@ -324,6 +327,8 @@ public class KvinHttp implements Kvin {
                     }
                 }
             };
+        } catch (UncheckedIOException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -347,7 +352,7 @@ public class KvinHttp implements Kvin {
                     return NiceIterator.emptyIterator();
                 }
                 String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
-                throw new RuntimeException("HTTP " + status + " while fetching properties: " + body);
+                throw new UncheckedIOException(new IOException("HTTP " + status + " while fetching properties: " + body));
             }
             // converting json to URI
             return new NiceIterator<>() {
@@ -400,6 +405,8 @@ public class KvinHttp implements Kvin {
                     }
                 }
             };
+        } catch (UncheckedIOException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

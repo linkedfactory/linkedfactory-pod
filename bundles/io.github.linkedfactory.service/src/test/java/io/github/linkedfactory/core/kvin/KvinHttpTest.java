@@ -51,6 +51,7 @@ import scala.collection.immutable.Nil$;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -286,8 +287,8 @@ public class KvinHttpTest extends Mockito {
 
 		try {
 			kvinHttp.fetch(URIs.createURI("http://example.org/item1"), null, null, 10).toList();
-			Assert.fail("Expected RuntimeException for non-404 HTTP error");
-		} catch (RuntimeException e) {
+			Assert.fail("Expected UncheckedIOException for non-404 HTTP error");
+		} catch (UncheckedIOException e) {
 			String message = e.getMessage() != null ? e.getMessage() : String.valueOf(e.getCause());
 			Assert.assertTrue(message.contains("500") || (e.getCause() != null && String.valueOf(e.getCause().getMessage()).contains("500")));
 		}

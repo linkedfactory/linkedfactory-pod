@@ -148,9 +148,7 @@ class KvinServiceTest {
     val postResponse = kvinRest(toReq(postReq))().map(_.toResponse).openOr(null)
     assertEquals(200, postResponse.code)
     val postBody = responseBody(postResponse)
-    assertTrue(postBody.contains("\"success\":true"))
-    assertTrue(postBody.contains("\"code\":\"OK\""))
-    assertTrue(postBody.contains("Values stored"))
+    assertTrue(postBody.trim.isEmpty)
 
     // support get request
     val getReq = new MockHttpServletRequest(baseUrl) {
@@ -162,14 +160,6 @@ class KvinServiceTest {
 
   @Test
   def explicitEnvelopeResponsesUseJsonContentType(): Unit = {
-    val postReq = new MockHttpServletRequest(baseUrl) {
-      method = "POST"
-      body_=(TestData.item1, "application/json")
-    }
-    val postResponse = kvinRest(toReq(postReq))().map(_.toResponse).openOr(null)
-    assertEquals(200, postResponse.code)
-    assertTrue(responseContentType(postResponse).toLowerCase.contains("application/json"))
-
     val invalidPostReq = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       body_=("""{ "item" : [false, 1]} }""", "application/json")
@@ -180,7 +170,7 @@ class KvinServiceTest {
   }
 
   @Test
-  def deleteValuesReturnsExplicitSuccessEnvelope(): Unit = {
+  def deleteValuesReturnsDeletedCountWithoutEnvelope(): Unit = {
     val postReq = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       body_=(TestData.itemSet, "application/json")
@@ -197,9 +187,9 @@ class KvinServiceTest {
     assertEquals(200, response.code)
 
     val body = responseBody(response)
-    assertTrue(body.contains("\"success\":true"))
-    assertTrue(body.contains("\"code\":\"OK\""))
     assertTrue(body.contains("\"deleted\":"))
+    assertFalse(body.contains("\"success\":"))
+    assertFalse(body.contains("\"code\":"))
   }
 
   @Test
@@ -215,6 +205,7 @@ class KvinServiceTest {
     val body = responseBody(response)
     assertTrue(body.contains("\"code\":\"INVALID_PAYLOAD\""))
     assertTrue(body.contains("\"message\":"))
+    assertFalse(body.contains("\"status\":"))
   }
 
   @Test
