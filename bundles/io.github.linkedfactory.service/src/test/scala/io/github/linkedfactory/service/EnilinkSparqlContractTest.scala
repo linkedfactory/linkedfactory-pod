@@ -96,6 +96,44 @@ class EnilinkSparqlContractTest {
   }
 
   @Test
+  def emptySparqlQueryBodyReturnsMissingQuery(): Unit = {
+    val req = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      parameters = List("model" -> EnilinkSparqlContractTest.sensorModel.toString)
+      contentType = "application/sparql-query"
+      body = Array.emptyByteArray
+      headers = Map("Accept" -> List("application/sparql-results+json"))
+    }
+    assertErrorContract(execute(req), 400, "MISSING_QUERY: The request body is empty. Expected a SPARQL query.")
+  }
+
+  @Test
+  def emptyUpdateParamReturnsMissingUpdate(): Unit = {
+    val req = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      parameters = List(
+        "update" -> "",
+        "model" -> EnilinkSparqlContractTest.sensorModel.toString
+      )
+      contentType = "application/x-www-form-urlencoded"
+      headers = Map("Accept" -> List("application/sparql-results+json"))
+    }
+    assertErrorContract(execute(req), 400, "MISSING_UPDATE:")
+  }
+
+  @Test
+  def emptySparqlUpdateBodyReturnsMissingUpdate(): Unit = {
+    val req = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      parameters = List("model" -> EnilinkSparqlContractTest.sensorModel.toString)
+      contentType = "application/sparql-update"
+      body = Array.emptyByteArray
+      headers = Map("Accept" -> List("application/sparql-results+json"))
+    }
+    assertErrorContract(execute(req), 400, "MISSING_UPDATE: The request body is empty. Expected a SPARQL update.")
+  }
+
+  @Test
   def unknownModelReturns404(): Unit = {
     val req = new MockHttpServletRequest(baseUrl) {
       method = "GET"
@@ -135,7 +173,7 @@ class EnilinkSparqlContractTest {
   }
 
   @Test
-  def invalidQueryRequestReturns400(): Unit = {
+  def conflictingQueryAndUpdateReturns400(): Unit = {
     val req = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       parameters = List(
@@ -143,6 +181,17 @@ class EnilinkSparqlContractTest {
         "update" -> "INSERT DATA { <a:s> <a:p> <a:o> }",
         "model" -> EnilinkSparqlContractTest.sensorModel.toString
       )
+      contentType = "application/x-www-form-urlencoded"
+      headers = Map("Accept" -> List("application/sparql-results+json"))
+    }
+    assertErrorContract(execute(req), 400, "CONFLICTING_PARAMETERS:")
+  }
+
+  @Test
+  def unrecognizedPostShapeReturnsInvalidQueryRequest(): Unit = {
+    val req = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      parameters = List("model" -> EnilinkSparqlContractTest.sensorModel.toString)
       contentType = "application/x-www-form-urlencoded"
       headers = Map("Accept" -> List("application/sparql-results+json"))
     }
