@@ -41,15 +41,15 @@ A concrete example for modeling the captured force data of a strain gauge could 
 ```
 ### RDF format
 For representing time-series data in plain RDF the following encoding is used:
-```
-S P [ <kvin:value> O ; <kvin:time> T ] .
+```ttl
+S P [ kvin:value O ; kvin:time T ] .
 ```
 
 The data of the strain gauge example above could then expressed as:
-```
+```ttl
 @base <https://example.org/Press/Frame/> .
 
-<StrainGauge> <p:force> [ <kvin:value> 7.10096884 ; <kvin:time> 1541521440000 ] .
+<StrainGauge> p:force [ kvin:value 7.10096884 ; kvin:time 1541521440000 ] .
 ```
 
 ## Data insertion and retrieval
