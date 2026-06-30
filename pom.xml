@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>io.github.linkedfactory</groupId>
 	<artifactId>linkedfactory-parent</artifactId>
-	<version>1.2.0-SNAPSHOT</version>
+	<version>1.2.0</version>
 	<packaging>pom</packaging>
 
 	<organization>
@@ -16,8 +16,8 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<komma.version>1.9.0-SNAPSHOT</komma.version>
-		<enilink.version>1.7.0-SNAPSHOT</enilink.version>
+		<komma.version>1.9.0</komma.version>
+		<enilink.version>1.7.0</enilink.version>
 		<scala.major.version>2.13</scala.major.version>
 		<scala.version>2.13.12</scala.version>
 		<scala.plugin.version>4.8.1</scala.plugin.version>

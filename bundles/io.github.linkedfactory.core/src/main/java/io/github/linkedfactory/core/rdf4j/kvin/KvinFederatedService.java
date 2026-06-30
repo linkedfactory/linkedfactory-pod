@@ -94,7 +94,7 @@ public class KvinFederatedService implements FederatedService {
         }
 
         // for debugging purposes
-        // System.out.println(service);
+	    System.out.println(service);
 
         Map<Value, Object> valueToData = new WeakHashMap<>();
         SimpleDataset dataset = new SimpleDataset();
