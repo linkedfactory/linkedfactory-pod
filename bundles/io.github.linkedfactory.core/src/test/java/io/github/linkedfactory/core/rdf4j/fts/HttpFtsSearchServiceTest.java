@@ -52,7 +52,7 @@ public class HttpFtsSearchServiceTest {
 	@Test
 	public void commitSendsBatchedPayload() throws Exception {
 		HttpFtsSearchService service = new HttpFtsSearchService();
-		service.activate(Map.of(
+		service.configure(Map.of(
 				HttpFtsSearchService.PROP_ENDPOINT, endpoint(),
 				HttpFtsSearchService.PROP_BULK_PATH, "/fts/bulk",
 				HttpFtsSearchService.PROP_FAIL_ON_ERROR, "true"
@@ -72,7 +72,7 @@ public class HttpFtsSearchServiceTest {
 		service.begin();
 		service.addRemoveStatements(addSet, removeSet);
 		service.commit();
-		service.deactivate();
+		service.shutdown();
 
 		assertEquals(1, requests.get());
 		//System.out.println(body.get());
@@ -94,7 +94,7 @@ public class HttpFtsSearchServiceTest {
 	@Test
 	public void rollbackSkipsRequest() throws Exception {
 		HttpFtsSearchService service = new HttpFtsSearchService();
-		service.activate(Map.of(HttpFtsSearchService.PROP_ENDPOINT, endpoint()));
+		service.configure(Map.of(HttpFtsSearchService.PROP_ENDPOINT, endpoint()));
 
 		service.begin();
 		service.addRemoveStatements(Set.of(vf.createStatement(
@@ -103,7 +103,7 @@ public class HttpFtsSearchServiceTest {
 				vf.createLiteral("x"))), Set.of());
 		service.rollback();
 		service.commit();
-		service.deactivate();
+		service.shutdown();
 
 		assertEquals(0, requests.get());
 	}
@@ -111,7 +111,7 @@ public class HttpFtsSearchServiceTest {
 	@Test
 	public void failOnErrorThrowsWhenEnabled() throws Exception {
 		HttpFtsSearchService service = new HttpFtsSearchService();
-		service.activate(Map.of(
+		service.configure(Map.of(
 				HttpFtsSearchService.PROP_ENDPOINT, endpoint(),
 				HttpFtsSearchService.PROP_FAIL_ON_ERROR, "true"
 		));
@@ -128,14 +128,14 @@ public class HttpFtsSearchServiceTest {
 		} catch (IOException expected) {
 			assertTrue(expected.getMessage().contains("HTTP 500"));
 		} finally {
-			service.deactivate();
+			service.shutdown();
 		}
 	}
 
 	@Test
 	public void failOnErrorCanBeDisabled() throws Exception {
 		HttpFtsSearchService service = new HttpFtsSearchService();
-		service.activate(Map.of(
+		service.configure(Map.of(
 				HttpFtsSearchService.PROP_ENDPOINT, endpoint(),
 				HttpFtsSearchService.PROP_FAIL_ON_ERROR, "false"
 		));
@@ -147,7 +147,7 @@ public class HttpFtsSearchServiceTest {
 				vf.createIRI("urn:p"),
 				vf.createLiteral("x"))), Set.of());
 		service.commit();
-		service.deactivate();
+		service.shutdown();
 
 		assertEquals(1, requests.get());
 	}
