@@ -2,6 +2,8 @@ package io.github.linkedfactory.core.komma;
 
 import io.github.linkedfactory.core.kvin.DelegatingKvin;
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSail;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchService;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinSail;
 import net.enilink.composition.annotations.Iri;
 import net.enilink.komma.model.MODELS;
@@ -17,11 +19,13 @@ import org.eclipse.rdf4j.sail.inferencer.fc.SchemaCachingRDFSInferencer;
 import org.eclipse.rdf4j.sail.memory.MemoryStore;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.FrameworkUtil;
+import org.osgi.framework.ServiceReference;
 
 @Iri(MODELS.NAMESPACE + "KvinMemoryModelSet")
 public abstract class KvinMemoryModelSet extends MemoryModelSetSupport {
     static BundleContext bundleContext = FrameworkUtil.getBundle(KvinMemoryModelSet.class).getBundleContext();
     static Kvin kvin;
+    static FtsSearchService ftsSearchService;
 
     public Repository createRepository() throws RepositoryException {
         NotifyingSail store = new MemoryStore();
@@ -35,7 +39,13 @@ public abstract class KvinMemoryModelSet extends MemoryModelSetSupport {
                 return bundleContext.getService(bundleContext.getServiceReference(Kvin.class));
             }
         };
-        Sail kvinSail = new KvinSail(new DelegatingKvin(kvinSupplier), store);
+        FtsSearchService ftsService = ftsSearchService;
+        if (ftsService == null) {
+            ServiceReference<FtsSearchService> serviceRef = bundleContext.getServiceReference(FtsSearchService.class);
+            ftsService = serviceRef != null ? bundleContext.getService(serviceRef) : FtsSearchService.NOOP;
+        }
+        Sail ftsSail = new FtsSail(ftsService, store);
+        Sail kvinSail = new KvinSail(new DelegatingKvin(kvinSupplier), ftsSail);
         SailRepository repository = new SailRepository(kvinSail);
         repository.init();
         addBasicKnowledge(repository);
@@ -44,5 +54,9 @@ public abstract class KvinMemoryModelSet extends MemoryModelSetSupport {
 
     public static void setKvin(Kvin kvin) {
         KvinMemoryModelSet.kvin = kvin;
+    }
+
+    public static void setFtsSearchService(FtsSearchService ftsSearchService) {
+        KvinMemoryModelSet.ftsSearchService = ftsSearchService;
     }
 }

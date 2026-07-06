@@ -44,9 +44,6 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 
 	private boolean isIndexedStatement(Statement statement) {
 		Value object = statement.getObject();
-		// FIXME full-text over literal values or push literal properties and their linked IRIs to search.
-		// object instanceof IRI ensures statements like: ex:sensor1 ex:locatedIn ex:lineA .
-		//are captured for indexing as references/keywords (not full-text), so search can filter/join on linked resources.
 		return object instanceof Literal || object instanceof IRI;
 	}
 
@@ -206,12 +203,6 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 			}
 		}
 
-		/*
-		  To reduce index churn.
-          A single add/remove batch lets the search backend resolve net effects
-          atomically (e.g., statement removed then re-added in same tx cancels out), avoids intermediate inconsistent states,
-          and is much more efficient than many tiny calls.
-		 */
 		static final class AddRemoveOperation implements Operation {
 			private final Set<Statement> added = new LinkedHashSet<>();
 			private final Set<Statement> removed = new LinkedHashSet<>();
