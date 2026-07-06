@@ -2,6 +2,8 @@ package io.github.linkedfactory.core.komma;
 
 import io.github.linkedfactory.core.kvin.DelegatingKvin;
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSail;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchService;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinSail;
 import net.enilink.composition.annotations.Iri;
 import net.enilink.komma.core.IReference;
@@ -29,6 +31,7 @@ import java.util.function.Supplier;
 public abstract class KvinPersistentModelSet extends PersistentModelSetSupport {
     static BundleContext bundleContext = FrameworkUtil.getBundle(KvinPersistentModelSet.class).getBundleContext();
     static Kvin kvin;
+    static FtsSearchService ftsSearchService;
 
     public Repository createRepository() throws RepositoryException {
 	    final IReference repo = getRepository();
@@ -69,7 +72,13 @@ public abstract class KvinPersistentModelSet extends PersistentModelSetSupport {
                 return bundleContext.getService(bundleContext.getServiceReference(Kvin.class));
             }
         };
-        Sail kvinSail = new KvinSail(new DelegatingKvin(kvinSupplier), store);
+        FtsSearchService ftsService = ftsSearchService;
+        if (ftsService == null) {
+            ServiceReference<FtsSearchService> serviceRef = bundleContext.getServiceReference(FtsSearchService.class);
+            ftsService = serviceRef != null ? bundleContext.getService(serviceRef) : FtsSearchService.NOOP;
+        }
+        Sail ftsSail = new FtsSail(ftsService, store);
+        Sail kvinSail = new KvinSail(new DelegatingKvin(kvinSupplier), ftsSail);
         SailRepository repository = new SailRepository(kvinSail);
         repository.init();
         addBasicKnowledge(repository);
@@ -78,5 +87,9 @@ public abstract class KvinPersistentModelSet extends PersistentModelSetSupport {
 
     public static void setKvin(Kvin kvin) {
         KvinPersistentModelSet.kvin = kvin;
+    }
+
+    public static void setFtsSearchService(FtsSearchService ftsSearchService) {
+        KvinPersistentModelSet.ftsSearchService = ftsSearchService;
     }
 }
