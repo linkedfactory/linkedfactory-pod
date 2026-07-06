@@ -17,10 +17,6 @@ import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
-import org.osgi.service.component.annotations.Activate;
-import org.osgi.service.component.annotations.Component;
-import org.osgi.service.component.annotations.Deactivate;
-import org.osgi.service.component.annotations.Modified;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +30,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-@Component(service = FtsSearchService.class)
 public class HttpFtsSearchService implements FtsSearchService {
 	private static final Logger logger = LoggerFactory.getLogger(HttpFtsSearchService.class);
 
@@ -50,16 +45,26 @@ public class HttpFtsSearchService implements FtsSearchService {
 	private volatile CloseableHttpClient httpClient;
 	private final ThreadLocal<TransactionState> txState = new ThreadLocal<>();
 
-	@Activate
-	@Modified
-	void activate(Map<String, Object> properties) {
+	public HttpFtsSearchService() {
+	}
+
+	public HttpFtsSearchService(Map<String, Object> properties) {
+		configure(properties);
+	}
+
+	public HttpFtsSearchService(String endpoint, String bulkPath, boolean failOnError) {
+		this.endpoint = normalizeEndpoint(endpoint);
+		this.bulkPath = normalizePath(bulkPath);
+		this.failOnError = failOnError;
+	}
+
+	public final void configure(Map<String, Object> properties) {
 		this.endpoint = normalizeEndpoint(stringProp(properties, PROP_ENDPOINT, ""));
 		this.bulkPath = normalizePath(stringProp(properties, PROP_BULK_PATH, "/fts/bulk"));
 		this.failOnError = booleanProp(properties, PROP_FAIL_ON_ERROR, true);
 	}
 
-	@Deactivate
-	void deactivate() throws IOException {
+	public void shutdown() throws IOException {
 		CloseableHttpClient client = httpClient;
 		httpClient = null;
 		if (client != null) {
