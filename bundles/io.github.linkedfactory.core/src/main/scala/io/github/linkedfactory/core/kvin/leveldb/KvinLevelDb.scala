@@ -585,7 +585,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
   override def put(entries: java.lang.Iterable[KvinTuple]): Unit = {
     var notifyTuples = Option.empty[mutable.ArrayBuffer[KvinTuple]]
-    if (!this.listeners.isEmpty && entries.isInstanceOf[IExtendedIterator[_]]) {
+    if (!this.listeners.isEmpty && entries.isInstanceOf[IExtendedIterator[?]]) {
       notifyTuples = Some(new mutable.ArrayBuffer[KvinTuple]())
     }
 
@@ -613,7 +613,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
           val flush = batch.size() > 1000000
           if (flush) {
-            var writeIds: Future[_] = null
+            var writeIds: Future[?] = null
             if (idsBatch.size() > 0) {
               writeIds = executor.submit(() => {
                 ids.write(idsBatch, new WriteOptions().sync(true))
@@ -642,7 +642,7 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
         }
       }
 
-      var writeIds: Future[_] = null
+      var writeIds: Future[?] = null
       if (idsBatch.size() > 0) {
         writeIds = executor.submit(() => {
           ids.write(idsBatch, new WriteOptions().sync(true))

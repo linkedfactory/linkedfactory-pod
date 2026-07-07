@@ -18,16 +18,17 @@ import org.junit.{AfterClass, BeforeClass, Test}
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, File, IOException}
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
-import javax.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletRequest
 import scala.util.Random
+import scala.compiletime.uninitialized
 
 /**
  * Companion object of unit tests for the KVIN service endpoint
  */
 object KvinServiceTest {
   var modelSet: IModelSet = null
-  var storeDirectory: File = _
-  var store: Kvin = _
+  var storeDirectory: File = uninitialized
+  var store: Kvin = uninitialized
   val base: KvinServiceTestBase = new KvinServiceTestBase()
 
   @BeforeClass
@@ -44,7 +45,7 @@ object KvinServiceTest {
     TestData.item1 = KvinServiceTest.base.generateJsonFromSingleTuple()
     TestData.itemSet = KvinServiceTest.base.generateJsonFromTupleSet()
 
-    createStore
+    createStore()
   }
 
   @AfterClass
@@ -57,13 +58,13 @@ object KvinServiceTest {
     deleteDirectory(storeDirectory.toPath)
   }
 
-  def createStore {
+  def createStore(): Unit = {
     storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis + "-" + Random.nextInt(1000) + "/")
     storeDirectory.deleteOnExit
     store = new KvinLevelDb(storeDirectory)
   }
 
-  def deleteDirectory(dir: Path) {
+  def deleteDirectory(dir: Path): Unit = {
     // delete store directory
     Files.walkFileTree(dir, new SimpleFileVisitor[Path]() {
       override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = {
@@ -291,7 +292,6 @@ class KvinServiceTest {
 
   @Test
   def queryDataWithOpTest(): Unit = {
-
     val postReq = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       body_=(TestData.itemSet, "application/json")

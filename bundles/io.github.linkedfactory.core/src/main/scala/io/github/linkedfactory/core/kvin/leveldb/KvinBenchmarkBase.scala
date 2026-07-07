@@ -48,7 +48,7 @@ abstract class KvinBenchmarkBase extends App {
       val uri = URIs.createURI("http://linkedfactory.github.io/" + randomNr + "/e3fabrik/rollex/" + randomNr + "/measured-point-1")
       val ctx = URIs.createURI("ctx:" + nrs(rand.nextInt(nrs.length)))
 
-      val value = if (randomNr % 2 == 0) rand.nextGaussian else rand.nextLong(100000)
+      val value = if (randomNr % 2 == 0) rand.nextGaussian() else rand.nextLong(100000)
       batch.addOne(new KvinTuple(uri, valueProperty, ctx, currentTime, value))
 
       // insert data via batch

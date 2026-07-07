@@ -60,8 +60,7 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
         this.executorService = executorService;
     }
 
-    @Override
-    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(StatementPattern stmt, final BindingSet bs)
+    protected CloseableIteration<BindingSet> evaluate(StatementPattern stmt, final BindingSet bs)
             throws QueryEvaluationException {
 //        System.out.println("Stmt: " + stmt);
 
@@ -112,6 +111,10 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
                 Var variable = stmt.getObjectVar();
                 return new AbstractCloseableIteration<>() {
                     @Override
+                    protected void handleClose() {
+                    }
+
+                    @Override
                     public boolean hasNext() throws QueryEvaluationException {
                         return it.hasNext();
                     }
@@ -141,6 +144,10 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
                 return new AbstractCloseableIteration<>() {
                     BindingSet next = null;
                     int i = 0;
+
+                    @Override
+                    protected void handleClose() {
+                    }
 
                     @Override
                     public boolean hasNext() throws QueryEvaluationException {
@@ -205,12 +212,12 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
             String[] joinAttributes = HashJoinIteration.hashJoinAttributeNames(join);
             return new BatchQueryEvaluationStep() {
                 @Override
-                public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
+                public CloseableIteration<BindingSet> evaluate(BindingSet bindingSet) {
                     return new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, true, joinAttributes, context);
                 }
 
                 @Override
-                public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
+                public CloseableIteration<BindingSet> evaluate(List<BindingSet> bindingSets) {
                     return new HashJoinIteration(
                             BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets),
                             join.getLeftArg().getBindingNames(),
@@ -262,12 +269,12 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
             } else {
                 return new BatchQueryEvaluationStep() {
                     @Override
-                    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
+                    public CloseableIteration<BindingSet> evaluate(BindingSet bindingSet) {
                         return new HashJoinIteration(leftPrepared, rightPrepared, bindingSet, false, joinAttributes, context);
                     }
 
                     @Override
-                    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
+                    public CloseableIteration<BindingSet> evaluate(List<BindingSet> bindingSets) {
                         return new HashJoinIteration(
                                 BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets),
                                 join.getLeftArg().getBindingNames(),
@@ -338,15 +345,6 @@ public class KvinEvaluationStrategy extends DefaultEvaluationStrategy {
             return new KvinFetchEvaluationStep(KvinEvaluationStrategy.this, (KvinFetch) expr, context);
         }
         return super.precompile(expr, context);
-    }
-
-    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(TupleExpr expr, BindingSet bindings)
-            throws QueryEvaluationException {
-        if (expr instanceof KvinFetch) {
-            QueryEvaluationContext context = new Minimal(this.dataset, this.tripleSource.getValueFactory());
-            return precompile(expr, context).evaluate(bindings);
-        }
-        return super.evaluate(expr, bindings);
     }
 
     public Kvin getKvin() {

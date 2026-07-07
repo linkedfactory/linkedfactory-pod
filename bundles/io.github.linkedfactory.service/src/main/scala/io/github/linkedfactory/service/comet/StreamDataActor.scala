@@ -20,20 +20,21 @@ import io.github.linkedfactory.service.Data
 import net.enilink.komma.core.{URI, URIs}
 import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.Full
-import net.liftweb.http.{CometActor, S}
+import net.liftweb.http.{CometActor, RenderOut, S}
 import net.liftweb.http.js.JE.JsRaw
 import net.liftweb.http.js.JsCmds.{Noop, OnLoad, Script, jsExpToJsCmd}
-import net.liftweb.json.Extraction.decompose
-import net.liftweb.json.JsonAST.{JArray, JField, JObject}
-import net.liftweb.json.JsonDSL.{jobject2assoc, list2jvalue, long2jvalue, pair2Assoc}
-import net.liftweb.json.compactRender
+import org.json4s._
+import org.json4s.native.JsonMethods.{compact, render as renderJson}
+import org.json4s.JsonDSL._
 import net.liftweb.util.Helpers.{intToTimeSpanBuilder, tryo}
 import net.liftweb.util.Schedule
 
+import java.util
 import java.util.TreeSet
 import java.util.concurrent.ScheduledFuture
 import scala.collection.mutable
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
+import scala.compiletime.uninitialized
 
 /**
  * A comet actor that streams updates of time series data to clients via DOM events 'stream-init' and 'stream-update'.
@@ -46,7 +47,7 @@ class StreamDataActor extends CometActor with KvinListener {
     var lastTimestamp = 0L
   }
 
-  implicit val formats = net.liftweb.json.DefaultFormats
+  implicit val formats: Formats = DefaultFormats
 
   override def dontCacheRendering = true
 
@@ -54,18 +55,18 @@ class StreamDataActor extends CometActor with KvinListener {
 
   var limit = 0
 
-  @volatile var future: ScheduledFuture[_] = _
+  @volatile var future: ScheduledFuture[?] = uninitialized
   var changedItems = mutable.Set.empty[(URI, URI)]
 
   var itemsOrPatterns = Set.empty[URI]
   var properties: Option[List[URI]] = None
-  var prefixes: TreeSet[String] = null
+  var prefixes: util.TreeSet[String] = uninitialized
   var items = mutable.Map.empty[URI, mutable.Map[URI, PropertyInfo]]
   var context = Kvin.DEFAULT_CONTEXT
 
   override def lifespan = Full(5.second)
 
-  def trimStar(uri: URI) = uri.trimSegments(1).appendSegment("")
+  private def trimStar(uri: URI) = uri.trimSegments(1).appendSegment("")
 
   /**
    * Expand prefixes into real data points
@@ -80,11 +81,11 @@ class StreamDataActor extends CometActor with KvinListener {
     case uri => Some(uri)
   }.toList
 
-  def propertyInfos(item: URI) = items.getOrElseUpdate(item, mutable.Map.empty[URI, PropertyInfo])
+  private def propertyInfos(item: URI) = items.getOrElseUpdate(item, mutable.Map.empty[URI, PropertyInfo])
 
-  def propertyInfo(property: URI, propertyInfos: mutable.Map[URI, PropertyInfo]) = propertyInfos.getOrElseUpdate(property, new PropertyInfo)
+  private def propertyInfo(property: URI, propertyInfos: mutable.Map[URI, PropertyInfo]) = propertyInfos.getOrElseUpdate(property, new PropertyInfo)
 
-  override def render = {
+  override def render: RenderOut = {
     val jsCmd = Data.kvin map { kvin =>
       // fetches data via batch API
       val tuples = kvin.fetch(items.keys.toList.asJava, properties.map(_.asJava) getOrElse Nil.asJava, context,
@@ -97,7 +98,7 @@ class StreamDataActor extends CometActor with KvinListener {
           val field = JField(property.toString, JArray(
             values.map { e =>
               timestamp = timestamp.max(e.time)
-              ("time", e.time) ~ ("seqNr", decompose(e.seqNr)) ~ ("value", decompose(e.value))
+              ("time", e.time) ~ ("seqNr", Extraction.decompose(e.seqNr)) ~ ("value", Extraction.decompose(e.value))
             }.toList))
           // update time stamp for last query
           pInfo.lastTimestamp = timestamp + 1
@@ -105,12 +106,12 @@ class StreamDataActor extends CometActor with KvinListener {
         }.toList
         JField(item.toString, JObject(propertyValuesJson))
       }.toList
-      OnLoad(triggerCmd("stream-init", compactRender(JObject(itemsJson))))
+      OnLoad(triggerCmd("stream-init", compact(renderJson(JObject(itemsJson)))))
     }
-    Script(jsCmd getOrElse Noop)
+    Script(jsCmd.getOrElse(Noop))
   }
 
-  override def localSetup {
+  override protected def localSetup(): Unit = {
     context = Data.currentModel.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT)
     limit = attributes.get("limit").map(_.toInt).getOrElse(DEFAULT_LIMIT)
     itemsOrPatterns = attributes.get("items").map(_.split("\\s+").filter(_.nonEmpty).map(URIs.createURI(_, true)))
@@ -120,29 +121,29 @@ class StreamDataActor extends CometActor with KvinListener {
     // collect URIs in the form of http://example.org/items/**
     itemsOrPatterns.foreach { uri =>
       if (uri.lastSegment == "**") {
-        if (prefixes == null) prefixes = new TreeSet
+        if (prefixes == null) prefixes = new util.TreeSet[String]()
         prefixes.add(trimStar(uri).toString)
       }
     }
     properties = attributes.get("properties").map {
       _.split("\\s+").flatMap { s => tryo(URIs.createURI(s)) }.toList
     }
-    Data.kvin map { kvin =>
-      items = mutable.Map(computeItems(kvin, context, itemsOrPatterns).map {
+    Data.kvin.map { kvin =>
+      items = mutable.Map((computeItems(kvin, context, itemsOrPatterns).map {
         (_, mutable.Map.empty[URI, PropertyInfo])
-      }: _*)
+      })*)
       kvin.addListener(this)
     }
   }
 
-  override def localShutdown {
+  override protected def localShutdown(): Unit = {
     Data.kvin.map(_.removeListener(this))
   }
 
-  override def entityCreated(item: URI) {
+  override def entityCreated(item: URI): Unit = {
   }
 
-  override def valueAdded(item: URI, property: URI, ctx: URI, time: Long, seqNr: Long, value: Any) {
+  override def valueAdded(item: URI, property: URI, ctx: URI, time: Long, seqNr: Long, value: Any): Unit = {
     var trackedItem = items.contains(item)
     if (!trackedItem && prefixes != null && {
       val prefix = prefixes.floor(item.toString)
@@ -166,7 +167,7 @@ class StreamDataActor extends CometActor with KvinListener {
       // create local copy to avoid long synchronized block
       val changedItemsLocal = changedItems.synchronized {
         val copy = changedItems.toList
-        changedItems.clear
+        changedItems.clear()
         copy
       }
       // query only the changed items and properties
@@ -181,16 +182,16 @@ class StreamDataActor extends CometActor with KvinListener {
               val propData = Data.kvin.map(_.fetch(item, property, context, KvinTuple.TIME_MAX_VALUE, timestamp, 100, 0L, null)
                 .iterator.asScala.map { e =>
                 timestamp = timestamp.max(e.time)
-                ("time", e.time) ~ ("seqNr", decompose(e.seqNr)) ~ ("value", decompose(e.value))
+                ("time", e.time) ~ ("seqNr", Extraction.decompose(e.seqNr)) ~ ("value", Extraction.decompose(e.value))
               }.toList)
-              propData map { propData =>
+              propData.map { data  =>
                 propInfo.lastTimestamp = timestamp + 1
-                List(JField(property.toString, JArray(propData)))
-              } getOrElse Nil
+                List(JField(property.toString, JArray(data)))
+              }.getOrElse(Nil)
           }
           if (itemData.isEmpty) Nil else List(JField(item.toString, itemData.toList))
       }
-      partialUpdate(triggerCmd("stream-update", compactRender(JObject(data.toList))))
+      partialUpdate(triggerCmd("stream-update", compact(renderJson(JObject(data.toList)))))
     }
   }
 

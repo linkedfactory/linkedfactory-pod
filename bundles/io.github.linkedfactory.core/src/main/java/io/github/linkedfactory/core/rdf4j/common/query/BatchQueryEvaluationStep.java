@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 
 public interface BatchQueryEvaluationStep extends QueryEvaluationStep {
-	static CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
+	static CloseableIteration<BindingSet> evaluate(
 			QueryEvaluationStep step, List<BindingSet> bindingSets) {
 		if (step instanceof BatchQueryEvaluationStep) {
 			return ((BatchQueryEvaluationStep) step).evaluate(bindingSets);
@@ -19,11 +19,11 @@ public interface BatchQueryEvaluationStep extends QueryEvaluationStep {
 		return evaluateSerial(step, bindingSets);
 	}
 
-	static CloseableIteration<BindingSet, QueryEvaluationException> evaluateSerial(
+	static CloseableIteration<BindingSet> evaluateSerial(
 			QueryEvaluationStep step, List<BindingSet> bindingSets) {
 		Iterator<BindingSet> bindingSetIterator = bindingSets.iterator();
 		return new AbstractCloseableIteration<>() {
-			CloseableIteration<BindingSet, QueryEvaluationException> it;
+			CloseableIteration<BindingSet> it;
 
 			@Override
 			public boolean hasNext() throws QueryEvaluationException {
@@ -59,7 +59,6 @@ public interface BatchQueryEvaluationStep extends QueryEvaluationStep {
 
 			@Override
 			protected void handleClose() throws QueryEvaluationException {
-				super.handleClose();
 				if (it != null) {
 					it.close();
 					it = null;
@@ -68,7 +67,7 @@ public interface BatchQueryEvaluationStep extends QueryEvaluationStep {
 		};
 	}
 
-	default CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
+	default CloseableIteration<BindingSet> evaluate(List<BindingSet> bindingSets) {
 		return evaluateSerial(this, bindingSets);
 	}
 }

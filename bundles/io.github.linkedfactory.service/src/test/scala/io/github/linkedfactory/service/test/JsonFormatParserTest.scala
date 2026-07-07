@@ -19,8 +19,10 @@ import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.service.util.JsonFormatParser
 import net.enilink.komma.core.URIs
 import net.liftweb.common.Full
-import net.liftweb.json.JsonAST._
-import net.liftweb.json.JsonDSL._
+import org.json4s._
+import org.json4s.native.JsonMethods._
+import org.json4s.JsonDSL._
+import org.json4s.JsonAST._
 import org.junit.{Assert, Test}
 
 

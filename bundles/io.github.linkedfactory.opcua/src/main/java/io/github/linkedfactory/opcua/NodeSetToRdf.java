@@ -60,7 +60,6 @@ public class NodeSetToRdf {
 
         model = modelSet.createModel(URIs.createURI("http://example.org/opcua/"));
         model.setLoaded(true);
-        model.getModelSet().getDataChangeSupport().setEnabled(null, false);
     }
 
     URI toUri(NodeClass nodeClass) {

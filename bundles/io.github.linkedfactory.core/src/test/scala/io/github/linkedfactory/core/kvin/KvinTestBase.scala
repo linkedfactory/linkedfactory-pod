@@ -15,26 +15,28 @@
  */
 package io.github.linkedfactory.core.kvin
 
-import net.enilink.komma.core.URIs
-import org.junit.Assert._
+import net.enilink.komma.core.{URI, URIs}
+import org.junit.Assert.*
 import org.junit.Test
 
 import java.io.{File, IOException}
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.util.Random
+
+import scala.compiletime.uninitialized
 
 /**
  * Tests for the LevelDB-based time series store.
  */
 abstract class KvinTestBase {
-  val valueProperty = URIs.createURI("property:value")
+  val valueProperty: URI = URIs.createURI("property:value")
   val seed = 200
-  var storeDirectory: File = _
-  var store: Kvin = _
+  var storeDirectory: File = uninitialized
+  var store: Kvin = uninitialized
 
-  def deleteDirectory(dir: Path) {
+  def deleteDirectory(dir: Path): Unit = {
     // delete store directory
     Files.walkFileTree(dir, new SimpleFileVisitor[Path]() {
       override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = {
@@ -50,7 +52,7 @@ abstract class KvinTestBase {
   }
 
   @Test
-  def testWriteMultiple {
+  def testWriteMultiple(): Unit = {
     val nrs = Array.fill(10)(Random.nextInt(Integer.MAX_VALUE))
     val count = 1000
     var rand = new Random(seed)
@@ -58,8 +60,8 @@ abstract class KvinTestBase {
       val randomNr = nrs(rand.nextInt(nrs.length))
       val uri = URIs.createURI("http://example.org/item-" + randomNr + "/subitem/subsubitem-" + randomNr + "/measured-point-1")
 
-      val time = Math.abs(rand.nextInt)
-      val value = rand.nextInt
+      val time = Math.abs(rand.nextInt())
+      val value = rand.nextInt()
       store.put(new KvinTuple(uri, valueProperty, null, time, value))
     }
     rand = new Random(seed)
@@ -67,25 +69,25 @@ abstract class KvinTestBase {
       val randomNr = nrs(rand.nextInt(nrs.length))
       val uri = URIs.createURI("http://example.org/item-" + randomNr + "/subitem/subsubitem-" + randomNr + "/measured-point-1")
 
-      val time = Math.abs(rand.nextInt)
-      val expected = rand.nextInt
+      val time = Math.abs(rand.nextInt())
+      val expected = rand.nextInt()
       val r = store.fetch(uri, valueProperty, null, time, time, 1, 0, null)
 
       assertEquals(expected, r.toList.asScala.head.value)
     }
   }
 
-  def itemUri(nr: Int) = URIs.createURI("http://example.org/l1/l2/item-" + nr + "/measure")
+  def itemUri(nr: Int): URI = URIs.createURI("http://example.org/l1/l2/item-" + nr + "/measure")
 
-  def propertyUri(nr: Int) = URIs.createURI("http://example.org/p" + nr)
+  def propertyUri(nr: Int): URI = URIs.createURI("http://example.org/p" + nr)
 
   def addData(items: Int, values: Int) : List[KvinTuple] = {
     val rand = new Random(seed)
     (1 to items).flatMap{ nr =>
       val uri = itemUri(nr)
       (1 to values).map { _ =>
-        val time = Math.abs(rand.nextInt)
-        val value = rand.nextInt
+        val time = Math.abs(rand.nextInt())
+        val value = rand.nextInt()
         val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, value)
         store.put(tuple)
         tuple
@@ -94,27 +96,27 @@ abstract class KvinTestBase {
   }
 
   @Test
-  def testProperties {
+  def testProperties(): Unit = {
     val rand = new Random(seed)
     for (itemNr <- 1 to 10) {
       val uri = itemUri(itemNr)
       for (propertyNr <- 1 to 5) {
         val pUri = propertyUri(propertyNr)
         for (i <- 1 to 10) {
-          val time = Math.abs(rand.nextInt)
-          val value = rand.nextInt
+          val time = Math.abs(rand.nextInt())
+          val value = rand.nextInt()
           store.put(new KvinTuple(uri, pUri, null, time, value))
         }
       }
     }
 
     val item4 = itemUri(4)
-    val properties = (1 to 5).map(propertyUri(_)).toSet
+    val properties = (1 to 5).map(propertyUri).toSet
     assertEquals(properties, store.properties(item4, null).toList.asScala.toSet)
   }
 
   @Test
-  def testLimit {
+  def testLimit(): Unit = {
     addData(3, 50)
     var limit = 5
     assertEquals(limit, store.fetch(itemUri(1), valueProperty, null, limit).toList.size)
@@ -123,7 +125,7 @@ abstract class KvinTestBase {
   }
 
   @Test
-  def testAllProperties {
+  def testAllProperties(): Unit = {
     val data = addData(3, 10)
     val dataByItem = data.groupBy(_.item)
     assertEquals(dataByItem(itemUri(1)).sortBy(_.time),
@@ -132,7 +134,7 @@ abstract class KvinTestBase {
   }
 
   //@Test
-  def testDelete {
+  def testDelete(): Unit = {
     val valueCount = 5
     addData(3, valueCount)
 
@@ -150,7 +152,7 @@ abstract class KvinTestBase {
   }
 
   @Test
-  def testInterval {
+  def testInterval(): Unit = {
     val rand = new Random(seed)
     val points = 100
     val pointDistance: Long = 100
@@ -159,7 +161,7 @@ abstract class KvinTestBase {
       val uri = itemUri(nr)
       for (i <- 0 until points) {
         val time = startTime - i * pointDistance
-        val value = rand.nextInt
+        val value = rand.nextInt()
         store.put(new KvinTuple(uri, valueProperty, null, time, value))
       }
     }

@@ -15,12 +15,12 @@
  */
 package io.github.linkedfactory.service.util
 
-import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
+import io.github.linkedfactory.core.kvin.{KvinTuple, Record}
 import net.enilink.komma.core.{URI, URIs}
+import net.liftweb.common.*
 import net.liftweb.common.Box.box2Iterable
-import net.liftweb.common._
-import net.liftweb.json.JsonAST._
-import net.liftweb.json.JsonDSL._
+import org.json4s.*
+import org.json4s.JsonAST.*
 
 import javax.xml.datatype.DatatypeFactory
 
@@ -30,7 +30,7 @@ import javax.xml.datatype.DatatypeFactory
 object JsonFormatParser extends Loggable {
   val dtFactoryLocal = new ThreadLocal[DatatypeFactory]
 
-  def datatypeFactory = {
+  def datatypeFactory: DatatypeFactory = {
     var factory = dtFactoryLocal.get
     if (factory == null) {
       factory = DatatypeFactory.newInstance
@@ -55,8 +55,8 @@ object JsonFormatParser extends Loggable {
     }
 
     def objectToRecord(o: JObject): Record = o.obj.foldLeft(Record.NULL) { case (e, field) =>
-      val property = resolveUri(field.name, activeContexts)
-      parseValue(field.value) match {
+      val property = resolveUri(field._1, activeContexts)
+      parseValue(field._2) match {
         case Full(value) => e.append(new Record(property, value))
         case _ => e
       }
@@ -66,7 +66,7 @@ object JsonFormatParser extends Loggable {
       case null | JNothing =>
         Failure("Invalid value")
       case JArray(values) =>
-        Full(values.flatMap(parseValue(_)).toArray)
+        Full(values.flatMap(parseValue).toArray)
       case obj: JObject =>
         obj \ "@id" match {
           case JString(id) => Full(resolveUri(id, activeContexts))
@@ -81,13 +81,13 @@ object JsonFormatParser extends Loggable {
       var generatedSeqNr = -1
       val result = values.map {
         // { "time" : 123, "seqNr" : 2, "value" : 1.3 }
-        case JObject(fields) =>
-          var seqNr = fields \ "seqNr" match {
+        case o @ JObject(_) =>
+          var seqNr = o \ "seqNr" match {
             case JInt(n) => n.intValue
             case _ => 0
           }
 
-          val time = (fields \ "time").toOpt.getOrElse(fields \ "t") match {
+          val time = (o \ "time").toOption.getOrElse(o \ "t") match {
             case JString(s) => datatypeFactory.newXMLGregorianCalendar(s).toGregorianCalendar.getTimeInMillis
             case JInt(n) => n.longValue
             case _ =>
@@ -99,7 +99,7 @@ object JsonFormatParser extends Loggable {
               currentTime
           }
 
-          parseValue((fields \ "value").toOpt.getOrElse(fields \ "v")) match {
+          parseValue((o \ "value").toOption.getOrElse(o \ "v")) match {
             case Full(value) =>
               Full(new KvinTuple(item, property, context, time, seqNr, value))
             case _ =>
@@ -158,7 +158,7 @@ object JsonFormatParser extends Loggable {
       case JObject(fields) => fields.flatMap {
         case JField(item, itemData) if item.equals("@context") => activeContexts = itemData :: activeContexts; None
         // "item" : { ... }
-        case JField(item, itemData) if !item.equals("@context") =>
+        case JField(item, itemData) =>
           // resolve relative URIs
           var itemUri = resolveUri(item, activeContexts)
           if (itemUri.lastSegment == "") itemUri = itemUri.trimSegments(1)
@@ -176,7 +176,7 @@ object JsonFormatParser extends Loggable {
               }
             case _ => Failure("Invalid data: Expected an object with property keys.")
           }
-      }.foldRight(Empty: Box[List[KvinTuple]])(collectErrors _)
+      }.foldRight(Empty: Box[List[KvinTuple]])(collectErrors)
       case _ => Failure("Invalid data")
     }
   }

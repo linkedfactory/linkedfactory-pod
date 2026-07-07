@@ -20,7 +20,6 @@ import io.github.linkedfactory.core.kvin.http.KvinHttp;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.core.kvin.util.KvinTupleGenerator;
 import io.github.linkedfactory.service.KvinService;
-import io.github.linkedfactory.service.KvinServiceTestBase;
 import io.github.linkedfactory.service.MockHttpServletRequest;
 import net.enilink.komma.core.KommaModule;
 import net.enilink.komma.core.URI;

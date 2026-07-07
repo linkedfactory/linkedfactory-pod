@@ -17,7 +17,7 @@ import java.util.Deque;
 import java.util.List;
 
 public class Helpers {
-	public static CloseableIteration<BindingSet, QueryEvaluationException> compareAndBind(BindingSet bs, Var variable, Value valueToBind) {
+	public static CloseableIteration<BindingSet> compareAndBind(BindingSet bs, Var variable, Value valueToBind) {
 		Value varValue = DefaultEvaluationStrategy.getVarValue(variable, bs);
 		if (varValue == null) {
 			CompositeBindingSet newBs = new CompositeBindingSet(bs);

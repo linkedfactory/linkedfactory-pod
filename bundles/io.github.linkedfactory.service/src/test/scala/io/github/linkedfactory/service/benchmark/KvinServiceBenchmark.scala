@@ -20,16 +20,17 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 import java.util
 import java.util.concurrent.LinkedBlockingQueue
-import javax.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletRequest
 import scala.util.Random
+import scala.compiletime.uninitialized
 
 /**
  * Companion object of unit tests for the KVIN service endpoint
  */
 object KvinServiceBenchmark {
   var modelSet: IModelSet = null
-  var storeDirectory: File = _
-  var store: Kvin = _
+  var storeDirectory: File = uninitialized
+  var store: Kvin = uninitialized
 
   @BeforeClass
   def setup(): Unit = {
@@ -41,7 +42,7 @@ object KvinServiceBenchmark {
     modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"))
     Globals.contextModelSet.default.set(Full(modelSet))
 
-    createStore
+    createStore()
   }
 
   @AfterClass
@@ -54,13 +55,13 @@ object KvinServiceBenchmark {
     deleteDirectory(storeDirectory.toPath)
   }
 
-  def createStore {
+  def createStore(): Unit = {
     storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis + "-" + Random.nextInt(1000) + "/")
     storeDirectory.deleteOnExit
     store = new KvinLevelDb(storeDirectory)
   }
 
-  def deleteDirectory(dir: Path) {
+  def deleteDirectory(dir: Path): Unit = {
     // delete store directory
     Files.walkFileTree(dir, new SimpleFileVisitor[Path]() {
       override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = {
@@ -123,7 +124,7 @@ class KvinServiceBenchmark {
     val inserter = new Thread() {
       override def run() : Unit = {
         var finished = false
-        do {
+        while (!finished) {
           queue.take() match {
             case None => finished = true
             case Some(json) =>
@@ -134,7 +135,7 @@ class KvinServiceBenchmark {
             }
             kvinRest(toReq(postReq))().map(_.toResponse.code)
           }
-        } while (!finished)
+        }
       }
     }
     inserter.start()
@@ -146,7 +147,7 @@ class KvinServiceBenchmark {
       val uri = URIs.createURI("http://linkedfactory.github.io/" + randomNr + "/e3fabrik/rollex/" + randomNr + "/measured-point-1")
       val ctx = URIs.createURI("ctx:" + randomNr)
 
-      val value = if (randomNr % 2 == 0) rand.nextGaussian else rand.nextLong(100000)
+      val value = if (randomNr % 2 == 0) rand.nextGaussian() else rand.nextLong(100000)
 
       tuples.add(new KvinTuple(uri, valueProperty, ctx, currentTime, value))
       currentTime += rand.nextInt(1000)

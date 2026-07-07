@@ -43,7 +43,7 @@ public class KvinFederatedService implements FederatedService {
 
     @Override
     public boolean ask(Service service, BindingSet bindings, String baseUri) throws QueryEvaluationException {
-        final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
+        final CloseableIteration<BindingSet> iter = evaluate(service,
                 new SingletonIteration<>(bindings), baseUri);
         try {
             while (iter.hasNext()) {
@@ -58,9 +58,9 @@ public class KvinFederatedService implements FederatedService {
     }
 
     @Override
-    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
+    public CloseableIteration<BindingSet> evaluate(
             Service service,
-            CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri)
+            CloseableIteration<BindingSet> bindings, String baseUri)
             throws QueryEvaluationException {
         if (!bindings.hasNext()) {
             return new EmptyIteration<>();
@@ -102,7 +102,7 @@ public class KvinFederatedService implements FederatedService {
             dataset.addDefaultGraph(vf.createIRI(this.contextProvider.getContext().toString()));
         }
         EvaluationStrategy strategy = new KvinEvaluationStrategy(kvin, executorService, scanner, vf, dataset, null, valueToData);
-        List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
+        List<CloseableIteration<BindingSet>> resultIters = new ArrayList<>();
 
         var precompiled = strategy.precompile(service.getArg());
         if (precompiled instanceof BatchQueryEvaluationStep) {
@@ -143,10 +143,10 @@ public class KvinFederatedService implements FederatedService {
     }
 
     @Override
-    public CloseableIteration<BindingSet, QueryEvaluationException> select(
+    public CloseableIteration<BindingSet> select(
             Service service,
             final Set<String> projectionVars, BindingSet bindings, String baseUri) throws QueryEvaluationException {
-        final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
+        final CloseableIteration<BindingSet> iter = evaluate(service,
                 new SingletonIteration<>(bindings), baseUri);
         if (service.getBindingNames().equals(projectionVars)) {
             return iter;

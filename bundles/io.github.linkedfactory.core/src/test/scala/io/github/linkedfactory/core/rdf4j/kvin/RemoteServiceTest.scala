@@ -34,14 +34,16 @@ import java.nio.charset.StandardCharsets
 import java.{lang, util}
 import scala.util.Random
 
+import scala.compiletime.uninitialized
+
 class RemoteServiceTest {
   val seed = 200
   val valueProperty: URI = URIs.createURI("property:value")
   val START_TIME = 1000
 
-  var storeDirectory: File = _
-  var store: Kvin = _
-  var repository: Repository = _
+  var storeDirectory: File = uninitialized
+  var store: Kvin = uninitialized
+  var repository: Repository = uninitialized
 
   object kvinHttpInstance {
     var count = 0
@@ -113,11 +115,11 @@ class RemoteServiceTest {
               val jsonParser = new JsonFormatParser(new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8)))
               jsonParser.parse
             }
-          }, getExecutorService _, null,true)
+          }, () => getExecutorService, null,true)
           kvinHttpInstance.count = kvinHttpInstance.count + 1
           return service
         }
-        val service = new KvinFederatedService(store, getExecutorService _, null,false)
+        val service = new KvinFederatedService(store, () => getExecutorService, null,false)
         service
       }
     })

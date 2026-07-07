@@ -25,9 +25,9 @@ import net.liftweb.common.Box.box2Iterable
 import net.liftweb.common._
 import net.liftweb.http.rest.RestHelper
 import net.liftweb.http.{InMemoryResponse, JsonResponse, LiftResponse, OkResponse, OutputStreamResponse, Req, S}
-import net.liftweb.json.Extraction.decompose
-import net.liftweb.json.JsonAST._
-import net.liftweb.json.JsonDSL._
+import org.json4s._
+import org.json4s.native.JsonMethods.{compact, render as renderJson}
+import org.json4s.JsonDSL._
 import net.liftweb.util.Helpers._
 import org.apache.commons.csv.{CSVFormat, CSVPrinter}
 
@@ -154,7 +154,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           // (ts : Long) => ts.toString
           def toString(ts: Long) = ts.toString
 
-          toString _
+          toString
         }
       }
 
@@ -162,7 +162,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         JField(e.getProperty.toString, e.getValue match {
           case r: Record => recordToJson(r)
           case uri: URI => JObject(JField("@id", uri.toString))
-          case other => decompose(other)
+          case other => Extraction.decompose(other)
         })
       }.toList)
 
@@ -171,11 +171,11 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         case null => "null"
         case b: Boolean => b.toString
         case n: Number => n.toString
-        case uri: URI => compactRender(JObject(JField("@id", uri.toString)))
-        case x: JValue => compactRender(x)
-        case e: Record => compactRender(recordToJson(e))
-        case a: Array[_] => a.view.map(value2Str(_, quoteStrings)).mkString("[", ",", "]")
-        case other if quoteStrings => compactRender(JString(other.toString))
+        case uri: URI => compact(renderJson(JObject(JField("@id", uri.toString))))
+        case x: JValue => compact(renderJson(x))
+        case e: Record => compact(renderJson(recordToJson(e)))
+        case a: Array[?] => a.view.map(value2Str(_, quoteStrings)).mkString("[", ",", "]")
+        case other if quoteStrings => compact(renderJson(JString(other.toString)))
         case other => other.toString
       }
 
@@ -232,7 +232,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             var finished = false
             while (!finished) {
               val nextTuples = itemData.keys.filter(_ != null)
-              val maxTuple = if (nextTuples.isEmpty) null else nextTuples.max(ordering)
+              val maxTuple = if (nextTuples.isEmpty) null else nextTuples.max(using ordering)
               if (maxTuple != null) {
                 // print the row, properties without values at row timestamp stay unset
                 csvPrinter.printRecord((formatDate(maxTuple.time) :: itemData.map(d => {
@@ -266,7 +266,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   // handle JSON post content
-  def saveValues(json: JValue, path: List[String], currentTime: Long): Box[_] = {
+  def saveValues(json: JValue, path: List[String], currentTime: Long): Box[?] = {
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
@@ -276,7 +276,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   // handle JSON post content
-  def saveValues(in: InputStream, path: List[String], currentTime: Long): Box[_] = {
+  def saveValues(in: InputStream, path: List[String], currentTime: Long): Box[?] = {
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
@@ -290,7 +290,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   // handle CSV post content
-  def saveCsvValues(in: InputStream, path: List[String], currentTime: Long): Box[_] = {
+  def saveCsvValues(in: InputStream, path: List[String], currentTime: Long): Box[?] = {
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
@@ -307,7 +307,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   // handle InfluxDB line protocol content
-  def saveLineValues(is: InputStream, path: List[String], currentTime: Long): Box[_] = {
+  def saveLineValues(is: InputStream, path: List[String], currentTime: Long): Box[?] = {
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 

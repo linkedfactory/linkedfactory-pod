@@ -23,7 +23,7 @@ import scala.xml.Text
 class GetObject(objectURI: URI) {
 
   def render(in: NodeSeq): NodeSeq = {
-		  Text(objectURI.toString)
+    Text(objectURI.toString)
   }
 
 }

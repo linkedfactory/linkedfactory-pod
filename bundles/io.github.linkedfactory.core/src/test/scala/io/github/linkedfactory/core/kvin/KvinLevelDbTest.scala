@@ -29,26 +29,26 @@ import scala.jdk.CollectionConverters._
  */
 class KvinLevelDbTest extends KvinTestBase {
   @Before
-  def createStore {
+  def createStore(): Unit = {
     storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis + "-" + Random.nextInt(1000) + "/")
-    storeDirectory.deleteOnExit
+    storeDirectory.deleteOnExit()
     store = new KvinLevelDb(storeDirectory)
   }
 
-  def recreateStore: Unit = {
+  def recreateStore(): Unit = {
     store.close()
     store = new KvinLevelDb(storeDirectory)
   }
 
   @After
-  def closeStore {
-    store.close
+  def closeStore(): Unit = {
+    store.close()
     store = null
     deleteDirectory(storeDirectory.toPath)
   }
 
   @Test
-  def testRecordsParallel {
+  def testRecordsParallel(): Unit = {
     val ctx = null
 
     val points = 100
@@ -69,7 +69,7 @@ class KvinLevelDbTest extends KvinTestBase {
     })
 
     // close and re-open store
-    recreateStore
+    recreateStore()
 
     val queryPoints = points / 2
     val interval = (queryPoints - 1) * pointDistance
@@ -82,13 +82,13 @@ class KvinLevelDbTest extends KvinTestBase {
         .foreach { tuple =>
           val record = tuple.value.asInstanceOf[Record]
           assertEquals(URIs.createURI("some:value#" + tuple.time),
-            record.first(URIs.createURI("prop:value")).getValue())
+            record.first(URIs.createURI("prop:value")).getValue)
         }
     }
   }
 
   @Test
-  def testIds: Unit = {
+  def testIds(): Unit = {
     val points = 100
     val pointDistance: Long = 100
     val startTime: Long = pointDistance * points
@@ -108,7 +108,7 @@ class KvinLevelDbTest extends KvinTestBase {
     val nextIds = store.asInstanceOf[KvinLevelDb].nextIds.map(_.get()).toList
 
     // close and re-open store
-    recreateStore
+    recreateStore()
 
     val nextIdsLoaded = store.asInstanceOf[KvinLevelDb].nextIds.map(_.get()).toList
     assertEquals(nextIds, nextIdsLoaded)

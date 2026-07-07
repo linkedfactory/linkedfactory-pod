@@ -1,7 +1,7 @@
 package io.github.linkedfactory.service
 
 import java.io.{ByteArrayInputStream, InputStream}
-import javax.servlet.ServletInputStream
+import jakarta.servlet.ServletInputStream
 
 /**
  * Lift's version is not fully working. Therefore some modifications are required.
@@ -14,11 +14,11 @@ class MockHttpServletRequest(url: String) extends net.liftweb.mocks.MockHttpServ
 
     override def available(): Int = is.available()
 
-    def isFinished(): Boolean = is.available() == 0
+    def isFinished: Boolean = is.available() == 0
 
-    def isReady(): Boolean = !isFinished()
+    def isReady: Boolean = !isFinished
 
-    def setReadListener(l: javax.servlet.ReadListener): Unit = ()
+    def setReadListener(l: jakarta.servlet.ReadListener): Unit = ()
   }
 
   override def getInputStream(): ServletInputStream = {

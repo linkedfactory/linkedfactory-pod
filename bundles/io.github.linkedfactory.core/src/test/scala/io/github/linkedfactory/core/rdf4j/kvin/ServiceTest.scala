@@ -22,30 +22,30 @@ import net.enilink.komma.core.{URI, URIs}
 import net.enilink.vocab.rdf.RDF
 import org.eclipse.rdf4j.model.Literal
 import org.eclipse.rdf4j.query.QueryLanguage
-import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver
+import org.eclipse.rdf4j.query.algebra.evaluation.federation.{AbstractFederatedServiceResolver, FederatedService}
 import org.eclipse.rdf4j.repository.Repository
 import org.eclipse.rdf4j.repository.sail.SailRepository
 import org.eclipse.rdf4j.sail.memory.MemoryStore
 import org.junit.{After, Assert, Before, Test}
 
-import java.io.{ByteArrayOutputStream, File, IOException}
-import java.nio.charset.StandardCharsets
+import java.io.{File, IOException}
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
-import java.util.concurrent.Executors
+import java.util.concurrent.{ExecutorService, Executors}
+import scala.compiletime.uninitialized
 import scala.util.Random
 
 class ServiceTest {
   val seed = 200
-  val valueProperty = URIs.createURI("property:value")
+  val valueProperty: URI = URIs.createURI("property:value")
   val START_TIME = 1000
 
-  var storeDirectory: File = _
-  var store: Kvin = _
-  var repository: Repository = _
+  var storeDirectory: File = uninitialized
+  var store: Kvin = uninitialized
+  var repository: Repository = uninitialized
 
   @Test
-  def basicTest() {
+  def basicTest(): Unit = {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
@@ -81,7 +81,7 @@ class ServiceTest {
   }
 
   @Test
-  def recordTest() {
+  def recordTest(): Unit = {
     val data = addRecords(2, 10)
 
     val conn = repository.getConnection
@@ -121,7 +121,7 @@ class ServiceTest {
   }
 
   @Test
-  def jsonTest() {
+  def jsonTest(): Unit = {
     val data = addRecords(2, 10)
 
     val conn = repository.getConnection
@@ -158,7 +158,7 @@ class ServiceTest {
   }
 
   @Test
-  def arrayTest() {
+  def arrayTest(): Unit = {
     val data = addArrays(2, 10)
 
     val conn = repository.getConnection
@@ -188,7 +188,7 @@ class ServiceTest {
 
         val itemValue = dataByItemAndTime(item)(time).head.value
 
-        val array = itemValue.asInstanceOf[Array[_]]
+        val array = itemValue.asInstanceOf[Array[?]]
         Assert.assertEquals(array(0).toString, bs.getValue("v1").asInstanceOf[Literal].getLabel)
         Assert.assertEquals(array(2).asInstanceOf[Record]
           .first(URIs.createURI("p:nested")).getValue.asInstanceOf[Double],
@@ -201,7 +201,7 @@ class ServiceTest {
   }
 
   @Test
-  def testLimit() {
+  def testLimit(): Unit = {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
@@ -243,7 +243,7 @@ class ServiceTest {
   }
 
   @Test
-  def testJoin() {
+  def testJoin(): Unit = {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
@@ -280,7 +280,7 @@ class ServiceTest {
   }
 
   @Test
-  def testJoinPreviousValue() {
+  def testJoinPreviousValue(): Unit = {
     val data = addData(10, 10)
 
     val conn = repository.getConnection
@@ -331,7 +331,7 @@ class ServiceTest {
       var time = START_TIME
       val uri = itemUri(nr)
       for (i <- 1 to values) yield {
-        val value = rand.nextDouble * rand.nextInt(100)
+        val value = rand.nextDouble() * rand.nextInt(100)
         val seqNr = i % 1000
         val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, seqNr, value)
         store.put(tuple)
@@ -348,7 +348,7 @@ class ServiceTest {
       val uri = itemUri(nr)
       for (i <- 1 to values) yield {
         val value = new Record(URIs.createURI("p:" + i),
-          new Record(URIs.createURI("p:nested"), rand.nextDouble * rand.nextInt(100)))
+          new Record(URIs.createURI("p:nested"), rand.nextDouble() * rand.nextInt(100)))
         val seqNr = i % 1000
         val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, seqNr, value)
         store.put(tuple)
@@ -365,7 +365,7 @@ class ServiceTest {
       val uri = itemUri(nr)
       for (i <- 1 to values) yield {
         val value = Array(1, "2",
-          new Record(URIs.createURI("p:nested"), rand.nextDouble * rand.nextInt(100)))
+          new Record(URIs.createURI("p:nested"), rand.nextDouble() * rand.nextInt(100)))
         val seqNr = i % 1000
         val tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, seqNr, value)
         store.put(tuple)
@@ -376,25 +376,25 @@ class ServiceTest {
   }
 
   @Before
-  def init() {
+  def init(): Unit = {
     createStore()
     createRepository()
   }
 
-  def createStore() {
+  def createStore(): Unit = {
     storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis + "-" + Random.nextInt(1000) + "/")
     storeDirectory.deleteOnExit()
     store = new KvinLevelDb(storeDirectory)
   }
 
-  def createRepository() {
+  def createRepository(): Unit = {
     val memoryStore = new MemoryStore
     val sailRepository = new SailRepository(memoryStore)
 
     sailRepository.setFederatedServiceResolver(new AbstractFederatedServiceResolver() {
-      val executorService = Executors.newCachedThreadPool()
+      val executorService: ExecutorService = Executors.newCachedThreadPool()
 
-      override def createService(url: String) = {
+      override def createService(url: String): FederatedService = {
         val service = new KvinFederatedService(store, () => executorService, null, false)
         service
       }
@@ -410,12 +410,12 @@ class ServiceTest {
   }
 
   @After
-  def closeRepository() {
+  def closeRepository(): Unit = {
     repository.shutDown()
   }
 
   @After
-  def closeStore() {
+  def closeStore(): Unit = {
     store.close()
     store = null
     deleteDirectory(storeDirectory.toPath)

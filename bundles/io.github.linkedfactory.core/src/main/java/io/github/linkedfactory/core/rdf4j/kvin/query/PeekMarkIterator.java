@@ -27,9 +27,9 @@ import org.eclipse.rdf4j.query.QueryEvaluationException;
  * @author Håvard M. Ottestad
  */
 @Experimental
-public class PeekMarkIterator<E> implements CloseableIteration<E, QueryEvaluationException> {
+public class PeekMarkIterator<E> implements CloseableIteration<E> {
 
-	private final CloseableIteration<E, QueryEvaluationException> iterator;
+	private final CloseableIteration<E> iterator;
 	private boolean mark;
 	private ArrayList<E> buffer;
 	private Iterator<E> bufferIterator = Collections.emptyIterator();
@@ -40,7 +40,7 @@ public class PeekMarkIterator<E> implements CloseableIteration<E, QueryEvaluatio
 
 	private boolean closed;
 
-	PeekMarkIterator(CloseableIteration<E, QueryEvaluationException> iterator) {
+	PeekMarkIterator(CloseableIteration<E> iterator) {
 		this.iterator = iterator;
 	}
 
