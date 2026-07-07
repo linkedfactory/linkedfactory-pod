@@ -11,6 +11,54 @@ The core idea is to use an RDF knowledge graph for describing the structure of s
 
 <img style="background-color: white; padding: 15px; width: 100%; max-width: 800px" alt="LinkedFactory semantic linking" src="docs/assets/lf-linking.svg">
 
+## Full-text search
+LinkedFactory Pod can forward RDF statement changes to an external search server through **`fts:FtsSail`**.
+
+Purpose:
+- index literal values for full-text search
+- keep IRIs and named graph context available for exact-match filtering
+- send only committed RDF changes to the search backend
+
+The search server must expose a bulk endpoint, by default:
+- `POST {fts:endpoint}{fts:bulkPath}`
+- `Content-Type: application/json`
+
+Example runtime configuration for a LinkedFactory Pod with a native RDF store and an external search server:
+```ttl
+@prefix rep: <http://www.openrdf.org/config/repository#>.
+@prefix sr: <http://www.openrdf.org/config/repository/sail#>.
+@prefix sail: <http://www.openrdf.org/config/sail#>.
+@prefix ns: <http://www.openrdf.org/config/sail/native#>.
+@prefix fts: <http://linkedfactory.github.io/config/sail/fts#>.
+
+<urn:enilink:data> a models:RepositoryModelSet ;
+    models:repository <urn:linkedfactory:data-repo> .
+
+<urn:linkedfactory:data-repo> a rep:Repository ;
+   rep:repositoryID "linkedfactory-data" ;
+   rep:repositoryImpl [
+      rep:repositoryType "openrdf:SailRepository" ;
+      sr:sailImpl [
+         sail:sailType "kvin:KvinSail" ;
+         sail:delegate [
+            sail:sailType "fts:FtsSail" ;
+            fts:endpoint "http://localhost:9200" ;
+            fts:bulkPath "/fts/bulk" ;
+            fts:failOnError true ;
+            sail:delegate [
+               sail:sailType "openrdf:NativeStore" ;
+               ns:tripleIndexes "cspo,cpos,spoc,posc"
+            ]
+         ]
+      ]
+   ] .
+```
+
+`fts:FtsSail` can also be used with in-memory stores by wrapping `openrdf:MemoryStore` instead of `NativeStore`.
+
+The bulk request format is an `operations` array containing `upsert`, `remove`, `clear`, and `clearContexts` entries. Named graph context is included per statement as `context`.
+
+TODO add federated service to integrate full text search with SPRQL
 ## Data representation
 Formally, the triple-based data model of RDF _(S, P, O)_ is extended to a quad-based data model _(S, P, T, O)_. If named graphs are used to manage multiple RDF datasets then an additional context **C** can be introduced to extend the data model to _(C, S, P, T, O)_. We call this the **Kvin** data model.
 
