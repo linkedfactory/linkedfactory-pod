@@ -43,8 +43,22 @@
 		</dependency>
 		<dependency>
 			<groupId>org.osgi</groupId>
-			<artifactId>osgi.cmpn</artifactId>
-			<version>7.0.0</version>
+			<artifactId>org.osgi.service.component</artifactId>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>org.osgi.service.component.annotations</artifactId>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>org.osgi.service.cm</artifactId>
+			<!-- required at runtime by Apache HTTP Client and therefore not provided -->
+		</dependency>
+		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>org.osgi.service.event</artifactId>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
@@ -150,6 +164,7 @@
 			<groupId>jakarta.servlet</groupId>
 			<artifactId>jakarta.servlet-api</artifactId>
 			<version>6.1.0</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>io.github.pcmind</groupId>

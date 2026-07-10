@@ -26,8 +26,10 @@
 		<bnd.version>7.3.0</bnd.version>
 		<slf4j.version>2.0.18</slf4j.version>
 
-		<linkedfactory.scm.connection>scm:git:git://github.com:linkedfactory/linkedfactory-pod.git</linkedfactory.scm.connection>
-		<linkedfactory.scm.developerConnection>scm:git:git@github.com:linkedfactory/linkedfactory-pod.git</linkedfactory.scm.developerConnection>
+		<linkedfactory.scm.connection>scm:git:git://github.com:linkedfactory/linkedfactory-pod.git
+		</linkedfactory.scm.connection>
+		<linkedfactory.scm.developerConnection>scm:git:git@github.com:linkedfactory/linkedfactory-pod.git
+		</linkedfactory.scm.developerConnection>
 		<linkedfactory.scm.url>https://github.com/linkedfactory/linkedfactory-pod</linkedfactory.scm.url>
 	</properties>
 
@@ -86,7 +88,8 @@
 				</executions>
 				<configuration>
 					<generateGitPropertiesFile>true</generateGitPropertiesFile>
-					<generateGitPropertiesFilename>${project.build.outputDirectory}/git.properties</generateGitPropertiesFilename>
+					<generateGitPropertiesFilename>${project.build.outputDirectory}/git.properties
+					</generateGitPropertiesFilename>
 					<includeOnlyProperties>
 						<includeOnlyProperty>^git.build.(time|version)$</includeOnlyProperty>
 						<includeOnlyProperty>^git.commit.id.(abbrev|full)$</includeOnlyProperty>
@@ -237,6 +240,36 @@
 			</resource>
 		</resources>
 	</build>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>osgi.core</artifactId>
+				<version>8.0.0</version>
+			</dependency>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>org.osgi.service.component</artifactId>
+				<version>1.5.1</version>
+			</dependency>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>org.osgi.service.component.annotations</artifactId>
+				<version>1.5.1</version>
+			</dependency>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>org.osgi.service.cm</artifactId>
+				<version>1.6.1</version>
+			</dependency>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>org.osgi.service.event</artifactId>
+				<version>1.4.1</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<dependencies>
 		<dependency>
