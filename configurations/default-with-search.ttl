@@ -1,0 +1,76 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix models: <http://enilink.net/vocab/komma/models#> .
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+@prefix user: <enilink:user:> .
+@prefix group: <enilink:group:> .
+@prefix auth: <http://enilink.net/vocab/auth#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix config: <enilink:config/> .
+@prefix rep: <http://www.openrdf.org/config/repository#>.
+@prefix sr: <http://www.openrdf.org/config/repository/sail#>.
+@prefix sail: <http://www.openrdf.org/config/sail#>.
+@prefix ns: <http://www.openrdf.org/config/sail/native#>.
+@prefix fts: <http://linkedfactory.github.io/config/sail/fts#>.
+
+# set query timeout to 60 seconds
+config: config:queryTimeout 60000 .
+
+# import definition of administrators group
+<> owl:imports <platform:/plugin/net.enilink.platform.core/config/group-admin.ttl> .
+
+# Define default admin user
+user:admin a foaf:Agent ; auth:password "admin" .
+
+# add admin user to administrators group
+group:Administrators foaf:member user:admin .
+
+# allow anonymous users full access to all models
+<enilink:auth:anonymousAll> a acl:Authorization ; acl:agent user:anonymous ;
+                         acl:accessToClass <http://enilink.net/vocab/komma/models#Model> ;
+                         acl:mode acl:Read, acl:Write, acl:Control .
+
+#<urn:enilink:data> a models:KvinMemoryModelSet ;
+#	models:inference false .
+
+#<urn:enilink:data> a models:KvinPersistentModelSet ;
+#	models:inference false ;
+#	models:repository <workspace:/data/> .
+
+# <urn:enilink:metadata> a models:PersistentModelSet ;
+#    models:inference false ;
+#    models:repository <workspace:/scopeset/meta/> .
+
+<urn:enilink:metadata> a models:PersistentModelSet ;
+    models:inference false ;
+    models:repository <workspace:/dtsc-test/meta/> .
+
+<urn:enilink:data> a models:RepositoryModelSet ;
+    models:repository <urn:linkedfactory:data-repo> .
+
+<urn:linkedfactory:data-repo> a rep:Repository ;
+   rep:repositoryID "linkedfactory-data" ;
+   rdfs:label "LinkedFactory data repository (Kvin + FTS)" ;
+   rep:repositoryImpl [
+      rep:repositoryType "openrdf:SailRepository" ;
+      sr:sailImpl [
+         sail:sailType "kvin:KvinSail" ;
+         sail:delegate [
+            sail:sailType "fts:FtsSail" ;
+            fts:backend "elastic" ;
+            fts:endpoint "http://localhost:9200" ;
+            fts:bulkPath "/fts/bulk" ;
+            fts:searchPath "/fts/_search" ;
+            fts:defaultLimit 100 ;
+            fts:failOnError true ;
+            sail:delegate [
+               sail:sailType "openrdf:NativeStore" ;
+               ns:tripleIndexes "cspo,cpos,spoc,posc"
+            ]
+         ]
+      ]
+   ] .
+
+@prefix login: <plugin://net.enilink.platform.core/Login/> .
+login: login:jaasConfigUrl <jaas.conf> ;
+	login:loginModule [ login:jaasConfigName "LinkedFactory-POD" ; rdfs:label "LinkedFactory-POD" ] .

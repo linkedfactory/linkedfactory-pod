@@ -11,9 +11,12 @@ public class FtsSailConfigTest {
 	@Test
 	public void exportAndParseRoundtripKeepsValues() throws Exception {
 		FtsSailConfig config = new FtsSailConfig();
+		config.setBackend("elastic");
 		config.setEndpoint("http://localhost:9200");
 		config.setBulkPath("/api/bulk");
+		config.setSearchPath("/api/search");
 		config.setFailOnError(false);
+		config.setDefaultLimit(25);
 
 		Model model = new LinkedHashModel();
 		var implNode = config.export(model);
@@ -21,8 +24,11 @@ public class FtsSailConfigTest {
 		FtsSailConfig parsed = new FtsSailConfig();
 		parsed.parse(model, implNode);
 
+		assertEquals("elastic", parsed.getBackend());
 		assertEquals("http://localhost:9200", parsed.getEndpoint());
 		assertEquals("/api/bulk", parsed.getBulkPath());
+		assertEquals("/api/search", parsed.getSearchPath());
 		assertFalse(parsed.isFailOnError());
+		assertEquals(25, parsed.getDefaultLimit());
 	}
 }
