@@ -1,6 +1,7 @@
 package io.github.linkedfactory.core.rdf4j.fts.config;
 
 import io.github.linkedfactory.core.rdf4j.fts.FtsSail;
+import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceConfig;
 import io.github.linkedfactory.core.rdf4j.fts.HttpFtsSearchService;
 import org.eclipse.rdf4j.sail.Sail;
 import org.eclipse.rdf4j.sail.config.SailConfigException;
@@ -31,10 +32,17 @@ public class FtsSailFactory implements SailFactory {
 
 		FtsSail sail;
 		if (config instanceof FtsSailConfig ftsConfig) {
-			sail = new FtsSail(new HttpFtsSearchService(
-					ftsConfig.getEndpoint(),
-					ftsConfig.getBulkPath(),
-					ftsConfig.isFailOnError()));
+			sail = new FtsSail(
+					new HttpFtsSearchService(
+							ftsConfig.getEndpoint(),
+							ftsConfig.getBulkPath(),
+							ftsConfig.isFailOnError()),
+					new FtsFederatedServiceConfig(
+							ftsConfig.getBackend(),
+							ftsConfig.getEndpoint(),
+							ftsConfig.getSearchPath(),
+							ftsConfig.isFailOnError(),
+							ftsConfig.getDefaultLimit()));
 		} else {
 			logger.warn("Config is instance of {} and not FtsSailConfig, using defaults.", config.getClass().getName());
 			sail = new FtsSail(new HttpFtsSearchService());
