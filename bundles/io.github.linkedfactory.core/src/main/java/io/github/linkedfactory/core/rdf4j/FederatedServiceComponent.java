@@ -6,6 +6,7 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.http.KvinHttp;
 import io.github.linkedfactory.core.rdf4j.aas.AasFederatedService;
 import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver;
+import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceResolver;
 import io.github.linkedfactory.core.rdf4j.io.SPARQLResultsParquetWriterFactory;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinFederatedService;
 import io.github.linkedfactory.core.rdf4j.kvin.functions.DateTimeFunction;
@@ -29,6 +30,7 @@ public class FederatedServiceComponent {
 	IModelSet ms;
 	Kvin kvin;
 	AbstractFederatedServiceResolver serviceResolver;
+	AbstractFederatedServiceResolver ftsServiceResolver;
 	@Reference(cardinality = ReferenceCardinality.OPTIONAL)
 	volatile ContextProvider contextProvider;
 
@@ -57,6 +59,7 @@ public class FederatedServiceComponent {
 		if (repositoryBinding != null) {
 			final Repository repository = repositoryBinding.getProvider().get();
 			if (repository instanceof FederatedServiceResolverClient) {
+				ftsServiceResolver = new FtsFederatedServiceResolver();
 				serviceResolver = new BaseFederatedServiceResolver() {
 					@Override
 					protected FederatedService createService(String serviceUrl)
@@ -73,6 +76,8 @@ public class FederatedServiceComponent {
 							return new KvinFederatedService(new KvinHttp(url), this::getExecutorService,
 									() -> contextProvider == null ? Kvin.DEFAULT_CONTEXT : contextProvider.getContext(),
 									true);
+						} else if (serviceUrl.startsWith("fts:")) {
+							return ftsServiceResolver.getService(serviceUrl);
 						}
 						return null;
 					}
@@ -87,6 +92,10 @@ public class FederatedServiceComponent {
 		if (serviceResolver != null) {
 			serviceResolver.shutDown();
 			serviceResolver = null;
+		}
+		if (ftsServiceResolver != null) {
+			ftsServiceResolver.shutDown();
+			ftsServiceResolver = null;
 		}
 	}
 
