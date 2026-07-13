@@ -58,7 +58,21 @@ Example runtime configuration for a LinkedFactory Pod with a native RDF store an
 
 The bulk request format is an `operations` array containing `upsert`, `remove`, `clear`, and `clearContexts` entries. Named graph context is included per statement as `context`.
 
-TODO add federated service to integrate full text search with SPRQL
+Full-text search can be used from SPARQL via federated service queries:
+
+```sparql
+prefix fts: <fts:>
+prefix dtsc: <https://example.org/dtsc/>
+
+select ?iri ?score where {
+  service <fts:> {
+    ?iri fts:keywords "some keywords" ;
+         fts:score ?score .
+  }
+  ?iri dtsc:weight ?weight .
+  filter (?weight > 50)
+}
+```
 ## Data representation
 Formally, the triple-based data model of RDF _(S, P, O)_ is extended to a quad-based data model _(S, P, T, O)_. If named graphs are used to manage multiple RDF datasets then an additional context **C** can be introduced to extend the data model to _(C, S, P, T, O)_. We call this the **Kvin** data model.
 
