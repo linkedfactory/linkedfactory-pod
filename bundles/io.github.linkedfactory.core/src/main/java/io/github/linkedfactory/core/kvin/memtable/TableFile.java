@@ -19,12 +19,14 @@ import java.util.*;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 public class TableFile implements KvinRecordStore {
-	static int LENGTH = 5 * 1014 * 1024;
+	static long LENGTH = 5L * 1024 * 1024;
+
 	Path path;
 	RandomAccessFile rafile;
 	FileChannel channel;
 	MappedByteBuffer buffer;
 	Map<ItemWithContext, List<ItemData>> items = new ConcurrentSkipListMap<>();
+
 	boolean hasPreviousIds = false;
 	long previousItemId;
 	long previousContextId;
@@ -62,36 +64,29 @@ public class TableFile implements KvinRecordStore {
 		ItemWithContext icp = new ItemWithContext(record.itemId(), record.contextId());
 
 		int itemLength = compressedIdsLength(record.itemId(), record.contextId(), record.propertyId());
-
-		ByteBuffer key = ByteBuffer.allocate(Varint.calcLengthUnsigned(record.time()) +
-				Varint.calcLengthUnsigned(record.seqNr()));
-		Varint.writeUnsigned(key, record.time());
-		Varint.writeUnsigned(key, record.seqNr());
-		key.flip();
-
-		int keyLength = key.remaining();
+		int keyLength = Varint.calcLengthUnsigned(record.time())
+				+ Varint.calcLengthUnsigned(record.seqNr());
 		int valueLength = ((byte[]) record.value()).length;
-		int requiredSpace = Varint.MAX_BYTES * 2 + itemLength + keyLength + valueLength;
+
+		int requiredSpace = Varint.MAX_BYTES + itemLength + keyLength + valueLength;
 		if (buffer.remaining() < requiredSpace) {
-			buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, buffer.capacity() * 2);
-			System.out.println("buffer size: " + buffer.capacity());
+			buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, buffer.capacity() * 2L);
 		}
+
+		int recordStart = buffer.position();
 		Varint.writeUnsigned(buffer, itemLength + keyLength + valueLength);
 		writeCompressedIds(record.itemId(), record.contextId(), record.propertyId());
+		// write key (time, seqNr) directly, no temporary buffer
+		Varint.writeUnsigned(buffer, record.time());
+		Varint.writeUnsigned(buffer, record.seqNr());
+		buffer.put((byte[]) record.value());
 
-		int[] ranges = new int[4];
-		ranges[0] = buffer.position();
-		ranges[1] = keyLength;
-		buffer.put(key);
-		ranges[2] = buffer.position();
-		ranges[3] = valueLength;
-		buffer.put(ByteBuffer.wrap((byte[]) record.value()));
 		hasPreviousIds = true;
 		previousItemId = record.itemId();
 		previousContextId = record.contextId();
 		previousPropertyId = record.propertyId();
 
-		addRange(icp, record.propertyId(), ranges);
+		addRange(icp, record.propertyId(), recordStart);
 	}
 
 	@Override
@@ -100,12 +95,13 @@ public class TableFile implements KvinRecordStore {
 	}
 
 	@Override
-	public IExtendedIterator<KvinRecord> fetch(long itemId, Long propertyId, Long contextId, long end, long begin, long limit,
-	                                           long interval, String op) {
+	public IExtendedIterator<KvinRecord> fetch(long itemId, Long propertyId, Long contextId, long end, long begin,
+	                                           long limit, long interval, String op) {
 		if (limit <= 0) {
 			return NiceIterator.emptyIterator();
 		}
-		var itemDataList = items.get(new ItemWithContext(itemId, contextOrDefault(contextId)));
+		long ctx = contextOrDefault(contextId);
+		var itemDataList = items.get(new ItemWithContext(itemId, ctx));
 		if (itemDataList == null || itemDataList.isEmpty()) {
 			return NiceIterator.emptyIterator();
 		}
@@ -119,18 +115,19 @@ public class TableFile implements KvinRecordStore {
 		long nextTimeThreshold = end;
 
 		for (ItemData itemData : selected) {
-			List<int[]> ranges = getSortedRanges(itemData);
-			for (int[] range : ranges) {
-				long time = readTime(range);
+			OffsetList ranges = getSortedRanges(itemData);
+			for (int i = 0; i < ranges.size; i++) {
+				int recordStart = ranges.a[i];
+				long time = readTime(recordStart);
 				if (time > end || time < begin) {
 					continue;
 				}
 				if (interval > 0 && time > nextTimeThreshold) {
 					continue;
 				}
-				int seqNr = readSeqNr(range);
-				byte[] value = readValue(range);
-				result.add(new KvinRecord(itemId, contextOrDefault(contextId), itemData.propertyId, time, seqNr, value));
+				int seqNr = readSeqNr(recordStart);
+				byte[] value = readValue(recordStart);
+				result.add(new KvinRecord(itemId, ctx, itemData.propertyId, time, seqNr, value));
 				if (interval > 0) {
 					nextTimeThreshold = time - interval;
 				}
@@ -200,56 +197,38 @@ public class TableFile implements KvinRecordStore {
 	int compressedIdsLength(long itemId, long contextId, long propertyId) {
 		int sharedPrefix = sharedPrefix(itemId, contextId, propertyId);
 		int length = Varint.calcLengthUnsigned(sharedPrefix);
-		if (sharedPrefix < 1) {
-			length += Varint.calcLengthUnsigned(itemId);
-		}
-		if (sharedPrefix < 2) {
-			length += Varint.calcLengthUnsigned(contextId);
-		}
-		if (sharedPrefix < 3) {
-			length += Varint.calcLengthUnsigned(propertyId);
-		}
+		if (sharedPrefix < 1) length += Varint.calcLengthUnsigned(itemId);
+		if (sharedPrefix < 2) length += Varint.calcLengthUnsigned(contextId);
+		if (sharedPrefix < 3) length += Varint.calcLengthUnsigned(propertyId);
 		return length;
 	}
 
 	void writeCompressedIds(long itemId, long contextId, long propertyId) {
 		int sharedPrefix = sharedPrefix(itemId, contextId, propertyId);
 		Varint.writeUnsigned(buffer, sharedPrefix);
-		if (sharedPrefix < 1) {
-			Varint.writeUnsigned(buffer, itemId);
-		}
-		if (sharedPrefix < 2) {
-			Varint.writeUnsigned(buffer, contextId);
-		}
-		if (sharedPrefix < 3) {
-			Varint.writeUnsigned(buffer, propertyId);
-		}
+		if (sharedPrefix < 1) Varint.writeUnsigned(buffer, itemId);
+		if (sharedPrefix < 2) Varint.writeUnsigned(buffer, contextId);
+		if (sharedPrefix < 3) Varint.writeUnsigned(buffer, propertyId);
 	}
 
 	int sharedPrefix(long itemId, long contextId, long propertyId) {
-		if (!hasPreviousIds || itemId != previousItemId) {
-			return 0;
-		}
-		if (contextId != previousContextId) {
-			return 1;
-		}
-		if (propertyId != previousPropertyId) {
-			return 2;
-		}
+		if (!hasPreviousIds || itemId != previousItemId) return 0;
+		if (contextId != previousContextId) return 1;
+		if (propertyId != previousPropertyId) return 2;
 		return 3;
 	}
 
 	public int findIndex(List<ItemData> itemData, long propertyId) {
 		int low = 0;
 		int high = itemData.size() - 1;
-
 		while (low <= high) {
 			int mid = low + ((high - low) / 2);
-			if (itemData.get(mid).propertyId < propertyId) {
+			long p = itemData.get(mid).propertyId;
+			if (p < propertyId) {
 				low = mid + 1;
-			} else if (itemData.get(mid).propertyId > propertyId) {
+			} else if (p > propertyId) {
 				high = mid - 1;
-			} else if (itemData.get(mid).propertyId == propertyId) {
+			} else {
 				return mid;
 			}
 		}
@@ -286,19 +265,20 @@ public class TableFile implements KvinRecordStore {
 		return Collections.singletonList(itemDataList.get(index));
 	}
 
-	List<int[]> getSortedRanges(ItemData itemData) {
+	OffsetList getSortedRanges(ItemData itemData) {
 		synchronized (itemData.unsorted) {
 			if (!itemData.unsorted.isEmpty()) {
-				List<int[]> merged = new ArrayList<>();
+				OffsetList merged = new OffsetList(
+						(itemData.sorted != null ? itemData.sorted.size : 0) + itemData.unsorted.size);
 				if (itemData.sorted != null) {
 					merged.addAll(itemData.sorted);
 				}
 				merged.addAll(itemData.unsorted);
 				itemData.unsorted.clear();
-				merged.sort(this::compareRanges);
+				sortOffsets(merged);
 				itemData.sorted = merged;
 			}
-			return itemData.sorted != null ? itemData.sorted : Collections.emptyList();
+			return itemData.sorted != null ? itemData.sorted : OffsetList.EMPTY;
 		}
 	}
 
@@ -311,7 +291,38 @@ public class TableFile implements KvinRecordStore {
 		}
 	}
 
-	int compareRanges(int[] a, int[] b) {
+	// ---- primitive-offset sort (descending time, then descending seqNr) ----
+
+	void sortOffsets(OffsetList list) {
+		quicksort(list.a, 0, list.size - 1);
+	}
+
+	private void quicksort(int[] a, int lo, int hi) {
+		while (lo < hi) {
+			int pivot = a[lo + (hi - lo) / 2];
+			int i = lo, j = hi;
+			while (i <= j) {
+				while (compareOffsets(a[i], pivot) < 0) i++;
+				while (compareOffsets(a[j], pivot) > 0) j--;
+				if (i <= j) {
+					int t = a[i];
+					a[i] = a[j];
+					a[j] = t;
+					i++;
+					j--;
+				}
+			}
+			if (j - lo < hi - i) {
+				quicksort(a, lo, j);
+				lo = i;
+			} else {
+				quicksort(a, i, hi);
+				hi = j;
+			}
+		}
+	}
+
+	int compareOffsets(int a, int b) {
 		long timeA = readTime(a);
 		long timeB = readTime(b);
 		if (timeA != timeB) {
@@ -320,18 +331,44 @@ public class TableFile implements KvinRecordStore {
 		return Integer.compare(readSeqNr(b), readSeqNr(a));
 	}
 
-	long readTime(int[] range) {
-		return Varint.readUnsigned(buffer, range[0]);
+	// ---- record navigation from a single start offset ----
+
+	private int payloadStart(int recordStart) {
+		return recordStart + Varint.firstToLength(buffer.get(recordStart));
 	}
 
-	int readSeqNr(int[] range) {
-		return (int) Varint.readUnsigned(buffer, 
-				range[0] + Varint.firstToLength(buffer.get(range[0])));
+	private int payloadEnd(int recordStart) {
+		int p = payloadStart(recordStart);
+		long len = Varint.readUnsigned(buffer, recordStart);
+		return p + (int) len;
 	}
 
-	byte[] readValue(int[] range) {
-		byte[] value = new byte[range[3]];
-		buffer.get(range[2], value);
+	private int keyStart(int recordStart) {
+		int p = payloadStart(recordStart);
+		long sharedPrefix = Varint.readUnsigned(buffer, p);
+		p += Varint.firstToLength(buffer.get(p));
+		if (sharedPrefix < 1) p += Varint.firstToLength(buffer.get(p));
+		if (sharedPrefix < 2) p += Varint.firstToLength(buffer.get(p));
+		if (sharedPrefix < 3) p += Varint.firstToLength(buffer.get(p));
+		return p;
+	}
+
+	long readTime(int recordStart) {
+		return Varint.readUnsigned(buffer, keyStart(recordStart));
+	}
+
+	int readSeqNr(int recordStart) {
+		int ks = keyStart(recordStart);
+		return (int) Varint.readUnsigned(buffer, ks + Varint.firstToLength(buffer.get(ks)));
+	}
+
+	byte[] readValue(int recordStart) {
+		int ks = keyStart(recordStart);
+		int seqPos = ks + Varint.firstToLength(buffer.get(ks));
+		int valueStart = seqPos + Varint.firstToLength(buffer.get(seqPos));
+		int valueLength = payloadEnd(recordStart) - valueStart;
+		byte[] value = new byte[valueLength];
+		buffer.get(valueStart, value);
 		return value;
 	}
 
@@ -339,25 +376,28 @@ public class TableFile implements KvinRecordStore {
 		long removed = 0;
 
 		synchronized (itemData.unsorted) {
-			Iterator<int[]> it = itemData.unsorted.iterator();
-			while (it.hasNext()) {
-				int[] range = it.next();
-				long time = readTime(range);
-				if (time >= begin && time <= end) {
-					it.remove();
-					removed++;
-				}
-			}
-		}
-
-		if (itemData.sorted != null && !itemData.sorted.isEmpty()) {
-			List<int[]> remaining = new ArrayList<>(itemData.sorted.size());
-			for (int[] range : itemData.sorted) {
-				long time = readTime(range);
+			OffsetList kept = new OffsetList(itemData.unsorted.size);
+			for (int i = 0; i < itemData.unsorted.size; i++) {
+				int rs = itemData.unsorted.a[i];
+				long time = readTime(rs);
 				if (time >= begin && time <= end) {
 					removed++;
 				} else {
-					remaining.add(range);
+					kept.add(rs);
+				}
+			}
+			itemData.unsorted.replaceWith(kept);
+		}
+
+		if (itemData.sorted != null && !itemData.sorted.isEmpty()) {
+			OffsetList remaining = new OffsetList(itemData.sorted.size);
+			for (int i = 0; i < itemData.sorted.size; i++) {
+				int rs = itemData.sorted.a[i];
+				long time = readTime(rs);
+				if (time >= begin && time <= end) {
+					removed++;
+				} else {
+					remaining.add(rs);
 				}
 			}
 			itemData.sorted = remaining;
@@ -391,7 +431,6 @@ public class TableFile implements KvinRecordStore {
 			}
 			try {
 				long sharedPrefix = Varint.readUnsigned(bb);
-
 				long itemId = sharedPrefix < 1 ? Varint.readUnsigned(bb) : previousItemId;
 				long contextId = sharedPrefix < 2 ? Varint.readUnsigned(bb) : previousContextId;
 				long propertyId = sharedPrefix < 3 ? Varint.readUnsigned(bb) : previousPropertyId;
@@ -399,16 +438,14 @@ public class TableFile implements KvinRecordStore {
 					break;
 				}
 
-				int keyStart = bb.position();
+				// validate key can be parsed
 				Varint.readUnsigned(bb);
 				Varint.readUnsigned(bb);
-				int keyEnd = bb.position();
-				if (keyEnd > payloadEnd) {
+				if (bb.position() > payloadEnd) {
 					break;
 				}
 
-				int[] ranges = new int[]{keyStart, keyEnd - keyStart, keyEnd, payloadEnd - keyEnd};
-				addRange(new ItemWithContext(itemId, contextId), propertyId, ranges);
+				addRange(new ItemWithContext(itemId, contextId), propertyId, recordStart);
 
 				hasPreviousIds = true;
 				previousItemId = itemId;
@@ -423,27 +460,31 @@ public class TableFile implements KvinRecordStore {
 		buffer.position(bb.position());
 	}
 
-	void addRange(ItemWithContext icp, long propertyId, int[] ranges) {
+	void addRange(ItemWithContext icp, long propertyId, int recordStart) {
 		var itemDataList = items.computeIfAbsent(icp, k -> new ArrayList<>());
-		ItemData itemData;
-		if (itemDataList.isEmpty()) {
-			itemData = new ItemData(propertyId);
-			itemDataList.add(itemData);
-		} else {
-			int index = findIndex(itemDataList, propertyId);
-			if (index >= 0) {
-				itemData = itemDataList.get(index);
-			} else {
+		synchronized (itemDataList) {
+			ItemData itemData;
+			if (itemDataList.isEmpty()) {
 				itemData = new ItemData(propertyId);
-				itemDataList.add(-index - 1, itemData);
+				itemDataList.add(itemData);
+			} else {
+				int index = findIndex(itemDataList, propertyId);
+				if (index >= 0) {
+					itemData = itemDataList.get(index);
+				} else {
+					itemData = new ItemData(propertyId);
+					itemDataList.add(-index - 1, itemData);
+				}
+			}
+			synchronized (itemData.unsorted) {
+				itemData.unsorted.add(recordStart);
 			}
 		}
-		itemData.unsorted.add(ranges);
 	}
 
 	static class ItemWithContext implements Comparable<ItemWithContext> {
-		long itemId;
-		long contextId;
+		final long itemId;
+		final long contextId;
 
 		ItemWithContext(long itemId, long contextId) {
 			this.itemId = itemId;
@@ -452,38 +493,76 @@ public class TableFile implements KvinRecordStore {
 
 		@Override
 		public int compareTo(ItemWithContext o) {
-			long diff = itemId - o.itemId;
-			if (diff != 0) {
-				return diff < 0 ? -1 : 1;
-			}
-			diff = contextId - o.contextId;
-			if (diff != 0) {
-				return diff < 0 ? -1 : 1;
-			}
-			return 0;
+			int c = Long.compare(itemId, o.itemId);
+			return c != 0 ? c : Long.compare(contextId, o.contextId);
 		}
 
 		@Override
 		public boolean equals(Object o) {
 			if (this == o) return true;
-			if (o == null || getClass() != o.getClass()) return false;
+			if (!(o instanceof ItemWithContext)) return false;
 			ItemWithContext iwc = (ItemWithContext) o;
 			return itemId == iwc.itemId && contextId == iwc.contextId;
 		}
 
 		@Override
 		public int hashCode() {
-			return Objects.hash(itemId, contextId);
+			long h = itemId * 31 + contextId;
+			return Long.hashCode(h);
 		}
 	}
 
 	public static class ItemData {
 		final long propertyId;
-		final List<int[]> unsorted = Collections.synchronizedList(new ArrayList<>());
-		volatile List<int[]> sorted;
+		final OffsetList unsorted = new OffsetList();
+		volatile OffsetList sorted;
 
 		ItemData(long propertyId) {
 			this.propertyId = propertyId;
+		}
+	}
+
+	/**
+	 * Growable primitive int list – stores one record-start offset per record.
+	 */
+	static final class OffsetList {
+		static final OffsetList EMPTY = new OffsetList(0);
+
+		int[] a;
+		int size;
+
+		OffsetList() {
+			this(8);
+		}
+
+		OffsetList(int capacity) {
+			a = new int[Math.max(1, capacity)];
+		}
+
+		void add(int v) {
+			if (size == a.length) {
+				a = Arrays.copyOf(a, size + (size >> 1) + 1);
+			}
+			a[size++] = v;
+		}
+
+		void addAll(OffsetList other) {
+			for (int i = 0; i < other.size; i++) {
+				add(other.a[i]);
+			}
+		}
+
+		void replaceWith(OffsetList other) {
+			this.a = other.a;
+			this.size = other.size;
+		}
+
+		boolean isEmpty() {
+			return size == 0;
+		}
+
+		void clear() {
+			size = 0;
 		}
 	}
 }
