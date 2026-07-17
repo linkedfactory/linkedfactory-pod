@@ -22,6 +22,7 @@ import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.Assert.*;
@@ -146,6 +147,28 @@ public class CsvFormatParserTest {
 
 		// no more tuples
 		assertFalse(tuples.hasNext());
+	}
+
+	@Test
+	public void shouldInterpretCsvValueTypes() throws IOException {
+		CsvFormatParser csvParser = new CsvFormatParser(URIs.createURI("urn:base:"), ';',
+				new ByteArrayInputStream("time;value\n123;42\n124;3.25\n125;TrUe\n126;\"quoted\"\n127;plain\n128;1.234,56\n"
+						.getBytes(StandardCharsets.UTF_8)));
+		IExtendedIterator<KvinTuple> tuples = csvParser.parse();
+		assertNotNull(tuples);
+
+		assertValue(tuples.next(), Long.class, 42L);
+		assertValue(tuples.next(), Double.class, 3.25d);
+		assertValue(tuples.next(), Boolean.class, true);
+		assertValue(tuples.next(), String.class, "quoted");
+		assertValue(tuples.next(), String.class, "plain");
+		assertValue(tuples.next(), Double.class, 1234.56d);
+		assertFalse(tuples.hasNext());
+	}
+
+	private static void assertValue(KvinTuple tuple, Class<?> type, Object expected) {
+		assertEquals(type, tuple.value.getClass());
+		assertEquals(expected, tuple.value);
 	}
 
 }

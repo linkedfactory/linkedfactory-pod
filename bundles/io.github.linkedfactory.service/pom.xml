@@ -222,4 +222,49 @@
 			</plugin>
 		</plugins>
 	</build>
+
+	<profiles>
+		<profile>
+			<id>jmh</id>
+			<properties>
+				<jmh.includes>io.github.linkedfactory.service.benchmark.KvinIngestionBenchmark</jmh.includes>
+				<jmh.result.format>json</jmh.result.format>
+				<jmh.result.file>${project.build.directory}/jmh-result.json</jmh.result.file>
+				<jmh.warmups>3</jmh.warmups>
+				<jmh.measurements>5</jmh.measurements>
+				<jmh.forks>2</jmh.forks>
+				<jmh.temp.root></jmh.temp.root>
+			</properties>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.codehaus.mojo</groupId>
+						<artifactId>exec-maven-plugin</artifactId>
+						<version>3.5.0</version>
+						<configuration>
+							<executable>${java.home}/bin/java</executable>
+							<classpathScope>test</classpathScope>
+							<arguments>
+								<argument>-Djmh.temp.root=${jmh.temp.root}</argument>
+								<argument>-cp</argument>
+								<classpath/>
+								<argument>org.openjdk.jmh.Main</argument>
+								<argument>${jmh.includes}</argument>
+								<argument>-wi</argument>
+								<argument>${jmh.warmups}</argument>
+								<argument>-i</argument>
+								<argument>${jmh.measurements}</argument>
+								<argument>-f</argument>
+								<argument>${jmh.forks}</argument>
+								<argument>-rf</argument>
+								<argument>${jmh.result.format}</argument>
+								<argument>-rff</argument>
+								<argument>${jmh.result.file}</argument>
+							</arguments>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>
