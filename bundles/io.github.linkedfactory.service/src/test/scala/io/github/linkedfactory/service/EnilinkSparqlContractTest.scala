@@ -1,27 +1,29 @@
 package io.github.linkedfactory.service
 
 import com.google.inject.Guice
-import net.enilink.komma.core.{KommaModule, Statement, URIs}
-import net.enilink.komma.model._
+import net.enilink.komma.core.{KommaModule, Statement, URI, URIs}
+import net.enilink.komma.model.*
 import net.enilink.platform.lift.util.Globals
 import net.enilink.platform.web.rest.SparqlRest
 import net.liftweb.common.{Box, Full}
 import net.liftweb.http.provider.servlet.HTTPRequestServlet
 import net.liftweb.http.{BasicResponse, CurrentReq, InMemoryResponse, LiftResponse, OutputStreamResponse, Req}
-import org.junit.Assert._
+import org.junit.Assert.*
 import org.junit.{AfterClass, BeforeClass, Test}
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import jakarta.servlet.http.HttpServletRequest
 
+import scala.compiletime.uninitialized
+
 /**
  * Thin compatibility tests that verify the SPARQL error contract as consumed
  * by linkedfactory-pod from the enilink dependency.
  */
 object EnilinkSparqlContractTest {
-  var modelSet: IModelSet = _
-  val sensorModel = MODELS.NAMESPACE_URI.appendFragment("sensor-data")
+  var modelSet: IModelSet = uninitialized
+  val sensorModel: URI = MODELS.NAMESPACE_URI.appendFragment("sensor-data")
 
   @BeforeClass
   def setup(): Unit = {
