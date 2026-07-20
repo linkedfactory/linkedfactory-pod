@@ -43,7 +43,7 @@ import java.util.regex.Pattern;
 
 public class CsvFormatParser {
 	protected final static Logger logger = LoggerFactory.getLogger(CsvFormatParser.class);
-	protected final static Pattern itemProperty = Pattern.compile("(?:((?:\\@|\\>|[^>@])+)@)?((?:\\@|\\>|[^>@])+)");
+	protected final static Pattern itemProperty = Pattern.compile("(?:((?:@|>|[^>@])+)@)?((?:@|>|[^>@])+)");
 	protected final URI base;
 	protected final List<Pair<URI, URI>> itemProperties;
 	protected CSVReader csvReader;
@@ -267,11 +267,11 @@ public class CsvFormatParser {
 			String cleanedValueStr;
 			if (valueStr.lastIndexOf(',') < valueStr.lastIndexOf('.')) {
 				// convert numbers like 123,456.78 to 123456.78
-				cleanedValueStr = valueStr.replaceAll(",", "");
+				cleanedValueStr = valueStr.replace(",", "");
 			} else {
 				// convert numbers like 123.456,78 to 123456.78
-				cleanedValueStr = valueStr.replaceAll("[.]", "")
-						.replaceAll(",", ".");
+				cleanedValueStr = valueStr.replace(".", "")
+						.replace(",", ".");
 			}
 			doubleValue = Doubles.tryParse(cleanedValueStr);
 		}
