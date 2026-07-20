@@ -4,9 +4,9 @@ import com.google.inject.Guice;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.core.kvin.util.CsvFormatParser;
+import io.github.linkedfactory.core.kvin.util.JsonFormatParser;
 import io.github.linkedfactory.service.KvinService;
 import io.github.linkedfactory.service.MockHttpServletRequest;
-import io.github.linkedfactory.service.util.JsonFormatParser$;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.KommaModule;
 import net.enilink.komma.core.URI;
@@ -18,6 +18,7 @@ import net.enilink.komma.model.ModelPlugin;
 import net.enilink.komma.model.ModelSetModule;
 import net.enilink.platform.lift.util.Globals;
 import net.liftweb.common.Box;
+import net.liftweb.common.Empty$;
 import net.liftweb.common.Full;
 import net.liftweb.http.CurrentReq$;
 import net.liftweb.http.LiftResponse;
@@ -39,6 +40,10 @@ import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 import org.junit.Assert;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
 import scala.Function0;
 import scala.PartialFunction;
 import scala.collection.immutable.Nil$;
@@ -46,6 +51,7 @@ import scala.collection.immutable.Nil$;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -56,11 +62,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-@BenchmarkMode(Mode.SingleShotTime)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
+@BenchmarkMode(Mode.Throughput)
 @Warmup(iterations = 3)
-@Measurement(iterations = 5)
-@Fork(2)
+@Measurement(iterations = 3)
+@Fork(1)
 @Threads(1)
 public class KvinIngestionBenchmark {
 	private static final int SEQUENTIAL_CSV_FILE_COUNT = 10;
@@ -84,15 +89,10 @@ public class KvinIngestionBenchmark {
 			jsonPayload = workload.jsonPayload();
 			csvPayload = workload.csvPayload();
 			csvPayloads = workload.csvPayloads(SEQUENTIAL_CSV_FILE_COUNT);
-			try {
-				KommaModule module = ModelPlugin.createModelSetModule(
-						Class.forName("net.enilink.komma.model.ModelPlugin").getClassLoader());
-				IModelSetFactory factory = (IModelSetFactory) Guice.createInjector(new ModelSetModule(module))
-						.getInstance(Class.forName("net.enilink.komma.model.IModelSetFactory"));
-				modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"));
-			} catch (ClassNotFoundException e) {
-				throw new IllegalStateException("Could not initialize the Komma model set", e);
-			}
+			KommaModule module = ModelPlugin.createModelSetModule(getClass().getClassLoader());
+			IModelSetFactory factory = Guice.createInjector(new ModelSetModule(module))
+					.getInstance(IModelSetFactory.class);
+			modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"));
 			Globals.contextModelSet().theDefault().set(VendorJ.vendor(new Full(modelSet)));
 		}
 
@@ -163,11 +163,8 @@ public class KvinIngestionBenchmark {
 					URIs.createURI("http://foo.com/linkedfactory/"), ',',
 					new ByteArrayInputStream(csvPayload));
 			parser.setContext(KvinIngestionWorkload.CONTEXT);
-			IExtendedIterator<KvinTuple> tuples = parser.parse();
-			try {
+			try (IExtendedIterator<KvinTuple> tuples = parser.parse()) {
 				store.put(tuples);
-			} finally {
-				tuples.close();
 			}
 			measuredWrites = true;
 		}
@@ -219,12 +216,16 @@ public class KvinIngestionBenchmark {
 			}
 
 			@Override
-			public Box<?> saveValues(JValue json, scala.collection.immutable.List<String> path, long currentTime) {
+			public Box<?> saveJsonValues(InputStream in, scala.collection.immutable.List<String> path, long currentTime) {
 				if (!parseOnly) {
-					return super.saveValues(json, path, currentTime);
+					return super.saveJsonValues(in, path, currentTime);
 				}
-				return JsonFormatParser$.MODULE$.parseItem(URIs.createURI("http://foo.com/linkedfactory/"),
-						contextModelUri(), json, currentTime);
+				try {
+					new JsonFormatParser(in).parse(currentTime).toList(); // parse and discard the tuples
+				} catch (IOException e) {
+					throw new RuntimeException(e);
+				}
+				return Empty$.MODULE$;
 			}
 
 			@Override
@@ -236,7 +237,7 @@ public class KvinIngestionBenchmark {
 						if (isDefinedAt(in)) {
 							return super.apply(in);
 						}
-						return () -> Box.legacyNullTest((LiftResponse) null);
+						return (Function0) (() -> Box.legacyNullTest((LiftResponse) null));
 					} finally {
 						currentModelSet.getUnitOfWork().end();
 					}
@@ -251,14 +252,11 @@ public class KvinIngestionBenchmark {
 			}
 			Set<KvinTuple> actual = new HashSet<>();
 			for (URI item : KvinIngestionWorkload.ITEMS) {
-				IExtendedIterator<KvinTuple> iterator = store.fetch(item, KvinIngestionWorkload.PROPERTY,
-						KvinIngestionWorkload.CONTEXT, 0);
-				try {
+				try (IExtendedIterator<KvinTuple> iterator = store.fetch(item, KvinIngestionWorkload.PROPERTY,
+						KvinIngestionWorkload.CONTEXT, 0)) {
 					while (iterator.hasNext()) {
 						actual.add(iterator.next());
 					}
-				} finally {
-					iterator.close();
 				}
 			}
 			Assert.assertEquals("Unexpected persisted KVIN tuples", expected, actual);
@@ -284,6 +282,14 @@ public class KvinIngestionBenchmark {
 				}
 			});
 		}
+	}
+
+	public static void main(String[] args) throws RunnerException {
+		Options opt = new OptionsBuilder()
+				.include(KvinIngestionBenchmark.class.getSimpleName() + "\\.") // adapt to control which benchmark tests to run
+				.forks(1)
+				.build();
+		new Runner(opt).run();
 	}
 
 	@Benchmark
