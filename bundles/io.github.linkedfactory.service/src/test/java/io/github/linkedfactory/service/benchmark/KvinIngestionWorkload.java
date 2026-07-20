@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 public final class KvinIngestionWorkload {
@@ -95,7 +96,12 @@ public final class KvinIngestionWorkload {
 
 	private static byte[] createJsonPayload(List<KvinTuple> tuples) {
 		try {
-			String json = JsonFormatWriter.toJsonString(WrappedIterator.create(tuples.iterator()));
+			String json = JsonFormatWriter.toJsonString(WrappedIterator.create(tuples.stream()
+					.sorted(Comparator.comparing((KvinTuple t) -> t.item.toString())
+							.thenComparing(t -> t.property.toString())
+							.thenComparingLong(t -> t.time)
+							.thenComparingInt(t -> t.seqNr))
+					.toList().iterator()));
 			return json.getBytes(StandardCharsets.UTF_8);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
