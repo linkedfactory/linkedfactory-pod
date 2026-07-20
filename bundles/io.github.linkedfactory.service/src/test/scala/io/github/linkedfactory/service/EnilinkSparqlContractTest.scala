@@ -13,7 +13,7 @@ import org.junit.{AfterClass, BeforeClass, Test}
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
-import javax.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletRequest
 
 /**
  * Thin compatibility tests that verify the SPARQL error contract as consumed
