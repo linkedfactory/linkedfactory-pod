@@ -16,28 +16,26 @@
 package io.github.linkedfactory.service.mqtt
 
 import com.google.common.cache.{Cache, CacheBuilder}
-import io.github.linkedfactory.core.kvin.Kvin
+import io.github.linkedfactory.core.kvin.util.JsonFormatParser
 import io.github.linkedfactory.service.ItemDataEvents
-import io.github.linkedfactory.service.util.JsonFormatParser
 import net.enilink.komma.core.{IReference, URIs}
 import net.enilink.komma.em.concepts.IResource
 import net.enilink.platform.core.PluginConfigModel
-import net.liftweb.common.Full
-import org.json4s._
-import org.json4s.native.JsonParser
-import org.json4s.native.JsonMethods.{compact, render as renderJson}
-import org.json4s.JsonDSL._
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
+import org.json4s.*
+import org.json4s.JsonDSL.*
+import org.json4s.native.JsonMethods.{compact, render as renderJson}
 import org.osgi.framework.{FrameworkUtil, ServiceRegistration}
 import org.osgi.service.component.annotations.{Component, Reference}
 import org.osgi.service.event.{Event, EventAdmin, EventConstants, EventHandler}
 
+import java.io.ByteArrayInputStream
 import java.util
 import java.util.concurrent.TimeUnit
 import java.util.{HashMap, Hashtable, UUID}
-import scala.util.matching.Regex
 import scala.compiletime.uninitialized
+import scala.util.matching.Regex
 
 /**
  * A simple bridge between HTTP and MQTT interfaces for linked factory events.
@@ -46,18 +44,18 @@ import scala.compiletime.uninitialized
 class MqttEventBridge {
   implicit val formats: DefaultFormats.type = DefaultFormats
 
-  val ownAuthorities: Cache[String, Boolean] = CacheBuilder.newBuilder.expireAfterWrite(30, TimeUnit.SECONDS).build.asInstanceOf[Cache[String, Boolean]]
+  private val ownAuthorities: Cache[String, Boolean] = CacheBuilder.newBuilder.expireAfterWrite(30, TimeUnit.SECONDS).build.asInstanceOf[Cache[String, Boolean]]
 
-  val ITEM: Regex = "^LF/[^/]+/([^/]+)/(.*)".r
+  private val ITEM: Regex = "^LF/[^/]+/([^/]+)/(.*)".r
 
   var client: MqttClient = uninitialized
-  var eventHandlerSvc: ServiceRegistration[?] = uninitialized
+  private var eventHandlerSvc: ServiceRegistration[EventHandler] = uninitialized
 
   var config: PluginConfigModel = uninitialized
 
-  var eventAdmin: EventAdmin = uninitialized
+  private var eventAdmin: EventAdmin = uninitialized
 
-  var shuttingDown = false
+  private var shuttingDown = false
 
   def activate(): Unit = {
     val (broker, filter) = {
@@ -91,24 +89,15 @@ class MqttEventBridge {
           topic match {
             // ignores own messages
             case ITEM(authority, path) if !ownAuthorities.getIfPresent(authority) =>
-              JsonParser.parseOpt(new String(msg.getPayload)) map {
-                json =>
-                  val topic = "linkedfactory/itemEvent/external"
-                  val item = "http://" + authority + "/" + path
+              new JsonFormatParser(new ByteArrayInputStream(msg.getPayload)).parseValues().forEach(tuple => {
+                val properties = new util.HashMap[String, Any]
+                properties.put(ItemDataEvents.ITEM, "http://" + authority + "/" + path)
+                properties.put(ItemDataEvents.PROPERTY, tuple.property.toString)
+                properties.put(ItemDataEvents.TIME, tuple.time)
+                properties.put(ItemDataEvents.VALUE, tuple.value)
 
-                  JsonFormatParser.parseItem(URIs.createURI(item), Kvin.DEFAULT_CONTEXT, json) match {
-                    case Full(values) => values.map { tuple =>
-                        val properties = new util.HashMap[String, Any]
-                        properties.put(ItemDataEvents.ITEM, item)
-                        properties.put(ItemDataEvents.PROPERTY, tuple.property.toString)
-                        properties.put(ItemDataEvents.TIME, tuple.time)
-                        properties.put(ItemDataEvents.VALUE, tuple.value)
-
-                        eventAdmin.postEvent(new Event(topic, properties))
-                    }
-                    case _ => // handle failure
-                  }
-              }
+                eventAdmin.postEvent(new Event("linkedfactory/itemEvent/external", properties))
+              })
             case _ => // ignore those events
           }
         }
@@ -150,7 +139,7 @@ class MqttEventBridge {
     }
   }
 
-  def connect(): Unit = {
+  private def connect(): Unit = {
     client.synchronized {
       if (!client.isConnected) {
         val options = new MqttConnectOptions
@@ -164,7 +153,7 @@ class MqttEventBridge {
   /**
    * Publishes item events over MQTT
    */
-  def publish(topic: String, property: String, time: Long, value: Any): Unit = {
+  private def publish(topic: String, property: String, time: Long, value: Any): Unit = {
     val qos = 2;
 
     // FIXME: avoid deadlock on shutdown
