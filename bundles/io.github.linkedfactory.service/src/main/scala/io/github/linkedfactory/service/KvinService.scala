@@ -270,7 +270,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
     try {
-      val tuples: IExtendedIterator[KvinTuple] = new JsonFormatParser(in).parse(currentTime)
+      val tuples: IExtendedIterator[KvinTuple] = new JsonFormatParser(in, parentUri)
+        .setContext(contextModelUri)
+        .parse(currentTime)
       store.put(tuples)
       Empty
     } catch {
