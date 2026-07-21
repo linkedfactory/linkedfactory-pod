@@ -78,15 +78,13 @@ public class KvinIngestionCsvDiagnosticBenchmark {
 		public void setupTrial() {
 			workload = new KvinIngestionWorkload();
 			csvPayload = workload.csvPayload();
-			try {
-				KommaModule module = ModelPlugin.createModelSetModule(
-						Class.forName("net.enilink.komma.model.ModelPlugin").getClassLoader());
-				IModelSetFactory factory = (IModelSetFactory) Guice.createInjector(new ModelSetModule(module))
-						.getInstance(Class.forName("net.enilink.komma.model.IModelSetFactory"));
-				modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"));
-			} catch (ClassNotFoundException e) {
-				throw new IllegalStateException("Could not initialize the Komma model set", e);
-			}
+
+			KommaModule module = ModelPlugin.createModelSetModule(ModelPlugin.class.getClassLoader());
+			IModelSetFactory factory =
+					Guice.createInjector(new ModelSetModule(module))
+							.getInstance(IModelSetFactory.class);
+			modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"));
+
 			Globals.contextModelSet().theDefault().set(VendorJ.vendor(new net.liftweb.common.Full(modelSet)));
 			sink = new ConsumingKvin();
 			service = new BenchmarkService(sink);

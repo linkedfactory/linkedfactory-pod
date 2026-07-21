@@ -92,15 +92,17 @@ public class KvinHttpTest extends Mockito {
 	}
 
 	@BeforeClass
-	public static void setupClass() throws ClassNotFoundException {
+	public static void setupClass() {
 		// create configuration and a model set factory
-		KommaModule module = ModelPlugin.createModelSetModule(Class.forName("net.enilink.komma.model.ModelPlugin").getClassLoader());
-		IModelSetFactory factory = (IModelSetFactory) Guice.createInjector(new ModelSetModule(module)).getInstance(Class.forName("net.enilink.komma.model.IModelSetFactory"));
+		KommaModule module = ModelPlugin.createModelSetModule(ModelPlugin.class.getClassLoader());
+		IModelSetFactory factory =
+				Guice.createInjector(new ModelSetModule(module))
+						.getInstance(IModelSetFactory.class);
 		// create a model set with an in-memory repository
 		modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"));
 		Globals.contextModelSet().theDefault().set(VendorJ.vendor(new Full(modelSet)));
 	}
-
+	
 	@AfterClass
 	public static void tearDownClass() {
 		modelSet.dispose();
