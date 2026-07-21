@@ -1,9 +1,9 @@
 # KVIN Ingestion Benchmarks
 
-This benchmark compares one deterministic 30,000-tuple ingestion batch through
+This benchmark compares deterministic 30,000-tuple ingestion batches through
 the direct KVIN LevelDB API and the in-process JSON and CSV service endpoints.
 It is an opt-in test benchmark and does not start the POD or open network
-sockets.
+sockets. Primary results are reported directly as tuples per second.
 
 ## Quick Start
 
@@ -19,24 +19,31 @@ mvn -U clean install -DskipTests
 This clean reactor build compiles the benchmark sources and generates JMH's
 benchmark registry.
 
-**2. Run the benchmarks with the comparison protocol** (3 warmups, 5 measurements, 2 forks, 1 thread):
+**2. Run the primary benchmarks with the comparison protocol** (3 three-second
+warmups, 5 three-second measurements, 2 forks, 1 thread):
 
 ```sh
-
-### Primary ingestion benchmarks (putBatch, postJson, postCsv, putCsvDirect, postCsvSequentialFiles)
-
 mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
-  -Djmh.warmups=3 -Djmh.measurements=5 -Djmh.forks=2 \
-  -Djmh.result.file=target/jmh-primary.json test-compile exec:exec
+  -Djmh.result.file=target/jmh-primary-run-a.json test-compile exec:exec
+```
 
-### CSV attribution diagnostics
+The defaults exercise five methods for 240 timed seconds
+(`5 methods × 8 iterations × 2 forks × 3 seconds`); including trial setup,
+invocation setup, validation, and store cleanup, allow approximately five
+minutes. Repeat the command with `jmh-primary-run-b.json` before comparing
+implementations.
+
+**3. Run attribution diagnostics when needed:**
+
+```sh
+# CSV attribution diagnostics
 
 mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
   -Djmh.includes=io.github.linkedfactory.service.benchmark.KvinIngestionCsvDiagnosticBenchmark \
   -Djmh.warmups=3 -Djmh.measurements=5 -Djmh.forks=2 \
   -Djmh.result.file=target/jmh-csv-diagnostic.json test-compile exec:exec
 
-### JSON diagnostics
+# JSON diagnostics
 
 mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
   -Djmh.includes=io.github.linkedfactory.service.benchmark.KvinIngestionJsonDiagnosticBenchmark \
@@ -44,31 +51,21 @@ mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
   -Djmh.result.file=target/jmh-json-diagnostic.json test-compile exec:exec
 ```
 
-**3. Read the results** (method, ms/op, JMH error, derived tuples/s):
+**4. Read the primary results** (method, tuples/s, JMH error):
 
 ```sh
-jq -r '.[] | [(.benchmark | split(".")[-1]), .primaryMetric.score, .primaryMetric.scoreError, (30000000 / .primaryMetric.score)] | @tsv' \
-  bundles/io.github.linkedfactory.service/target/jmh-primary.json
+jq -r '.[] | [(.benchmark | split(".")[-1]), .primaryMetric.score, .primaryMetric.scoreError, .primaryMetric.scoreUnit] | @tsv' \
+  bundles/io.github.linkedfactory.service/target/jmh-primary-run-a.json
 ```
 
-Gives output like
-```sh
-(method)        (ms/op)                 (JMH error)             (tuples/s)   
-postCsv         72.29846979999999       24.080653592587588      414946.5415103433
-postCsvSequentialFiles  80.8543817      17.14687428124646       371037.40538529155
-postJson        235.88979579999994      37.99118818211922       127178.03200540143
-putBatch        43.564955499999996      27.169511316820625      688626.8941557854
-putCsvDirect    62.84361260000001       53.04789937599848       477375.4842986222
-````
+Diagnostic suites deliberately remain single-shot batch timings in `ms/op` and
+do not use `OperationsPerInvocation`.
 
-**4. Before drawing any conclusion,** repeat the same command as an independent
-Run B with a different `-Djmh.result.file` and compare.
-
-#### Smoke test only 
+#### Smoke test only
 
 > not a valid measurement, just checks that everything starts:
 
-`-Djmh.warmups=0 -Djmh.measurements=1 -Djmh.forks=1`
+`-Djmh.warmups=0 -Djmh.measurements=1 -Djmh.measurement.time=1s -Djmh.forks=1`
 
 
 ### Optional flags
@@ -76,8 +73,8 @@ Run B with a different `-Djmh.result.file` and compare.
 - `-Djmh.includes=<regex>`: run only the benchmarks matching the pattern.
 - `-Djmh.temp.root=/tmp`: override the temporary LevelDB root without changing
   production storage behavior.
-- `-Djmh.warmups`, `-Djmh.measurements`, `-Djmh.forks`, `-Djmh.result.file`:
-  standard JMH run controls used above.
+- `-Djmh.warmups`, `-Djmh.warmup.time`, `-Djmh.measurements`,
+  `-Djmh.measurement.time`, `-Djmh.forks`, `-Djmh.result.file`: JMH run controls.
 
 The JMH profile never runs during a normal build or `mvn test`. Benchmarks only
 start when you explicitly pass `-Pjmh` and call the `exec:exec` goal. This keeps
@@ -92,8 +89,8 @@ them out of standard build and CI pipelines.
   JDK, filesystem, and JMH settings when comparing runs.
 
 The benchmark creates a fresh temporary LevelDB store for every invocation,
-warms six URI IDs with six preseed tuples, validates the persisted set, closes
-the store, and removes the temporary directory.
+warms the selected six item/property IDs with six preseed tuples, validates the
+persisted set, closes the store, and removes the temporary directory.
 
 ---
 
@@ -101,13 +98,25 @@ the store, and removes the temporary directory.
 
 ### Workload
 
-Each operation is one request or one direct batch containing exactly 30,000
-`KvinTuple` values: 5,000 rows across six stable item URIs, one property, one
-context, 1,000 timestamps, and sequence numbers 1 through 5. JSON, CSV, and
-direct input normalize to the same tuple set. Payload generation and
-serialization happen during JMH trial setup, outside measured methods. The
-prebuilt tuple list uses the same row-major order emitted by the CSV parser, so
-the direct/CSV comparison does not also compare insertion orders.
+Each invocation processes one of ten immutable variants. Every variant contains
+exactly 30,000 `KvinTuple` values: 5,000 rows across six item URIs, one property,
+one context, 1,000 timestamps, and sequence numbers 1 through 5. The channel
+pool contains 100 zero-padded URIs and is shuffled once with seed
+`0x4B56494E_20260721L`. Variants use non-overlapping six-channel slices from
+that order and ten distinct properties from a pool of ten.
+
+Timestamps advance in one-second steps. Variant `n` starts at
+`1710000000000 + n × 1000000`, giving each variant a disjoint deterministic
+timestamp window. The numeric value formula remains relative to the six CSV
+columns, keeping value parsing and payload sizes comparable across variants.
+
+All ten tuple lists, JSON payloads, CSV payloads, and ten-file CSV partitions
+are generated and cached during JMH trial setup, outside measured methods.
+Invocation setup rotates through variants zero through nine, then repeats. Each
+trial and fork begins at variant zero. JSON, CSV, partitioned CSV, and direct
+input normalize to the same tuple set for their selected variant. The prebuilt
+tuple list uses the same row-major order emitted by the CSV parser, so the
+direct/CSV comparison does not also compare insertion orders.
 
 #### KVIN Tuples
 
@@ -120,8 +129,8 @@ A tuple is one KVIN value with its identity and ordering metadata:
 For example, the first canonical value is:
 
 ```text
-item:     http://iwu.lf.de/ecc4p/emag/channel-1
-property: http://iwu.lf.de/ecc4p/values
+item:     one deterministic selection from .../emag/channel-000 through channel-099
+property: one of .../property-00 through property-09
 context:  http://iwu.lf.de/ecc4p/models/emag
 time:     1710000000000
 seqNr:    1
@@ -255,17 +264,45 @@ The JSON diagnostic class isolates the JSON path in the same way:
 
 ### Reading Results
 
-JMH reports a mean and an error interval for each single-shot batch. Use the
-raw JSON for the values, not a hand-timed loop. The derived rates are:
+For the five primary methods, `OperationsPerInvocation(30000)` makes JMH report
+the mean and error directly in `ops/s`, where one operation is one tuple. Read
+these tuple/s values from the raw JSON rather than deriving them from rounded
+batch times. An equivalent 30,000-tuple batch time can be calculated for a
+presentation table as `30,000 / tuples_per_second × 1,000` milliseconds.
 
-```text
-tuples/s = 30,000,000 / batch_ms
-payload MiB/s = payload_bytes / 1,048,576 / (batch_ms / 1,000)
-```
+Diagnostics report single-shot batch time in `ms/op`; their unit and semantic
+boundary are intentionally different. Include the JMH environment header,
+score unit, and error intervals when publishing results.
 
-The `jq` command in the Quick Start prints method, mean milliseconds per
-operation, JMH error, and derived tuples per second. Include the raw JMH
-environment header and error intervals when publishing results.
+Use the three-second defaults for comparisons and require two independent full
+runs. A short smoke run or a duration-sensitivity check is validation, not a
+publishable performance result.
+
+#### Run A reference result
+
+Run A used the protocol above on 2026-07-21. The commit column names the base
+commit; the benchmark included the workload-variant changes in this patch.
+
+| Benchmark | Tuples/s | JMH error | Equivalent 30,000-tuple batch |
+|---|---:|---:|---:|
+| `postCsv` | 737,270 | ±23,597 | 40.69 ms |
+| `postCsvSequentialFiles` | 669,339 | ±65,246 | 44.82 ms |
+| `postJson` | 499,159 | ±109,763 | 60.10 ms |
+| `putBatch` | 1,468,205 | ±133,007 | 20.43 ms |
+| `putCsvDirect` | 840,222 | ±196,984 | 35.70 ms |
+
+| Environment | Value |
+|---|---|
+| Base commit | `733a33d` |
+| Date | 2026-07-21 |
+| CPU | Intel Core i7-1185G7 @ 3.00 GHz, 4 vCPUs |
+| OS | Linux 5.15.123.1-microsoft-standard-WSL2, x86_64 |
+| JDK | Eclipse Temurin 21.0.11+10 LTS |
+
+The independent Run B scores were 761,544, 640,135, 468,624, 1,672,301,
+and 920,589 tuples/s in the table's method order. Every Run A and Run B JMH
+confidence interval overlapped; Run B serves as the consistency check rather
+than a second result to average into Run A.
 
 Interpret the controls as boundaries, not additive stages:
 
@@ -285,8 +322,8 @@ complete `postCsv` result to improve in two independent runs.
 
 ### Local Evolution Log
 
-Machine-specific history is deliberately not tracked. When doing performance
-work, create this append-only file:
+Beyond the reference run above, machine-specific history is deliberately not
+tracked. When doing performance work, create this append-only file:
 
 ```sh
 mkdir -p .cache-main/benchmarks

@@ -231,7 +231,9 @@
 				<jmh.result.format>json</jmh.result.format>
 				<jmh.result.file>${project.build.directory}/jmh-result.json</jmh.result.file>
 				<jmh.warmups>3</jmh.warmups>
+				<jmh.warmup.time>3s</jmh.warmup.time>
 				<jmh.measurements>5</jmh.measurements>
+				<jmh.measurement.time>3s</jmh.measurement.time>
 				<jmh.forks>2</jmh.forks>
 				<jmh.temp.root></jmh.temp.root>
 			</properties>
@@ -252,8 +254,12 @@
 								<argument>${jmh.includes}</argument>
 								<argument>-wi</argument>
 								<argument>${jmh.warmups}</argument>
+								<argument>-w</argument>
+								<argument>${jmh.warmup.time}</argument>
 								<argument>-i</argument>
 								<argument>${jmh.measurements}</argument>
+								<argument>-r</argument>
+								<argument>${jmh.measurement.time}</argument>
 								<argument>-f</argument>
 								<argument>${jmh.forks}</argument>
 								<argument>-rf</argument>

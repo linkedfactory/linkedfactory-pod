@@ -33,6 +33,7 @@ import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
@@ -63,15 +64,21 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @BenchmarkMode(Mode.Throughput)
+@OutputTimeUnit(TimeUnit.SECONDS)
 @Warmup(iterations = 3)
-@Measurement(iterations = 3)
-@Fork(1)
+@Measurement(iterations = 5)
+@Fork(2)
 @Threads(1)
 public class KvinIngestionBenchmark {
 	private static final int SEQUENTIAL_CSV_FILE_COUNT = 10;
 
 	@State(Scope.Thread)
 	public static class BenchmarkState {
+		private List<KvinIngestionWorkload> workloads;
+		private List<byte[]> jsonPayloadVariants;
+		private List<byte[]> csvPayloadVariants;
+		private List<List<byte[]>> csvPayloadPartitionVariants;
+		private int nextVariantIndex;
 		private KvinIngestionWorkload workload;
 		private IModelSet modelSet;
 		private KvinLevelDb store;
@@ -85,10 +92,12 @@ public class KvinIngestionBenchmark {
 
 		@Setup(Level.Trial)
 		public void setupTrial() {
-			workload = new KvinIngestionWorkload();
-			jsonPayload = workload.jsonPayload();
-			csvPayload = workload.csvPayload();
-			csvPayloads = workload.csvPayloads(SEQUENTIAL_CSV_FILE_COUNT);
+			workloads = KvinIngestionWorkload.variants();
+			jsonPayloadVariants = workloads.stream().map(KvinIngestionWorkload::jsonPayload).toList();
+			csvPayloadVariants = workloads.stream().map(KvinIngestionWorkload::csvPayload).toList();
+			csvPayloadPartitionVariants = workloads.stream()
+					.map(variant -> variant.csvPayloads(SEQUENTIAL_CSV_FILE_COUNT)).toList();
+			nextVariantIndex = 0;
 			KommaModule module = ModelPlugin.createModelSetModule(getClass().getClassLoader());
 			IModelSetFactory factory = Guice.createInjector(new ModelSetModule(module))
 					.getInstance(IModelSetFactory.class);
@@ -98,6 +107,12 @@ public class KvinIngestionBenchmark {
 
 		@Setup(Level.Invocation)
 		public void setupInvocation() throws IOException {
+			int variantIndex = nextVariantIndex;
+			nextVariantIndex = (nextVariantIndex + 1) % KvinIngestionWorkload.VARIANT_COUNT;
+			workload = workloads.get(variantIndex);
+			jsonPayload = jsonPayloadVariants.get(variantIndex);
+			csvPayload = csvPayloadVariants.get(variantIndex);
+			csvPayloads = csvPayloadPartitionVariants.get(variantIndex);
 			String tempRoot = System.getProperty("jmh.temp.root", "");
 			Path directory = tempRoot.isEmpty()
 					? Files.createTempDirectory("kvin-ingestion-jmh-")
@@ -243,7 +258,7 @@ public class KvinIngestionBenchmark {
 					}
 				});
 			}
-			}
+		}
 
 		private void validateStore() {
 			Set<KvinTuple> expected = new HashSet<>(workload.preseedTuples());
@@ -251,8 +266,8 @@ public class KvinIngestionBenchmark {
 				expected.addAll(workload.tuples());
 			}
 			Set<KvinTuple> actual = new HashSet<>();
-			for (URI item : KvinIngestionWorkload.ITEMS) {
-				try (IExtendedIterator<KvinTuple> iterator = store.fetch(item, KvinIngestionWorkload.PROPERTY,
+			for (URI item : workload.items()) {
+				try (IExtendedIterator<KvinTuple> iterator = store.fetch(item, workload.property(),
 						KvinIngestionWorkload.CONTEXT, 0)) {
 					while (iterator.hasNext()) {
 						actual.add(iterator.next());
@@ -293,26 +308,31 @@ public class KvinIngestionBenchmark {
 	}
 
 	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
 	public void putBatch(BenchmarkState state) {
 		state.putBatch();
 	}
 
 	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
 	public void postJson(BenchmarkState state) throws IOException {
 		state.postJson();
 	}
 
 	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
 	public void postCsv(BenchmarkState state) throws IOException {
 		state.postCsv();
 	}
 
 	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
 	public void putCsvDirect(BenchmarkState state) throws IOException {
 		state.putCsvDirect();
 	}
 
 	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
 	public void postCsvSequentialFiles(BenchmarkState state) throws IOException {
 		state.postCsvSequentialFiles();
 	}
