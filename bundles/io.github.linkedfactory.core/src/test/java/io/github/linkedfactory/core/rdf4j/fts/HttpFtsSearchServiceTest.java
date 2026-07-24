@@ -119,6 +119,28 @@ public class HttpFtsSearchServiceTest {
 	}
 
 	@Test
+	public void shutdownDiscardsUncommittedPayload() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/fts/bulk",
+				true,
+				outboxDir.toString());
+
+		service.begin();
+		service.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		service.shutdown();
+
+		assertEquals(0, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertFalse(files.findAny().isPresent());
+		}
+	}
+
+	@Test
 	public void failOnErrorThrowsWhenEnabled() throws Exception {
 		HttpFtsSearchService service = new HttpFtsSearchService();
 		service.configure(Map.of(

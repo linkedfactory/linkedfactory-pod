@@ -109,6 +109,39 @@ public class ElasticKeywordSearchBackendTest {
 		}
 	}
 
+	@Test
+	public void returnsEmptyListWhenFailOnErrorIsDisabled() throws Exception {
+		AtomicInteger attempts = new AtomicInteger();
+		HttpServer errorServer = HttpServer.create(new InetSocketAddress(0), 0);
+		errorServer.createContext("/fts/_search", exchange -> {
+			attempts.incrementAndGet();
+			try (InputStream in = exchange.getRequestBody()) {
+				body.set(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+			}
+			byte[] response = "error".getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(500, response.length);
+			exchange.getResponseBody().write(response);
+			exchange.close();
+		});
+		errorServer.start();
+
+		try {
+			ElasticKeywordSearchBackend backend = new ElasticKeywordSearchBackend(
+					"http://127.0.0.1:" + errorServer.getAddress().getPort(),
+					"/fts/_search",
+					false,
+					100);
+			FtsSearchRequest request = new FtsSearchRequest("motor data", "urn:label", 3, 1.5, true, "urn:item1");
+			List<FtsSearchHit> hits = backend.search(request);
+			backend.close();
+
+			Assert.assertEquals(3, attempts.get());
+			Assert.assertTrue(hits.isEmpty());
+		} finally {
+			errorServer.stop(0);
+		}
+	}
+
 	private String endpoint() {
 		return "http://127.0.0.1:" + server.getAddress().getPort();
 	}

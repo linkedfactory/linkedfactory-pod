@@ -9,6 +9,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class FtsFederatedServiceTest {
 	@Test
@@ -256,5 +257,105 @@ public class FtsFederatedServiceTest {
 		} finally {
 			repository.shutDown();
 		}
+	}
+
+	@Test
+	public void missingKeywordsFailQuery() {
+		FtsSearchBackend backend = request -> List.of();
+		SailRepository repository = repository(backend);
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  service <fts:> {
+					    ?iri fts:score ?score .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				result.hasNext();
+				result.next();
+				Assert.fail("Expected query evaluation to fail");
+			} catch (org.eclipse.rdf4j.query.QueryEvaluationException expected) {
+				Assert.assertTrue(expected.getMessage().contains("must include ?iri fts:keywords"));
+			}
+		} finally {
+			repository.shutDown();
+		}
+	}
+
+	@Test
+	public void duplicateBoostPatternsFailQuery() {
+		FtsSearchBackend backend = request -> List.of();
+		SailRepository repository = repository(backend);
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  service <fts:> {
+					    ?iri fts:keywords "one" ;
+					         fts:boost 1.0 ;
+					         fts:boost 2.0 .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				result.hasNext();
+				result.next();
+				Assert.fail("Expected query evaluation to fail");
+			} catch (org.eclipse.rdf4j.query.QueryEvaluationException expected) {
+				Assert.assertTrue(expected.getMessage().contains("duplicate fts:boost"));
+			}
+		} finally {
+			repository.shutDown();
+		}
+	}
+
+	@Test
+	public void blankKeywordBindingSkipsBackendCall() {
+		AtomicInteger called = new AtomicInteger();
+		FtsSearchBackend backend = request -> {
+			called.incrementAndGet();
+			return List.of(new FtsSearchHit("urn:item1", null, null));
+		};
+		SailRepository repository = repository(backend);
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  bind("" as ?q)
+					  service <fts:> {
+					    ?iri fts:keywords ?q .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				Assert.assertFalse(result.hasNext());
+			}
+			Assert.assertEquals(0, called.get());
+		} finally {
+			repository.shutDown();
+		}
+	}
+
+	private SailRepository repository(FtsSearchBackend backend) {
+		SailRepository repository = new SailRepository(new MemoryStore());
+		repository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
+			@Override
+			protected FederatedService createService(String serviceUrl) {
+				if (serviceUrl.startsWith("fts:")) {
+					return new FtsFederatedService(backend);
+				}
+				return null;
+			}
+		});
+		repository.init();
+		return repository;
 	}
 }

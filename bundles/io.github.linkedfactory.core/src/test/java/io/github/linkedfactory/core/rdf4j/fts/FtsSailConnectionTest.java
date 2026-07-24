@@ -168,6 +168,57 @@ public class FtsSailConnectionTest {
 		assertEquals(ctx, service.clearedContexts.get(0)[0]);
 	}
 
+	@Test
+	public void clearThenReAddKeepsOnlyLatestChanges() {
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+
+		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
+		verify(wrapped).addConnectionListener(listenerCaptor.capture());
+		SailConnectionListener listener = listenerCaptor.getValue();
+
+		Statement stmt = vf.createStatement(
+				vf.createIRI("urn:s1"),
+				vf.createIRI("urn:p1"),
+				vf.createLiteral("value"));
+
+		connection.begin();
+		listener.statementAdded(stmt);
+		connection.clear();
+		listener.statementAdded(stmt);
+		connection.commit();
+
+		assertEquals(1, service.clearCount);
+		assertEquals(1, service.addRemoveCount);
+		assertTrue(service.addedStatements.contains(stmt));
+		assertTrue(service.removedStatements.isEmpty());
+	}
+
+	@Test
+	public void rollbackAfterSpillDiscardsBufferedChanges() {
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		FtsSailConnection connection = new FtsSailConnection(wrapped, service, 2);
+
+		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
+		verify(wrapped).addConnectionListener(listenerCaptor.capture());
+		SailConnectionListener listener = listenerCaptor.getValue();
+
+		connection.begin();
+		for (int i = 0; i < 10; i++) {
+			listener.statementAdded(vf.createStatement(
+					vf.createIRI("urn:s" + i),
+					vf.createIRI("urn:p"),
+					vf.createLiteral("value" + i)));
+		}
+		connection.rollback();
+
+		assertEquals(0, service.addRemoveCount);
+		assertEquals(1, service.rollbackCount);
+		assertTrue(service.addedStatements.isEmpty());
+	}
+
 	private static final class RecordingSearchService implements FtsSearchService {
 		private final Set<Statement> addedStatements = new LinkedHashSet<>();
 		private final Set<Statement> removedStatements = new LinkedHashSet<>();
