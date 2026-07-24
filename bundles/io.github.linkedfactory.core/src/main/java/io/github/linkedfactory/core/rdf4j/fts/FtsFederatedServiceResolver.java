@@ -4,6 +4,7 @@ import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 
+import java.net.URI;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -64,10 +65,10 @@ public class FtsFederatedServiceResolver extends AbstractFederatedServiceResolve
 	private String endpoint(String serviceUrl) {
 		String suffix = serviceUrl.substring(FTS.FTS.length()).trim();
 		if (!suffix.isEmpty()) {
-			if (suffix.startsWith("//")) {
-				return "http:" + suffix;
+			if (suffix.startsWith("//") || URI.create(suffix).isAbsolute()) {
+				throw new IllegalArgumentException("Absolute FTS service URLs are not allowed: " + serviceUrl);
 			}
-			return suffix;
+			return URI.create(config.getEndpoint()).resolve(URI.create(suffix)).toString();
 		}
 		return config.getEndpoint();
 	}

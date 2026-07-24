@@ -101,4 +101,42 @@ public class FtsFederatedServiceTest {
 			repository.shutDown();
 		}
 	}
+
+	@Test
+	public void invalidIriReturnedByBackendFailsQuery() {
+		FtsSearchBackend backend = request -> List.of(new FtsSearchHit("not a valid iri", null, null));
+
+		SailRepository repository = new SailRepository(new MemoryStore());
+		repository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
+			@Override
+			protected FederatedService createService(String serviceUrl) {
+				if (serviceUrl.startsWith("fts:")) {
+					return new FtsFederatedService(backend);
+				}
+				return null;
+			}
+		});
+		repository.init();
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  service <fts:> {
+					    ?iri fts:keywords "query" .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				result.hasNext();
+				result.next();
+				Assert.fail("Expected query evaluation to fail");
+			} catch (org.eclipse.rdf4j.query.QueryEvaluationException expected) {
+				Assert.assertTrue(expected.getMessage().contains("Invalid IRI returned by FTS backend"));
+			}
+		} finally {
+			repository.shutDown();
+		}
+	}
 }
