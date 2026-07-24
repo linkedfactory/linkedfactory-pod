@@ -139,4 +139,122 @@ public class FtsFederatedServiceTest {
 			repository.shutDown();
 		}
 	}
+
+	@Test
+	public void duplicateKeywordsFailQuery() {
+		FtsSearchBackend backend = request -> List.of();
+
+		SailRepository repository = new SailRepository(new MemoryStore());
+		repository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
+			@Override
+			protected FederatedService createService(String serviceUrl) {
+				if (serviceUrl.startsWith("fts:")) {
+					return new FtsFederatedService(backend);
+				}
+				return null;
+			}
+		});
+		repository.init();
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  service <fts:> {
+					    ?iri fts:keywords "one" ;
+					         fts:keywords "two" .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				result.hasNext();
+				result.next();
+				Assert.fail("Expected query evaluation to fail");
+			} catch (org.eclipse.rdf4j.query.QueryEvaluationException expected) {
+				Assert.assertTrue(expected.getMessage().contains("exactly one fts:keywords"));
+			}
+		} finally {
+			repository.shutDown();
+		}
+	}
+
+	@Test
+	public void mismatchedSubjectsFailQuery() {
+		FtsSearchBackend backend = request -> List.of();
+
+		SailRepository repository = new SailRepository(new MemoryStore());
+		repository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
+			@Override
+			protected FederatedService createService(String serviceUrl) {
+				if (serviceUrl.startsWith("fts:")) {
+					return new FtsFederatedService(backend);
+				}
+				return null;
+			}
+		});
+		repository.init();
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  service <fts:> {
+					    ?iri fts:keywords "one" .
+					    ?other fts:score ?score .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				result.hasNext();
+				result.next();
+				Assert.fail("Expected query evaluation to fail");
+			} catch (org.eclipse.rdf4j.query.QueryEvaluationException expected) {
+				Assert.assertTrue(expected.getMessage().contains("same subject"));
+			}
+		} finally {
+			repository.shutDown();
+		}
+	}
+
+	@Test
+	public void invalidLimitBindingFailsQuery() {
+		FtsSearchBackend backend = request -> List.of();
+
+		SailRepository repository = new SailRepository(new MemoryStore());
+		repository.setFederatedServiceResolver(new BaseFederatedServiceResolver() {
+			@Override
+			protected FederatedService createService(String serviceUrl) {
+				if (serviceUrl.startsWith("fts:")) {
+					return new FtsFederatedService(backend);
+				}
+				return null;
+			}
+		});
+		repository.init();
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  bind("ten" as ?limit)
+					  service <fts:> {
+					    ?iri fts:keywords "query" ;
+					         fts:limit ?limit .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				result.hasNext();
+				result.next();
+				Assert.fail("Expected query evaluation to fail");
+			} catch (org.eclipse.rdf4j.query.QueryEvaluationException expected) {
+				Assert.assertTrue(expected.getMessage().contains("Invalid fts:limit value"));
+			}
+		} finally {
+			repository.shutDown();
+		}
+	}
 }
