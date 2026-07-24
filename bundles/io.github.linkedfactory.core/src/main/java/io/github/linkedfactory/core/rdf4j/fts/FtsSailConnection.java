@@ -19,6 +19,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -26,9 +27,11 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 	private static final int DEFAULT_MAX_BUFFERED_STATEMENTS = 5000;
+	private static final long STALE_SPILL_FILE_MILLIS = TimeUnit.HOURS.toMillis(1);
 
 	private final FtsSearchService searchService;
 	private final FtsSailBuffer buffer;
@@ -56,6 +59,7 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 	FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsSearchService searchService,
 			int maxBufferedStatements) {
 		super(wrappedConnection);
+		cleanupStaleSpillFiles();
 		this.searchService = searchService == null ? FtsSearchService.NOOP : searchService;
 		this.buffer = new FtsSailBuffer(maxBufferedStatements);
 		wrappedConnection.addConnectionListener(connectionListener);
@@ -72,6 +76,27 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 	private boolean isIndexedStatement(Statement statement) {
 		Value object = statement.getObject();
 		return object instanceof Literal || object instanceof IRI;
+	}
+
+	private void cleanupStaleSpillFiles() {
+		Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
+		long cutoff = System.currentTimeMillis() - STALE_SPILL_FILE_MILLIS;
+		try (var files = Files.list(tmpDir)) {
+			files.filter(path -> path.getFileName().toString().startsWith("fts-sail-buffer-"))
+					.filter(path -> path.getFileName().toString().endsWith(".bin"))
+					.forEach(path -> {
+						try {
+							FileTime modified = Files.getLastModifiedTime(path);
+							if (modified.toMillis() < cutoff) {
+								Files.deleteIfExists(path);
+							}
+						} catch (IOException e) {
+							throw new RuntimeException("Unable to clean stale FTS spill file", e);
+						}
+					});
+		} catch (IOException e) {
+			throw new RuntimeException("Unable to scan FTS spill files", e);
+		}
 	}
 
 	@Override
@@ -98,6 +123,7 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 
 	@Override
 	public void begin() throws SailException {
+		cleanupStaleSpillFiles();
 		super.begin();
 		buffer.reset();
 		try {

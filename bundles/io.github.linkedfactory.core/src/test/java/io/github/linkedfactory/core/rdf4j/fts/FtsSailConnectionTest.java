@@ -8,6 +8,9 @@ import org.eclipse.rdf4j.sail.SailConnectionListener;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -217,6 +220,18 @@ public class FtsSailConnectionTest {
 		assertEquals(0, service.addRemoveCount);
 		assertEquals(1, service.rollbackCount);
 		assertTrue(service.addedStatements.isEmpty());
+	}
+
+	@Test
+	public void staleSpillFilesAreCleanedOnStartup() throws Exception {
+		Path stale = Files.createTempFile("fts-sail-buffer-", ".bin");
+		Files.setLastModifiedTime(stale, FileTime.fromMillis(System.currentTimeMillis() - 2 * 60 * 60 * 1000L));
+
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		new FtsSailConnection(wrapped, service);
+
+		assertTrue(Files.notExists(stale));
 	}
 
 	private static final class RecordingSearchService implements FtsSearchService {
