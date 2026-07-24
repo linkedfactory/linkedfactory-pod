@@ -38,6 +38,9 @@ public class FtsFederatedService implements FederatedService {
 
 	@Override
 	public boolean ask(Service service, BindingSet bindings, String baseUri) throws QueryEvaluationException {
+		if (service.getBindingNames().isEmpty()) {
+			return false;
+		}
 		final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
 				new SingletonIteration<>(bindings), baseUri);
 		try {
@@ -77,8 +80,13 @@ public class FtsFederatedService implements FederatedService {
 
 			List<BindingSet> rows = new ArrayList<>(hits.size());
 			for (FtsSearchHit hit : hits) {
+				IRI iriValue;
+				try {
+					iriValue = VF.createIRI(hit.getIri());
+				} catch (IllegalArgumentException e) {
+					throw new QueryEvaluationException("Invalid IRI returned by FTS backend: " + hit.getIri(), e);
+				}
 				QueryBindingSet row = new QueryBindingSet(input);
-				IRI iriValue = VF.createIRI(hit.getIri());
 
 				if (pattern.subjectVar.hasValue() && !pattern.subjectVar.getValue().equals(iriValue)) {
 					continue;
@@ -139,7 +147,9 @@ public class FtsFederatedService implements FederatedService {
 				BindingSet result = iter.next();
 				for (String var : projectionVars) {
 					Value v = result.getValue(var);
-					projected.addBinding(var, v);
+					if (v != null) {
+						projected.addBinding(var, v);
+					}
 				}
 				return projected;
 			}

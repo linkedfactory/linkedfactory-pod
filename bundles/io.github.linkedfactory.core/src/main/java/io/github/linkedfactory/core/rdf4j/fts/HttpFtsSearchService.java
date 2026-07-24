@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.http.HttpEntity;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
@@ -41,6 +42,11 @@ public class HttpFtsSearchService implements FtsSearchService {
 	private volatile String endpoint = "";
 	private volatile String bulkPath = "/fts/bulk";
 	private volatile boolean failOnError = true;
+	private final RequestConfig requestConfig = RequestConfig.custom()
+			.setConnectTimeout(5_000)
+			.setConnectionRequestTimeout(5_000)
+			.setSocketTimeout(30_000)
+			.build();
 
 	private volatile CloseableHttpClient httpClient;
 	private final ThreadLocal<TransactionState> txState = new ThreadLocal<>();
@@ -132,6 +138,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 		String url = endpoint + bulkPath;
 		HttpPost request = new HttpPost(url);
+		request.setConfig(requestConfig);
 		request.setEntity(new StringEntity(mapper.writeValueAsString(payload), ContentType.APPLICATION_JSON));
 		try (CloseableHttpResponse response = client().execute(request)) {
 			int status = response.getStatusLine().getStatusCode();
@@ -161,7 +168,10 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 		synchronized (this) {
 			if (httpClient == null) {
-				httpClient = HttpClients.createDefault();
+				httpClient = HttpClients.custom()
+						.setDefaultRequestConfig(requestConfig)
+						.disableAutomaticRetries()
+						.build();
 			}
 			return httpClient;
 		}

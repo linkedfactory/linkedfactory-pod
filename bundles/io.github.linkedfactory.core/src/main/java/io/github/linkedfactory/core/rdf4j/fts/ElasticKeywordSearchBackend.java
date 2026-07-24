@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.http.HttpEntity;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
@@ -36,6 +37,11 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 	private final String searchPath;
 	private final boolean failOnError;
 	private final int defaultLimit;
+	private final RequestConfig requestConfig = RequestConfig.custom()
+			.setConnectTimeout(5_000)
+			.setConnectionRequestTimeout(5_000)
+			.setSocketTimeout(30_000)
+			.build();
 	private volatile CloseableHttpClient httpClient;
 
 	public ElasticKeywordSearchBackend(String endpoint) {
@@ -90,6 +96,7 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 
 		String url = endpoint + searchPath;
 		HttpPost httpPost = new HttpPost(url);
+		httpPost.setConfig(requestConfig);
 		httpPost.setEntity(new StringEntity(mapper.writeValueAsString(payload), ContentType.APPLICATION_JSON));
 
 		try (CloseableHttpResponse response = client().execute(httpPost)) {
@@ -124,7 +131,10 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 		}
 		synchronized (this) {
 			if (httpClient == null) {
-				httpClient = HttpClients.createDefault();
+				httpClient = HttpClients.custom()
+						.setDefaultRequestConfig(requestConfig)
+						.disableAutomaticRetries()
+						.build();
 			}
 			return httpClient;
 		}

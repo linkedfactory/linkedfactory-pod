@@ -42,6 +42,14 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 		wrappedConnection.addConnectionListener(connectionListener);
 	}
 
+	/*
+	  FIXME do we want to push literal properties and their linked IRIs to search.
+      object instanceof IRI ensures statements like:
+        ex:sensor1 ex:locatedIn ex:lineA .
+        are captured for indexing as references/keywords (not full-text),
+        so search can filter/join on linked resources.
+      If only full-text over literal values is needed, remove that part and keep only object instanceof Literal.
+	 */
 	private boolean isIndexedStatement(Statement statement) {
 		Value object = statement.getObject();
 		return object instanceof Literal || object instanceof IRI;
@@ -90,7 +98,9 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 				FtsSailBuffer.Operation op = it.next();
 				if (op instanceof FtsSailBuffer.AddRemoveOperation) {
 					FtsSailBuffer.AddRemoveOperation addRemove = (FtsSailBuffer.AddRemoveOperation) op;
-					searchService.addRemoveStatements(addRemove.getAdded(), addRemove.getRemoved());
+					if (!addRemove.getAdded().isEmpty() || !addRemove.getRemoved().isEmpty()) {
+						searchService.addRemoveStatements(addRemove.getAdded(), addRemove.getRemoved());
+					}
 				} else if (op instanceof FtsSailBuffer.ClearContextOperation) {
 					searchService.clearContexts(((FtsSailBuffer.ClearContextOperation) op).getContexts());
 				} else if (op instanceof FtsSailBuffer.ClearOperation) {
@@ -133,6 +143,7 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 		}
 	}
 
+	//TODO memory vs disk
 	private static final class FtsSailBuffer {
 		private final List<Operation> operations = new ArrayList<>();
 
@@ -163,6 +174,15 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 		}
 
 		void optimize() {
+			for (int i = operations.size() - 1; i >= 0; i--) {
+				if (operations.get(i) instanceof ClearOperation) {
+					while (i > 0) {
+						operations.remove(i - 1);
+						i--;
+					}
+					break;
+				}
+			}
 			for (Operation op : operations) {
 				if (op instanceof AddRemoveOperation) {
 					((AddRemoveOperation) op).optimize();
