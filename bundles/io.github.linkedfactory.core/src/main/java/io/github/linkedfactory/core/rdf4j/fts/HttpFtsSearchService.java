@@ -26,13 +26,17 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class HttpFtsSearchService implements FtsSearchService {
 	private static final Logger logger = LoggerFactory.getLogger(HttpFtsSearchService.class);
@@ -40,11 +44,15 @@ public class HttpFtsSearchService implements FtsSearchService {
 	static final String PROP_ENDPOINT = "fts.endpoint";
 	static final String PROP_BULK_PATH = "fts.bulkPath";
 	static final String PROP_FAIL_ON_ERROR = "fts.failOnError";
+	static final String PROP_OUTBOX_DIR = "fts.outboxDir";
+	private static final String DEFAULT_OUTBOX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
+			"linkedfactory-fts-outbox").toString();
 
 	private final ObjectMapper mapper = new ObjectMapper();
 	private volatile String endpoint = "";
 	private volatile String bulkPath = "/fts/bulk";
 	private volatile boolean failOnError = true;
+	private volatile Path outboxDir = Path.of(DEFAULT_OUTBOX_DIR);
 	private final RequestConfig requestConfig = RequestConfig.custom()
 			.setConnectTimeout(5_000)
 			.setConnectionRequestTimeout(5_000)
@@ -62,15 +70,21 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	public HttpFtsSearchService(String endpoint, String bulkPath, boolean failOnError) {
+		this(endpoint, bulkPath, failOnError, DEFAULT_OUTBOX_DIR);
+	}
+
+	public HttpFtsSearchService(String endpoint, String bulkPath, boolean failOnError, String outboxDir) {
 		this.endpoint = normalizeEndpoint(endpoint);
 		this.bulkPath = normalizePath(bulkPath);
 		this.failOnError = failOnError;
+		this.outboxDir = normalizeOutboxDir(outboxDir);
 	}
 
 	public final void configure(Map<String, Object> properties) {
 		this.endpoint = normalizeEndpoint(stringProp(properties, PROP_ENDPOINT, ""));
 		this.bulkPath = normalizePath(stringProp(properties, PROP_BULK_PATH, "/fts/bulk"));
 		this.failOnError = booleanProp(properties, PROP_FAIL_ON_ERROR, true);
+		this.outboxDir = normalizeOutboxDir(stringProp(properties, PROP_OUTBOX_DIR, DEFAULT_OUTBOX_DIR));
 	}
 
 	public void shutdown() throws IOException {
@@ -128,6 +142,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 	public void commit() throws Exception {
 		TransactionState tx = txState.get();
 		if (tx == null || tx.isEmpty()) {
+			drainOutbox();
 			cleanup(tx);
 			txState.remove();
 			return;
@@ -139,25 +154,9 @@ public class HttpFtsSearchService implements FtsSearchService {
 			return;
 		}
 
-		Path payload = null;
 		try {
-			payload = tx.finishPayload();
-			String url = endpoint + bulkPath;
-			HttpPost request = new HttpPost(url);
-			request.setConfig(requestConfig);
-			request.setEntity(new FileEntity(payload.toFile(), ContentType.APPLICATION_JSON));
-			try (CloseableHttpResponse response = client().execute(request)) {
-				int status = response.getStatusLine().getStatusCode();
-				if (status >= 300) {
-					HttpEntity entity = response.getEntity();
-					String body = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
-					IOException error = new IOException("HTTP " + status + " while sending FTS updates: " + body);
-					if (failOnError) {
-						throw error;
-					}
-					logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, error);
-				}
-			}
+			tx.persist(outboxDir);
+			drainOutbox();
 		} finally {
 			cleanup(tx);
 			txState.remove();
@@ -294,12 +293,62 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 	}
 
+	private void drainOutbox() throws Exception {
+		if (endpoint.isEmpty()) {
+			return;
+		}
+		ensureOutboxDir();
+		try (Stream<Path> files = Files.list(outboxDir)) {
+			List<Path> pending = files
+					.filter(path -> path.getFileName().toString().endsWith(".json"))
+					.sorted(Comparator.comparing(path -> path.getFileName().toString()))
+					.collect(Collectors.toList());
+			for (Path file : pending) {
+				try {
+					sendPayload(file);
+					Files.deleteIfExists(file);
+				} catch (Exception e) {
+					if (failOnError) {
+						throw e;
+					}
+					logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, e);
+					return;
+				}
+			}
+		}
+	}
+
+	private void sendPayload(Path payload) throws Exception {
+		String url = endpoint + bulkPath;
+		HttpPost request = new HttpPost(url);
+		request.setConfig(requestConfig);
+		request.setEntity(new FileEntity(payload.toFile(), ContentType.APPLICATION_JSON));
+		try (CloseableHttpResponse response = client().execute(request)) {
+			int status = response.getStatusLine().getStatusCode();
+			if (status >= 300) {
+				HttpEntity entity = response.getEntity();
+				String body = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
+				throw new IOException("HTTP " + status + " while sending FTS updates: " + body);
+			}
+		}
+	}
+
+	private void ensureOutboxDir() throws IOException {
+		Files.createDirectories(outboxDir);
+	}
+
+	private Path normalizeOutboxDir(String value) {
+		String dir = value == null || value.isBlank() ? DEFAULT_OUTBOX_DIR : value.trim();
+		return Path.of(dir);
+	}
+
 	private static final class TransactionState {
 		private final Path file;
 		private final java.io.BufferedWriter writer;
 		private final ObjectMapper mapper;
 		private boolean empty = true;
 		private boolean finished = false;
+		private boolean persisted = false;
 
 		private TransactionState(Path file, java.io.BufferedWriter writer, ObjectMapper mapper) {
 			this.file = file;
@@ -320,6 +369,22 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 		boolean isEmpty() {
 			return empty;
+		}
+
+		Path persist(Path outboxDir) {
+			finishPayload();
+			if (persisted) {
+				return file;
+			}
+			try {
+				Files.createDirectories(outboxDir);
+				Path target = outboxDir.resolve(System.currentTimeMillis() + "-" + System.nanoTime() + ".json");
+				Files.move(file, target, StandardCopyOption.REPLACE_EXISTING);
+				persisted = true;
+				return target;
+			} catch (IOException e) {
+				throw new RuntimeException("Unable to persist FTS bulk payload", e);
+			}
 		}
 
 		void append(JsonNode op) {
@@ -350,6 +415,9 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 
 		void cleanup() {
+			if (persisted) {
+				return;
+			}
 			try {
 				if (!finished) {
 					writer.close();
