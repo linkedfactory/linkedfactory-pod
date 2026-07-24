@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class ElasticKeywordSearchBackendTest {
@@ -57,6 +58,55 @@ public class ElasticKeywordSearchBackendTest {
 				.path("query_string").path("default_field").asText());
 		Assert.assertEquals("urn:item1", payload.path("query").path("bool").path("filter").get(0)
 				.path("term").path("_id").asText());
+	}
+
+	@Test
+	public void retriesTransientHttpFailuresBeforeReturningHits() throws Exception {
+		AtomicInteger attempts = new AtomicInteger();
+		HttpServer retryServer = HttpServer.create(new InetSocketAddress(0), 0);
+		retryServer.createContext("/fts/_search", exchange -> {
+			int current = attempts.incrementAndGet();
+			try (InputStream in = exchange.getRequestBody()) {
+				body.set(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+			}
+			byte[] response = current < 3 ? "{}".getBytes(StandardCharsets.UTF_8) : """
+					{
+					  "hits": {
+					    "hits": [
+					      {
+					        "_id": "urn:item1",
+					        "_score": 0.87,
+					        "highlight": {
+					          "urn:label": ["matched snippet"]
+					        }
+					      }
+					    ]
+					  }
+					}
+					""".getBytes(StandardCharsets.UTF_8);
+			int status = current < 3 ? 503 : 200;
+			exchange.sendResponseHeaders(status, response.length);
+			exchange.getResponseBody().write(response);
+			exchange.close();
+		});
+		retryServer.start();
+
+		try {
+			ElasticKeywordSearchBackend backend = new ElasticKeywordSearchBackend(
+					"http://127.0.0.1:" + retryServer.getAddress().getPort(),
+					"/fts/_search",
+					true,
+					100);
+			FtsSearchRequest request = new FtsSearchRequest("motor data", "urn:label", 3, 1.5, true, "urn:item1");
+			List<FtsSearchHit> hits = backend.search(request);
+			backend.close();
+
+			Assert.assertEquals(3, attempts.get());
+			Assert.assertEquals(1, hits.size());
+			Assert.assertEquals("urn:item1", hits.get(0).getIri());
+		} finally {
+			retryServer.stop(0);
+		}
 	}
 
 	private String endpoint() {

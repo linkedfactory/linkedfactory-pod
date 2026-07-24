@@ -40,6 +40,8 @@ import java.util.stream.Stream;
 
 public class HttpFtsSearchService implements FtsSearchService {
 	private static final Logger logger = LoggerFactory.getLogger(HttpFtsSearchService.class);
+	private static final int MAX_ATTEMPTS = 3;
+	private static final long RETRY_BACKOFF_MILLIS = 100L;
 
 	static final String PROP_ENDPOINT = "fts.endpoint";
 	static final String PROP_BULK_PATH = "fts.bulkPath";
@@ -88,6 +90,8 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	public void shutdown() throws IOException {
+		cleanup(txState.get());
+		txState.remove();
 		CloseableHttpClient client = httpClient;
 		httpClient = null;
 		if (client != null) {
@@ -305,7 +309,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 					.collect(Collectors.toList());
 			for (Path file : pending) {
 				try {
-					sendPayload(file);
+					sendPayloadWithRetries(file);
 					Files.deleteIfExists(file);
 				} catch (Exception e) {
 					if (failOnError) {
@@ -315,6 +319,25 @@ public class HttpFtsSearchService implements FtsSearchService {
 					return;
 				}
 			}
+		}
+	}
+
+	private void sendPayloadWithRetries(Path payload) throws Exception {
+		Exception lastError = null;
+		for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+			try {
+				sendPayload(payload);
+				return;
+			} catch (IOException e) {
+				lastError = e;
+				if (!isRetryable(e) || attempt == MAX_ATTEMPTS) {
+					throw e;
+				}
+				sleepBeforeRetry(attempt, e);
+			}
+		}
+		if (lastError != null) {
+			throw lastError;
 		}
 	}
 
@@ -331,6 +354,25 @@ public class HttpFtsSearchService implements FtsSearchService {
 				throw new IOException("HTTP " + status + " while sending FTS updates: " + body);
 			}
 		}
+	}
+
+	private boolean isRetryable(IOException error) {
+		String message = error.getMessage();
+		if (message == null) {
+			return false;
+		}
+		return message.contains("HTTP 429") || message.contains("HTTP 500") || message.contains("HTTP 502")
+				|| message.contains("HTTP 503") || message.contains("HTTP 504");
+	}
+
+	private void sleepBeforeRetry(int attempt, IOException error) throws IOException {
+		try {
+			Thread.sleep(RETRY_BACKOFF_MILLIS * attempt);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IOException("Interrupted while retrying FTS update", e);
+		}
+		logger.warn("Retrying FTS update attempt {} after transient failure: {}", attempt + 1, error.getMessage());
 	}
 
 	private void ensureOutboxDir() throws IOException {

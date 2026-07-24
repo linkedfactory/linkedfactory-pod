@@ -144,11 +144,12 @@ public class HttpFtsSearchServiceTest {
 
 	@Test
 	public void failOnErrorCanBeDisabled() throws Exception {
-		HttpFtsSearchService service = new HttpFtsSearchService();
-		service.configure(Map.of(
-				HttpFtsSearchService.PROP_ENDPOINT, endpoint(),
-				HttpFtsSearchService.PROP_FAIL_ON_ERROR, "false"
-		));
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/fts/bulk",
+				false,
+				outboxDir.toString());
 		responseCode = 500;
 
 		service.begin();
@@ -159,7 +160,10 @@ public class HttpFtsSearchServiceTest {
 		service.commit();
 		service.shutdown();
 
-		assertEquals(1, requests.get());
+		assertEquals(3, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertTrue(files.findAny().isPresent());
+		}
 	}
 
 	@Test
@@ -184,7 +188,7 @@ public class HttpFtsSearchServiceTest {
 			assertTrue(expected.getMessage().contains("HTTP 500"));
 		}
 
-		assertEquals(1, requests.get());
+		assertEquals(3, requests.get());
 		try (var files = Files.list(outboxDir)) {
 			assertTrue(files.findAny().isPresent());
 		}
@@ -193,9 +197,47 @@ public class HttpFtsSearchServiceTest {
 		service.commit();
 		service.shutdown();
 
-		assertEquals(2, requests.get());
+		assertEquals(4, requests.get());
 		try (var files = Files.list(outboxDir)) {
 			assertFalse(files.findAny().isPresent());
+		}
+	}
+
+	@Test
+	public void retriesTransientHttpFailuresBeforeSucceeding() throws Exception {
+		AtomicInteger attempt = new AtomicInteger();
+		HttpServer retryServer = HttpServer.create(new InetSocketAddress(0), 0);
+		retryServer.createContext("/fts/bulk", exchange -> {
+			int current = attempt.incrementAndGet();
+			try (InputStream in = exchange.getRequestBody()) {
+				body.set(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+			}
+			int status = current < 3 ? 503 : 200;
+			byte[] response = current < 3 ? "retry".getBytes(StandardCharsets.UTF_8) : "ok".getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(status, response.length);
+			exchange.getResponseBody().write(response);
+			exchange.close();
+		});
+		retryServer.start();
+
+		try {
+			HttpFtsSearchService service = new HttpFtsSearchService(
+					"http://127.0.0.1:" + retryServer.getAddress().getPort(),
+					"/fts/bulk",
+					true,
+					Files.createTempDirectory("fts-outbox-test").toString());
+
+			service.begin();
+			service.addRemoveStatements(Set.of(vf.createStatement(
+					vf.createIRI("urn:s"),
+					vf.createIRI("urn:p"),
+					vf.createLiteral("x"))), Set.of());
+			service.commit();
+			service.shutdown();
+
+			assertEquals(3, attempt.get());
+		} finally {
+			retryServer.stop(0);
 		}
 	}
 
