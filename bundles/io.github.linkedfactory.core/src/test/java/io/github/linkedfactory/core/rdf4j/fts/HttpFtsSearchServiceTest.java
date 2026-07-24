@@ -226,6 +226,50 @@ public class HttpFtsSearchServiceTest {
 	}
 
 	@Test
+	public void restartsAndDrainsPersistedOutbox() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService first = new HttpFtsSearchService(
+				endpoint(),
+				"/fts/bulk",
+				true,
+				outboxDir.toString());
+
+		responseCode = 500;
+		first.begin();
+		first.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		try {
+			first.commit();
+			fail("Expected exception on HTTP error with failOnError=true");
+		} catch (IOException expected) {
+			assertTrue(expected.getMessage().contains("HTTP 500"));
+		} finally {
+			first.shutdown();
+		}
+
+		assertEquals(3, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertTrue(files.findAny().isPresent());
+		}
+
+		responseCode = 200;
+		HttpFtsSearchService restarted = new HttpFtsSearchService(
+				endpoint(),
+				"/fts/bulk",
+				true,
+				outboxDir.toString());
+		restarted.commit();
+		restarted.shutdown();
+
+		assertEquals(4, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertFalse(files.findAny().isPresent());
+		}
+	}
+
+	@Test
 	public void retriesTransientHttpFailuresBeforeSucceeding() throws Exception {
 		AtomicInteger attempt = new AtomicInteger();
 		HttpServer retryServer = HttpServer.create(new InetSocketAddress(0), 0);
