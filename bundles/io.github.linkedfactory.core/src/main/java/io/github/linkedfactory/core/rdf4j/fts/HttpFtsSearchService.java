@@ -9,6 +9,7 @@ import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
+import org.apache.http.entity.FileEntity;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
@@ -23,6 +24,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -80,17 +83,21 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	@Override
 	public void begin() {
-		txState.set(new TransactionState());
+		TransactionState tx = txState.get();
+		if (tx != null) {
+			tx.cleanup();
+		}
+		txState.set(TransactionState.create(mapper));
 	}
 
 	@Override
 	public void addRemoveStatements(Set<Statement> added, Set<Statement> removed) {
 		TransactionState tx = state();
 		if (!added.isEmpty()) {
-			tx.operations.add(statementBatch("upsert", added));
+			tx.append(statementBatch("upsert", added));
 		}
 		if (!removed.isEmpty()) {
-			tx.operations.add(statementBatch("remove", removed));
+			tx.append(statementBatch("remove", removed));
 		}
 	}
 
@@ -107,57 +114,59 @@ public class HttpFtsSearchService implements FtsSearchService {
 			}
 		}
 		op.set("contexts", ctx);
-		state().operations.add(op);
+		state().append(op);
 	}
 
 	@Override
 	public void clear() {
 		ObjectNode op = mapper.createObjectNode();
 		op.put("op", "clear");
-		state().operations.add(op);
+		state().append(op);
 	}
 
 	@Override
 	public void commit() throws Exception {
 		TransactionState tx = txState.get();
-		if (tx == null || tx.operations.isEmpty()) {
+		if (tx == null || tx.isEmpty()) {
+			cleanup(tx);
 			txState.remove();
 			return;
 		}
 		if (endpoint.isEmpty()) {
 			logger.debug("Skipping FTS update: no {} configured.", PROP_ENDPOINT);
+			cleanup(tx);
 			txState.remove();
 			return;
 		}
 
-		ObjectNode payload = mapper.createObjectNode();
-		ArrayNode operations = payload.putArray("operations");
-		for (JsonNode op : tx.operations) {
-			operations.add(op);
-		}
-
-		String url = endpoint + bulkPath;
-		HttpPost request = new HttpPost(url);
-		request.setConfig(requestConfig);
-		request.setEntity(new StringEntity(mapper.writeValueAsString(payload), ContentType.APPLICATION_JSON));
-		try (CloseableHttpResponse response = client().execute(request)) {
-			int status = response.getStatusLine().getStatusCode();
-			if (status >= 300) {
-				HttpEntity entity = response.getEntity();
-				String body = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
-				IOException error = new IOException("HTTP " + status + " while sending FTS updates: " + body);
-				if (failOnError) {
-					throw error;
+		Path payload = null;
+		try {
+			payload = tx.finishPayload();
+			String url = endpoint + bulkPath;
+			HttpPost request = new HttpPost(url);
+			request.setConfig(requestConfig);
+			request.setEntity(new FileEntity(payload.toFile(), ContentType.APPLICATION_JSON));
+			try (CloseableHttpResponse response = client().execute(request)) {
+				int status = response.getStatusLine().getStatusCode();
+				if (status >= 300) {
+					HttpEntity entity = response.getEntity();
+					String body = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
+					IOException error = new IOException("HTTP " + status + " while sending FTS updates: " + body);
+					if (failOnError) {
+						throw error;
+					}
+					logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, error);
 				}
-				logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, error);
 			}
 		} finally {
+			cleanup(tx);
 			txState.remove();
 		}
 	}
 
 	@Override
 	public void rollback() {
+		cleanup(txState.get());
 		txState.remove();
 	}
 
@@ -180,7 +189,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 	private TransactionState state() {
 		TransactionState state = txState.get();
 		if (state == null) {
-			state = new TransactionState();
+			state = TransactionState.create(mapper);
 			txState.set(state);
 		}
 		return state;
@@ -275,7 +284,85 @@ public class HttpFtsSearchService implements FtsSearchService {
 		return value.startsWith("/") ? value : "/" + value;
 	}
 
+	private void cleanup(TransactionState tx) {
+		if (tx != null) {
+			try {
+				tx.cleanup();
+			} catch (RuntimeException e) {
+				logger.warn("Unable to clean up FTS bulk payload", e);
+			}
+		}
+	}
+
 	private static final class TransactionState {
-		private final List<JsonNode> operations = new ArrayList<>();
+		private final Path file;
+		private final java.io.BufferedWriter writer;
+		private final ObjectMapper mapper;
+		private boolean empty = true;
+		private boolean finished = false;
+
+		private TransactionState(Path file, java.io.BufferedWriter writer, ObjectMapper mapper) {
+			this.file = file;
+			this.writer = writer;
+			this.mapper = mapper;
+		}
+
+		static TransactionState create(ObjectMapper mapper) {
+			try {
+				Path file = Files.createTempFile("fts-http-bulk-", ".json");
+				java.io.BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
+				writer.write("{\"operations\":[");
+				return new TransactionState(file, writer, mapper);
+			} catch (IOException e) {
+				throw new RuntimeException("Unable to create FTS bulk payload", e);
+			}
+		}
+
+		boolean isEmpty() {
+			return empty;
+		}
+
+		void append(JsonNode op) {
+			try {
+				if (!empty) {
+					writer.write(',');
+				}
+				writer.write(mapper.writeValueAsString(op));
+				writer.flush();
+				empty = false;
+			} catch (IOException e) {
+				throw new RuntimeException("Unable to append to FTS bulk payload", e);
+			}
+		}
+
+		Path finishPayload() {
+			if (!finished) {
+				try {
+					writer.write("]}");
+					writer.flush();
+					writer.close();
+					finished = true;
+				} catch (IOException e) {
+					throw new RuntimeException("Unable to finalize FTS bulk payload", e);
+				}
+			}
+			return file;
+		}
+
+		void cleanup() {
+			try {
+				if (!finished) {
+					writer.close();
+				}
+			} catch (IOException e) {
+				throw new RuntimeException("Unable to close FTS bulk payload", e);
+			} finally {
+				try {
+					Files.deleteIfExists(file);
+				} catch (IOException e) {
+					throw new RuntimeException("Unable to delete FTS bulk payload", e);
+				}
+			}
+		}
 	}
 }

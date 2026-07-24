@@ -54,8 +54,9 @@ public class FtsFederatedServiceResolverTest {
 		try {
 			resolver.getService("fts:http://evil.example");
 			fail("Expected QueryEvaluationException");
-		} catch (QueryEvaluationException | IllegalArgumentException expected) {
-			assertTrue(expected.getMessage().contains("Absolute FTS service URLs"));
+		} catch (QueryEvaluationException expected) {
+			assertNotNull(expected.getCause());
+			assertTrue(expected.getCause().getMessage().contains("Absolute FTS service URLs"));
 		}
 	}
 

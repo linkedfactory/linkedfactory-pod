@@ -112,6 +112,29 @@ public class FtsSailConnectionTest {
 	}
 
 	@Test
+	public void largeTransactionSpillsAndCommitsAllStatements() {
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		FtsSailConnection connection = new FtsSailConnection(wrapped, service, 2);
+
+		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
+		verify(wrapped).addConnectionListener(listenerCaptor.capture());
+		SailConnectionListener listener = listenerCaptor.getValue();
+
+		connection.begin();
+		for (int i = 0; i < 10; i++) {
+			listener.statementAdded(vf.createStatement(
+					vf.createIRI("urn:s" + i),
+					vf.createIRI("urn:p"),
+					vf.createLiteral("value" + i)));
+		}
+		connection.commit();
+
+		assertTrue(service.addRemoveCount > 1);
+		assertEquals(10, service.addedStatements.size());
+	}
+
+	@Test
 	public void rollbackDiscardsPendingChanges() {
 		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
