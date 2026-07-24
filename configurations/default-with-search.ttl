@@ -59,8 +59,8 @@ group:Administrators foaf:member user:admin .
             sail:sailType "fts:FtsSail" ;
             fts:backend "elastic" ;
             fts:endpoint "http://localhost:9200" ;
-            fts:bulkPath "/fts/bulk" ;
-            fts:searchPath "/fts/_search" ;
+            fts:bulkPath "/linkedfactory/_bulk" ;
+            fts:searchPath "/linkedfactory/_search" ;
             fts:defaultLimit 100 ;
             fts:failOnError true ;
             sail:delegate [

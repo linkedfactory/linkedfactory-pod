@@ -38,7 +38,10 @@ public class FtsFederatedService implements FederatedService {
 
 	@Override
 	public boolean ask(Service service, BindingSet bindings, String baseUri) throws QueryEvaluationException {
-		final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
+		if (service.getBindingNames().isEmpty()) {
+			return false;
+		}
+		final CloseableIteration<BindingSet> iter = evaluate(service,
 				new SingletonIteration<>(bindings), baseUri);
 		try {
 			while (iter.hasNext()) {
@@ -53,14 +56,14 @@ public class FtsFederatedService implements FederatedService {
 	}
 
 	@Override
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(Service service,
-			CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri) throws QueryEvaluationException {
+	public CloseableIteration<BindingSet> evaluate(Service service,
+			CloseableIteration<BindingSet> bindings, String baseUri) throws QueryEvaluationException {
 		if (!bindings.hasNext()) {
 			return new EmptyIteration<>();
 		}
 
 		FtsPattern pattern = extractPattern(service);
-		List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
+		List<CloseableIteration<BindingSet>> resultIters = new ArrayList<>();
 		while (bindings.hasNext()) {
 			BindingSet input = bindings.next();
 			FtsSearchRequest request = pattern.toRequest(input);
@@ -77,8 +80,13 @@ public class FtsFederatedService implements FederatedService {
 
 			List<BindingSet> rows = new ArrayList<>(hits.size());
 			for (FtsSearchHit hit : hits) {
+				IRI iriValue;
+				try {
+					iriValue = VF.createIRI(hit.getIri());
+				} catch (IllegalArgumentException e) {
+					throw new QueryEvaluationException("Invalid IRI returned by FTS backend: " + hit.getIri(), e);
+				}
 				QueryBindingSet row = new QueryBindingSet(input);
-				IRI iriValue = VF.createIRI(hit.getIri());
 
 				if (pattern.subjectVar.hasValue() && !pattern.subjectVar.getValue().equals(iriValue)) {
 					continue;
@@ -119,9 +127,9 @@ public class FtsFederatedService implements FederatedService {
 	}
 
 	@Override
-	public CloseableIteration<BindingSet, QueryEvaluationException> select(Service service, Set<String> projectionVars,
+	public CloseableIteration<BindingSet> select(Service service, Set<String> projectionVars,
 			BindingSet bindings, String baseUri) throws QueryEvaluationException {
-		final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
+		final CloseableIteration<BindingSet> iter = evaluate(service,
 				new SingletonIteration<>(bindings), baseUri);
 		if (service.getBindingNames().equals(projectionVars)) {
 			return iter;
@@ -139,7 +147,9 @@ public class FtsFederatedService implements FederatedService {
 				BindingSet result = iter.next();
 				for (String var : projectionVars) {
 					Value v = result.getValue(var);
-					projected.addBinding(var, v);
+					if (v != null) {
+						projected.addBinding(var, v);
+					}
 				}
 				return projected;
 			}
@@ -166,6 +176,7 @@ public class FtsFederatedService implements FederatedService {
 	}
 
 	private FtsPattern extractPattern(Service service) throws QueryEvaluationException {
+		List<StatementPattern> patterns = StatementPatternCollector.process(service.getArg());
 		StatementPattern keywords = null;
 		StatementPattern score = null;
 		StatementPattern snippet = null;
@@ -173,9 +184,15 @@ public class FtsFederatedService implements FederatedService {
 		StatementPattern limit = null;
 		StatementPattern boost = null;
 
-		for (StatementPattern stmt : StatementPatternCollector.process(service.getArg())) {
+		for (StatementPattern stmt : patterns) {
 			Value predicate = stmt.getPredicateVar().getValue();
+			if (predicate == null) {
+				throw new QueryEvaluationException("SERVICE <fts:> only supports constant FTS predicates.");
+			}
 			if (FTS.KEYWORDS.equals(predicate)) {
+				if (keywords != null) {
+					throw new QueryEvaluationException("SERVICE <fts:> must contain exactly one fts:keywords pattern.");
+				}
 				keywords = stmt;
 			}
 		}
@@ -183,20 +200,38 @@ public class FtsFederatedService implements FederatedService {
 			throw new QueryEvaluationException("SERVICE <fts:> must include ?iri fts:keywords ...");
 		}
 
-		for (StatementPattern stmt : StatementPatternCollector.process(service.getArg())) {
-			if (!sameSubject(keywords.getSubjectVar(), stmt.getSubjectVar())) {
+		for (StatementPattern stmt : patterns) {
+			Value predicate = stmt.getPredicateVar().getValue();
+			if (predicate == null || !isFtsPredicate(predicate)) {
 				continue;
 			}
-			Value predicate = stmt.getPredicateVar().getValue();
+			if (!sameSubject(keywords.getSubjectVar(), stmt.getSubjectVar())) {
+				throw new QueryEvaluationException("SERVICE <fts:> patterns must use the same subject.");
+			}
 			if (FTS.SCORE.equals(predicate)) {
+				if (score != null) {
+					throw new QueryEvaluationException("SERVICE <fts:> must not contain duplicate fts:score patterns.");
+				}
 				score = stmt;
 			} else if (FTS.SNIPPET.equals(predicate)) {
+				if (snippet != null) {
+					throw new QueryEvaluationException("SERVICE <fts:> must not contain duplicate fts:snippet patterns.");
+				}
 				snippet = stmt;
 			} else if (FTS.FIELD.equals(predicate)) {
+				if (field != null) {
+					throw new QueryEvaluationException("SERVICE <fts:> must not contain duplicate fts:field patterns.");
+				}
 				field = stmt;
 			} else if (FTS.LIMIT.equals(predicate)) {
+				if (limit != null) {
+					throw new QueryEvaluationException("SERVICE <fts:> must not contain duplicate fts:limit patterns.");
+				}
 				limit = stmt;
 			} else if (FTS.BOOST.equals(predicate)) {
+				if (boost != null) {
+					throw new QueryEvaluationException("SERVICE <fts:> must not contain duplicate fts:boost patterns.");
+				}
 				boost = stmt;
 			}
 		}
@@ -215,7 +250,7 @@ public class FtsFederatedService implements FederatedService {
 		return a.getName().equals(b.getName());
 	}
 
-	private static CloseableIteration<BindingSet, QueryEvaluationException> toIteration(List<BindingSet> results) {
+	private static CloseableIteration<BindingSet> toIteration(List<BindingSet> results) {
 		return new CloseableIteration<>() {
 			private final Iterator<BindingSet> iterator = results.iterator();
 
@@ -282,7 +317,10 @@ public class FtsFederatedService implements FederatedService {
 
 			int limit = 0;
 			Value limitValue = resolveValue(limitVar, input);
-			if (limitValue instanceof Literal) {
+			if (limitValue != null) {
+				if (!(limitValue instanceof Literal)) {
+					throw new QueryEvaluationException("Invalid fts:limit value: " + limitValue);
+				}
 				try {
 					limit = ((Literal) limitValue).intValue();
 				} catch (NumberFormatException e) {
@@ -292,7 +330,10 @@ public class FtsFederatedService implements FederatedService {
 
 			Double boost = null;
 			Value boostValue = resolveValue(boostVar, input);
-			if (boostValue instanceof Literal) {
+			if (boostValue != null) {
+				if (!(boostValue instanceof Literal)) {
+					throw new QueryEvaluationException("Invalid fts:boost value: " + boostValue);
+				}
 				try {
 					boost = ((Literal) boostValue).doubleValue();
 				} catch (NumberFormatException e) {
@@ -318,5 +359,14 @@ public class FtsFederatedService implements FederatedService {
 			}
 			return input.getValue(var.getName());
 		}
+	}
+
+	private boolean isFtsPredicate(Value predicate) {
+		return FTS.KEYWORDS.equals(predicate)
+				|| FTS.SCORE.equals(predicate)
+				|| FTS.SNIPPET.equals(predicate)
+				|| FTS.FIELD.equals(predicate)
+				|| FTS.LIMIT.equals(predicate)
+				|| FTS.BOOST.equals(predicate);
 	}
 }

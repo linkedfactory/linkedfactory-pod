@@ -10,6 +10,7 @@ import org.eclipse.rdf4j.model.util.Models;
 import org.eclipse.rdf4j.sail.config.AbstractDelegatingSailImplConfig;
 import org.eclipse.rdf4j.sail.config.SailConfigException;
 
+import java.nio.file.Path;
 import java.util.Optional;
 
 public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
@@ -20,13 +21,17 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private static final IRI BULK_PATH = VF.createIRI(CONFIG_NS, "bulkPath");
 	private static final IRI SEARCH_PATH = VF.createIRI(CONFIG_NS, "searchPath");
 	private static final IRI FAIL_ON_ERROR = VF.createIRI(CONFIG_NS, "failOnError");
+	private static final IRI OUTBOX_DIR = VF.createIRI(CONFIG_NS, "outboxDir");
 	private static final IRI DEFAULT_LIMIT = VF.createIRI(CONFIG_NS, "defaultLimit");
+	private static final String DEFAULT_OUTBOX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
+			"linkedfactory-fts-outbox").toString();
 
 	private String backend = "elastic";
 	private String endpoint;
 	private String bulkPath = "/fts/bulk";
 	private String searchPath = "/fts/_search";
 	private boolean failOnError = true;
+	private String outboxDir = DEFAULT_OUTBOX_DIR;
 	private int defaultLimit = 100;
 
 	public FtsSailConfig() {
@@ -69,6 +74,16 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 		this.failOnError = failOnError;
 	}
 
+	public String getOutboxDir() {
+		return outboxDir;
+	}
+
+	public void setOutboxDir(String outboxDir) {
+		if (outboxDir != null && !outboxDir.isBlank()) {
+			this.outboxDir = outboxDir.trim();
+		}
+	}
+
 	public String getSearchPath() {
 		return searchPath;
 	}
@@ -103,6 +118,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 			model.add(implNode, SEARCH_PATH, VF.createLiteral(searchPath));
 		}
 		model.add(implNode, FAIL_ON_ERROR, VF.createLiteral(failOnError));
+		model.add(implNode, OUTBOX_DIR, VF.createLiteral(outboxDir));
 		model.add(implNode, DEFAULT_LIMIT, VF.createLiteral(defaultLimit));
 		return implNode;
 	}
@@ -131,6 +147,9 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 				throw new SailConfigException("Invalid boolean for fts:failOnError", e);
 			}
 		}
+
+		Optional<Literal> outboxDirLiteral = Models.objectLiteral(model.filter(implNode, OUTBOX_DIR, null));
+		outboxDirLiteral.ifPresent(literal -> outboxDir = literal.getLabel());
 
 		Optional<Literal> defaultLimitLiteral = Models.objectLiteral(model.filter(implNode, DEFAULT_LIMIT, null));
 		if (defaultLimitLiteral.isPresent()) {
