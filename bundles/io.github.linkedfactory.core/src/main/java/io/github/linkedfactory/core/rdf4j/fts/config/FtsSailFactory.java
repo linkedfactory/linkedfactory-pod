@@ -36,7 +36,8 @@ public class FtsSailFactory implements SailFactory {
 					new HttpFtsSearchService(
 							ftsConfig.getEndpoint(),
 							ftsConfig.getBulkPath(),
-							ftsConfig.isFailOnError()),
+							ftsConfig.isFailOnError(),
+							ftsConfig.getOutboxDir()),
 					new FtsFederatedServiceConfig(
 							ftsConfig.getBackend(),
 							ftsConfig.getEndpoint(),
