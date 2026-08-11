@@ -40,8 +40,19 @@ import java.util.stream.Stream;
 
 public class HttpFtsSearchService implements FtsSearchService {
 	private static final Logger logger = LoggerFactory.getLogger(HttpFtsSearchService.class);
+
 	private static final int MAX_ATTEMPTS = 3;
 	private static final long RETRY_BACKOFF_MILLIS = 100L;
+
+	private static final ContentType NDJSON = ContentType.create("application/x-ndjson", StandardCharsets.UTF_8);
+	private static final String REMOVE_SCRIPT = "for (entry in params.fields.entrySet()) { "
+			+ "def key = entry.getKey(); "
+			+ "if (ctx._source.containsKey(key)) { "
+			+ "ctx._source[key].removeAll(entry.getValue()); "
+			+ "if (ctx._source[key].isEmpty()) { ctx._source.remove(key); } "
+			+ "} "
+			+ "} "
+			+ "if (ctx._source.isEmpty()) { ctx.op = 'delete'; }";
 
 	static final String PROP_ENDPOINT = "fts.endpoint";
 	static final String PROP_BULK_PATH = "fts.bulkPath";
@@ -52,7 +63,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	private final ObjectMapper mapper = new ObjectMapper();
 	private volatile String endpoint = "";
-	private volatile String bulkPath = "/fts/bulk";
+	private volatile String bulkPath = "/_bulk";
 	private volatile boolean failOnError = true;
 	private volatile Path outboxDir = Path.of(DEFAULT_OUTBOX_DIR);
 	private final RequestConfig requestConfig = RequestConfig.custom()
@@ -84,7 +95,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	public final void configure(Map<String, Object> properties) {
 		this.endpoint = normalizeEndpoint(stringProp(properties, PROP_ENDPOINT, ""));
-		this.bulkPath = normalizePath(stringProp(properties, PROP_BULK_PATH, "/fts/bulk"));
+		this.bulkPath = normalizePath(stringProp(properties, PROP_BULK_PATH, "/_bulk"));
 		this.failOnError = booleanProp(properties, PROP_FAIL_ON_ERROR, true);
 		this.outboxDir = normalizeOutboxDir(stringProp(properties, PROP_OUTBOX_DIR, DEFAULT_OUTBOX_DIR));
 	}
@@ -145,12 +156,14 @@ public class HttpFtsSearchService implements FtsSearchService {
 	@Override
 	public void commit() throws Exception {
 		TransactionState tx = txState.get();
+
 		if (tx == null || tx.isEmpty()) {
 			drainOutbox();
 			cleanup(tx);
 			txState.remove();
 			return;
 		}
+
 		if (endpoint.isEmpty()) {
 			logger.debug("Skipping FTS update: no {} configured.", PROP_ENDPOINT);
 			cleanup(tx);
@@ -166,6 +179,79 @@ public class HttpFtsSearchService implements FtsSearchService {
 			txState.remove();
 		}
 	}
+	private boolean containsOperation(ArrayNode operations, String opName) {
+		for (JsonNode op : operations) {
+			if (opName.equals(op.path("op").asText())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private String toBulkNdjson(ArrayNode operations) throws IOException {
+		StringBuilder ndjson = new StringBuilder();
+		for (JsonNode op : operations) {
+			String type = op.path("op").asText();
+			if (!("upsert".equals(type) || "remove".equals(type))) {
+				continue;
+			}
+			JsonNode documents = op.path("documents");
+			if (!documents.isObject()) {
+				continue;
+			}
+
+			var docs = documents.fields();
+			while (docs.hasNext()) {
+				var entry = docs.next();
+				String id = entry.getKey();
+				JsonNode fields = entry.getValue();
+
+				ObjectNode action = mapper.createObjectNode();
+				ObjectNode update = action.putObject("update");
+				update.put("_id", id);
+
+				ObjectNode payload = mapper.createObjectNode();
+				if ("upsert".equals(type)) {
+					payload.set("doc", fields);
+					payload.put("doc_as_upsert", true);
+				} else {
+					ObjectNode script = payload.putObject("script");
+					script.put("lang", "painless");
+					script.put("source", REMOVE_SCRIPT);
+					script.set("params", mapper.createObjectNode().set("fields", fields));
+				}
+
+				ndjson.append(mapper.writeValueAsString(action)).append('\n');
+				ndjson.append(mapper.writeValueAsString(payload)).append('\n');
+			}
+		}
+		return ndjson.toString();
+	}
+
+	private String deleteByQueryPath() {
+		if (bulkPath.endsWith("/_bulk")) {
+			return bulkPath.substring(0, bulkPath.length() - "_bulk".length()) + "_delete_by_query";
+		}
+		return "/_delete_by_query";
+	}
+
+	private void sendRequest(String url, String body, ContentType contentType, String operation) throws IOException {
+		HttpPost request = new HttpPost(url);
+		request.setEntity(new StringEntity(body, contentType));
+		try (CloseableHttpResponse response = client().execute(request)) {
+			int status = response.getStatusLine().getStatusCode();
+			if (status >= 300) {
+				HttpEntity entity = response.getEntity();
+				String responseBody = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
+				IOException error = new IOException("HTTP " + status + " " + operation + ": " + responseBody);
+				if (failOnError) {
+					throw error;
+				}
+				logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, error);
+			}
+		}
+	}
+
 
 	@Override
 	public void rollback() {
@@ -280,9 +366,9 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private static String normalizePath(String path) {
-		String value = Objects.requireNonNullElse(path, "/fts/bulk").trim();
+		String value = Objects.requireNonNullElse(path, "/_bulk").trim();
 		if (value.isEmpty()) {
-			value = "/fts/bulk";
+			value = "/_bulk";
 		}
 		return value.startsWith("/") ? value : "/" + value;
 	}
@@ -342,16 +428,81 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private void sendPayload(Path payload) throws Exception {
+
+		JsonNode root = mapper.readTree(payload.toFile());
+		JsonNode operationsNode = root.path("operations");
+
+		if (!operationsNode.isArray()) {
+			throw new IOException(
+					"Invalid FTS outbox payload: missing operations array"
+			);
+		}
+
+		ArrayNode operations = (ArrayNode) operationsNode;
+
+		if (containsOperation(operations, "clear")) {
+			sendRequest(
+					endpoint + deleteByQueryPath(),
+					mapper.writeValueAsString(
+							Map.of(
+									"query",
+									Map.of(
+											"match_all",
+											Map.of()
+									)
+							)
+					),
+					ContentType.APPLICATION_JSON,
+					"while clearing FTS index"
+			);
+		}
+
+		if (containsOperation(operations, "clearContexts")) {
+			logger.warn(
+					"clearContexts is not mapped to native Elasticsearch operations and was ignored."
+			);
+		}
+
+		String ndjson = toBulkNdjson(operations);
+
+		if (ndjson.isBlank()) {
+			return;
+		}
+
 		String url = endpoint + bulkPath;
+
 		HttpPost request = new HttpPost(url);
 		request.setConfig(requestConfig);
-		request.setEntity(new FileEntity(payload.toFile(), ContentType.APPLICATION_JSON));
+
+		request.setEntity(
+				new StringEntity(
+						ndjson,
+						NDJSON
+				)
+		);
+
 		try (CloseableHttpResponse response = client().execute(request)) {
-			int status = response.getStatusLine().getStatusCode();
+
+			int status =
+					response.getStatusLine().getStatusCode();
+
 			if (status >= 300) {
 				HttpEntity entity = response.getEntity();
-				String body = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
-				throw new IOException("HTTP " + status + " while sending FTS updates: " + body);
+
+				String body =
+						entity == null
+								? ""
+								: EntityUtils.toString(
+								entity,
+								StandardCharsets.UTF_8
+						);
+
+				throw new IOException(
+						"HTTP "
+								+ status
+								+ " while sending FTS updates: "
+								+ body
+				);
 			}
 		}
 	}
