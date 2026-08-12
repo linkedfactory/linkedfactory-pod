@@ -41,7 +41,7 @@ public class HttpFtsSearchServiceTest {
 		body = new AtomicReference<>();
 		requests = new AtomicInteger(0);
 		server = HttpServer.create(new InetSocketAddress(0), 0);
-		server.createContext("/fts/bulk", this::handleRequest);
+		server.createContext("/_bulk", this::handleRequest);
 		server.start();
 	}
 
@@ -54,12 +54,14 @@ public class HttpFtsSearchServiceTest {
 
 	@Test
 	public void commitSendsBatchedPayload() throws Exception {
+
 		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
 		HttpFtsSearchService service = new HttpFtsSearchService(
 				endpoint(),
-				"/fts/bulk",
+				"/_bulk",
 				true,
 				outboxDir.toString());
+
 
 		Statement added = vf.createStatement(
 				vf.createIRI("urn:sensor1"),
@@ -78,19 +80,22 @@ public class HttpFtsSearchServiceTest {
 		service.shutdown();
 
 		assertEquals(1, requests.get());
-		//System.out.println(body.get());
-		JsonNode payload = mapper.readTree(body.get());
-		assertTrue(payload.has("operations"));
-		assertEquals(2, payload.get("operations").size());
-		assertEquals("upsert", payload.get("operations").get(0).get("op").asText());
-		assertEquals("remove", payload.get("operations").get(1).get("op").asText());
+		String[] lines = body.get().strip().split("\\n");
+		assertEquals(4, lines.length);
+
+		JsonNode upsertAction = mapper.readTree(lines[0]);
+		JsonNode upsertPayload = mapper.readTree(lines[1]);
+		JsonNode removeAction = mapper.readTree(lines[2]);
+		JsonNode removePayload = mapper.readTree(lines[3]);
+
+		assertEquals("urn:sensor1", upsertAction.path("update").path("_id").asText());
+		assertEquals("urn:sensor1", removeAction.path("update").path("_id").asText());
+		assertTrue(upsertPayload.path("doc_as_upsert").asBoolean());
 		assertEquals("Battery Sensor",
-				payload.get("operations").get(0)
-						.get("documents").get("urn:sensor1")
+				upsertPayload.path("doc")
 						.get("urn:label").get(0).get("value").asText());
 		assertEquals("urn:lineA",
-				payload.get("operations").get(1)
-						.get("documents").get("urn:sensor1")
+				removePayload.path("script").path("params").path("fields")
 						.get("urn:locatedIn").get(0).get("value").asText());
 	}
 
@@ -99,7 +104,7 @@ public class HttpFtsSearchServiceTest {
 		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
 		HttpFtsSearchService service = new HttpFtsSearchService(
 				endpoint(),
-				"/fts/bulk",
+				"/_bulk",
 				true,
 				outboxDir.toString());
 
@@ -123,7 +128,7 @@ public class HttpFtsSearchServiceTest {
 		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
 		HttpFtsSearchService service = new HttpFtsSearchService(
 				endpoint(),
-				"/fts/bulk",
+				"/_bulk",
 				true,
 				outboxDir.toString());
 
@@ -169,7 +174,7 @@ public class HttpFtsSearchServiceTest {
 		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
 		HttpFtsSearchService service = new HttpFtsSearchService(
 				endpoint(),
-				"/fts/bulk",
+				"/_bulk",
 				false,
 				outboxDir.toString());
 		responseCode = 500;
@@ -193,7 +198,7 @@ public class HttpFtsSearchServiceTest {
 		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
 		HttpFtsSearchService service = new HttpFtsSearchService(
 				endpoint(),
-				"/fts/bulk",
+				"/_bulk",
 				true,
 				outboxDir.toString());
 
@@ -230,7 +235,7 @@ public class HttpFtsSearchServiceTest {
 		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
 		HttpFtsSearchService first = new HttpFtsSearchService(
 				endpoint(),
-				"/fts/bulk",
+				"/_bulk",
 				true,
 				outboxDir.toString());
 
@@ -257,7 +262,7 @@ public class HttpFtsSearchServiceTest {
 		responseCode = 200;
 		HttpFtsSearchService restarted = new HttpFtsSearchService(
 				endpoint(),
-				"/fts/bulk",
+				"/_bulk",
 				true,
 				outboxDir.toString());
 		restarted.commit();
@@ -273,7 +278,7 @@ public class HttpFtsSearchServiceTest {
 	public void retriesTransientHttpFailuresBeforeSucceeding() throws Exception {
 		AtomicInteger attempt = new AtomicInteger();
 		HttpServer retryServer = HttpServer.create(new InetSocketAddress(0), 0);
-		retryServer.createContext("/fts/bulk", exchange -> {
+		retryServer.createContext("/_bulk", exchange -> {
 			int current = attempt.incrementAndGet();
 			try (InputStream in = exchange.getRequestBody()) {
 				body.set(new String(in.readAllBytes(), StandardCharsets.UTF_8));
@@ -289,7 +294,7 @@ public class HttpFtsSearchServiceTest {
 		try {
 			HttpFtsSearchService service = new HttpFtsSearchService(
 					"http://127.0.0.1:" + retryServer.getAddress().getPort(),
-					"/fts/bulk",
+					"/_bulk",
 					true,
 					Files.createTempDirectory("fts-outbox-test").toString());
 
