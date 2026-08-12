@@ -57,12 +57,12 @@ group:Administrators foaf:member user:admin .
          sail:sailType "kvin:KvinSail" ;
          sail:delegate [
             sail:sailType "fts:FtsSail" ;
-            fts:endpoint "http://localhost:9200" ;
-            fts:bulkPath "/fts/bulk" ;
-            fts:failOnError true ;
             fts:backend "elastic" ;
-            fts:searchPath "/fts/_search" ;
+            fts:endpoint "http://localhost:9200" ;
+            fts:bulkPath "/linkedfactory/_bulk" ;
+            fts:searchPath "/linkedfactory/_search" ;
             fts:defaultLimit 100 ;
+            fts:failOnError true ;
             sail:delegate [
                sail:sailType "openrdf:NativeStore" ;
                ns:tripleIndexes "cspo,cpos,spoc,posc"
