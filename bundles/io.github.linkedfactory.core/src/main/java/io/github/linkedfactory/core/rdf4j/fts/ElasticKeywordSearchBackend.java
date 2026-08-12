@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.http.HttpEntity;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
@@ -25,6 +26,8 @@ import java.util.Objects;
 
 public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 	private static final Logger logger = LoggerFactory.getLogger(ElasticKeywordSearchBackend.class);
+	private static final int MAX_ATTEMPTS = 3;
+	private static final long RETRY_BACKOFF_MILLIS = 100L;
 
 	public static final String PROP_ENDPOINT = "fts.endpoint";
 	public static final String PROP_SEARCH_PATH = "fts.searchPath";
@@ -36,6 +39,11 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 	private final String searchPath;
 	private final boolean failOnError;
 	private final int defaultLimit;
+	private final RequestConfig requestConfig = RequestConfig.custom()
+			.setConnectTimeout(5_000)
+			.setConnectionRequestTimeout(5_000)
+			.setSocketTimeout(30_000)
+			.build();
 	private volatile CloseableHttpClient httpClient;
 
 	public ElasticKeywordSearchBackend(String endpoint) {
@@ -89,23 +97,67 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 		}
 
 		String url = endpoint + searchPath;
-		HttpPost httpPost = new HttpPost(url);
-		httpPost.setEntity(new StringEntity(mapper.writeValueAsString(payload), ContentType.APPLICATION_JSON));
-
-		try (CloseableHttpResponse response = client().execute(httpPost)) {
-			int status = response.getStatusLine().getStatusCode();
-			HttpEntity entity = response.getEntity();
-			String body = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
+		Exception lastError = null;
+		for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+			int status;
+			String body;
+			try {
+				HttpPost httpPost = new HttpPost(url);
+				httpPost.setConfig(requestConfig);
+				httpPost.setEntity(new StringEntity(mapper.writeValueAsString(payload), ContentType.APPLICATION_JSON));
+				try (CloseableHttpResponse response = client().execute(httpPost)) {
+					status = response.getStatusLine().getStatusCode();
+					HttpEntity entity = response.getEntity();
+					body = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
+				}
+			} catch (IOException e) {
+				lastError = e;
+				if (attempt == MAX_ATTEMPTS) {
+					if (failOnError) {
+						throw e;
+					}
+					logger.error("Ignoring FTS query failure because {}=false", PROP_FAIL_ON_ERROR, e);
+					return Collections.emptyList();
+				}
+				sleepBeforeRetry(attempt, e);
+				continue;
+			}
 			if (status >= 300) {
 				IOException error = new IOException("HTTP " + status + " while querying FTS backend: " + body);
-				if (failOnError) {
-					throw error;
+				if (!isRetryableStatus(status) || attempt == MAX_ATTEMPTS) {
+					if (failOnError) {
+						throw error;
+					}
+					logger.error("Ignoring FTS query failure because {}=false", PROP_FAIL_ON_ERROR, error);
+					return Collections.emptyList();
 				}
-				logger.error("Ignoring FTS query failure because {}=false", PROP_FAIL_ON_ERROR, error);
-				return Collections.emptyList();
+				lastError = error;
+				sleepBeforeRetry(attempt, error);
+				continue;
 			}
 			return parseHits(body);
 		}
+		if (lastError != null) {
+			if (failOnError) {
+				throw lastError;
+			}
+			logger.error("Ignoring FTS query failure because {}=false", PROP_FAIL_ON_ERROR, lastError);
+		}
+		return Collections.emptyList();
+	}
+
+	private boolean isRetryableStatus(int status) {
+		return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
+	}
+
+	private void sleepBeforeRetry(int attempt, Exception error) throws IOException {
+		try {
+			Thread.sleep(RETRY_BACKOFF_MILLIS * attempt);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IOException("Interrupted while retrying FTS query", e);
+		}
+		logger.warn("Retrying FTS query attempt {} after transient failure: {}", attempt + 1, error.getMessage());
 	}
 
 	@Override
@@ -124,7 +176,10 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 		}
 		synchronized (this) {
 			if (httpClient == null) {
-				httpClient = HttpClients.createDefault();
+				httpClient = HttpClients.custom()
+						.setDefaultRequestConfig(requestConfig)
+						.disableAutomaticRetries()
+						.build();
 			}
 			return httpClient;
 		}

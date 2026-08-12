@@ -8,6 +8,9 @@ import org.eclipse.rdf4j.sail.SailConnectionListener;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -60,6 +63,81 @@ public class FtsSailConnectionTest {
 	}
 
 	@Test
+	public void clearDropsPreviouslyBufferedOperations() {
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+
+		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
+		verify(wrapped).addConnectionListener(listenerCaptor.capture());
+		SailConnectionListener listener = listenerCaptor.getValue();
+
+		connection.begin();
+		Statement addLiteral = vf.createStatement(
+				vf.createIRI("urn:s1"),
+				vf.createIRI("urn:p1"),
+				vf.createLiteral("value")
+		);
+		listener.statementAdded(addLiteral);
+		connection.clear();
+		connection.commit();
+
+		assertEquals(1, service.clearCount);
+		assertEquals(0, service.addRemoveCount);
+		assertTrue(service.addedStatements.isEmpty());
+		assertTrue(service.removedStatements.isEmpty());
+	}
+
+	@Test
+	public void addAndRemoveSameStatementCancelOut() {
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+
+		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
+		verify(wrapped).addConnectionListener(listenerCaptor.capture());
+		SailConnectionListener listener = listenerCaptor.getValue();
+
+		Statement stmt = vf.createStatement(
+				vf.createIRI("urn:s1"),
+				vf.createIRI("urn:p1"),
+				vf.createLiteral("value")
+		);
+
+		connection.begin();
+		listener.statementAdded(stmt);
+		listener.statementRemoved(stmt);
+		connection.commit();
+
+		assertEquals(0, service.addRemoveCount);
+		assertTrue(service.addedStatements.isEmpty());
+		assertTrue(service.removedStatements.isEmpty());
+	}
+
+	@Test
+	public void largeTransactionSpillsAndCommitsAllStatements() {
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		FtsSailConnection connection = new FtsSailConnection(wrapped, service, 2);
+
+		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
+		verify(wrapped).addConnectionListener(listenerCaptor.capture());
+		SailConnectionListener listener = listenerCaptor.getValue();
+
+		connection.begin();
+		for (int i = 0; i < 10; i++) {
+			listener.statementAdded(vf.createStatement(
+					vf.createIRI("urn:s" + i),
+					vf.createIRI("urn:p"),
+					vf.createLiteral("value" + i)));
+		}
+		connection.commit();
+
+		assertTrue(service.addRemoveCount > 1);
+		assertEquals(10, service.addedStatements.size());
+	}
+
+	@Test
 	public void rollbackDiscardsPendingChanges() {
 		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
@@ -93,22 +171,94 @@ public class FtsSailConnectionTest {
 		assertEquals(ctx, service.clearedContexts.get(0)[0]);
 	}
 
+	@Test
+	public void clearThenReAddKeepsOnlyLatestChanges() {
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+
+		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
+		verify(wrapped).addConnectionListener(listenerCaptor.capture());
+		SailConnectionListener listener = listenerCaptor.getValue();
+
+		Statement stmt = vf.createStatement(
+				vf.createIRI("urn:s1"),
+				vf.createIRI("urn:p1"),
+				vf.createLiteral("value"));
+
+		connection.begin();
+		listener.statementAdded(stmt);
+		connection.clear();
+		listener.statementAdded(stmt);
+		connection.commit();
+
+		assertEquals(1, service.clearCount);
+		assertEquals(1, service.addRemoveCount);
+		assertTrue(service.addedStatements.contains(stmt));
+		assertTrue(service.removedStatements.isEmpty());
+	}
+
+	@Test
+	public void rollbackAfterSpillDiscardsBufferedChanges() {
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		FtsSailConnection connection = new FtsSailConnection(wrapped, service, 2);
+
+		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
+		verify(wrapped).addConnectionListener(listenerCaptor.capture());
+		SailConnectionListener listener = listenerCaptor.getValue();
+
+		connection.begin();
+		for (int i = 0; i < 10; i++) {
+			listener.statementAdded(vf.createStatement(
+					vf.createIRI("urn:s" + i),
+					vf.createIRI("urn:p"),
+					vf.createLiteral("value" + i)));
+		}
+		connection.rollback();
+
+		assertEquals(0, service.addRemoveCount);
+		assertEquals(1, service.rollbackCount);
+		assertTrue(service.addedStatements.isEmpty());
+	}
+
+	@Test
+	public void staleSpillFilesAreCleanedOnStartup() throws Exception {
+		Path stale = Files.createTempFile("fts-sail-buffer-", ".bin");
+		Files.setLastModifiedTime(stale, FileTime.fromMillis(System.currentTimeMillis() - 2 * 60 * 60 * 1000L));
+
+		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+		RecordingSearchService service = new RecordingSearchService();
+		new FtsSailConnection(wrapped, service);
+
+		assertTrue(Files.notExists(stale));
+	}
+
 	private static final class RecordingSearchService implements FtsSearchService {
 		private final Set<Statement> addedStatements = new LinkedHashSet<>();
 		private final Set<Statement> removedStatements = new LinkedHashSet<>();
 		private final List<org.eclipse.rdf4j.model.Resource[]> clearedContexts = new ArrayList<>();
+		private int addRemoveCount;
+		private int clearCount;
 		private int commitCount;
 		private int rollbackCount;
 
 		@Override
 		public void addRemoveStatements(Set<Statement> added, Set<Statement> removed) {
+			addRemoveCount++;
 			addedStatements.addAll(added);
 			removedStatements.addAll(removed);
 		}
 
 		@Override
 		public void clearContexts(org.eclipse.rdf4j.model.Resource... contexts) {
+			clearCount++;
 			clearedContexts.add(contexts);
+		}
+
+		@Override
+		public void clear() {
+			clearCount++;
 		}
 
 		@Override

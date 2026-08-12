@@ -16,6 +16,7 @@ public class FtsSailConfigTest {
 		config.setBulkPath("/api/bulk");
 		config.setSearchPath("/api/search");
 		config.setFailOnError(false);
+		config.setOutboxDir("/var/lib/fts-outbox");
 		config.setDefaultLimit(25);
 
 		Model model = new LinkedHashModel();
@@ -29,6 +30,7 @@ public class FtsSailConfigTest {
 		assertEquals("/api/bulk", parsed.getBulkPath());
 		assertEquals("/api/search", parsed.getSearchPath());
 		assertFalse(parsed.isFailOnError());
+		assertEquals("/var/lib/fts-outbox", parsed.getOutboxDir());
 		assertEquals(25, parsed.getDefaultLimit());
 	}
 }

@@ -14,6 +14,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -22,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -38,7 +41,7 @@ public class HttpFtsSearchServiceTest {
 		body = new AtomicReference<>();
 		requests = new AtomicInteger(0);
 		server = HttpServer.create(new InetSocketAddress(0), 0);
-		server.createContext("/fts/bulk", this::handleRequest);
+		server.createContext("/_bulk", this::handleRequest);
 		server.start();
 	}
 
@@ -51,12 +54,14 @@ public class HttpFtsSearchServiceTest {
 
 	@Test
 	public void commitSendsBatchedPayload() throws Exception {
-		HttpFtsSearchService service = new HttpFtsSearchService();
-		service.configure(Map.of(
-				HttpFtsSearchService.PROP_ENDPOINT, endpoint(),
-				HttpFtsSearchService.PROP_BULK_PATH, "/fts/bulk",
-				HttpFtsSearchService.PROP_FAIL_ON_ERROR, "true"
-		));
+
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+
 
 		Statement added = vf.createStatement(
 				vf.createIRI("urn:sensor1"),
@@ -75,26 +80,33 @@ public class HttpFtsSearchServiceTest {
 		service.shutdown();
 
 		assertEquals(1, requests.get());
-		//System.out.println(body.get());
-		JsonNode payload = mapper.readTree(body.get());
-		assertTrue(payload.has("operations"));
-		assertEquals(2, payload.get("operations").size());
-		assertEquals("upsert", payload.get("operations").get(0).get("op").asText());
-		assertEquals("remove", payload.get("operations").get(1).get("op").asText());
+		String[] lines = body.get().strip().split("\\n");
+		assertEquals(4, lines.length);
+
+		JsonNode upsertAction = mapper.readTree(lines[0]);
+		JsonNode upsertPayload = mapper.readTree(lines[1]);
+		JsonNode removeAction = mapper.readTree(lines[2]);
+		JsonNode removePayload = mapper.readTree(lines[3]);
+
+		assertEquals("urn:sensor1", upsertAction.path("update").path("_id").asText());
+		assertEquals("urn:sensor1", removeAction.path("update").path("_id").asText());
+		assertTrue(upsertPayload.path("doc_as_upsert").asBoolean());
 		assertEquals("Battery Sensor",
-				payload.get("operations").get(0)
-						.get("documents").get("urn:sensor1")
+				upsertPayload.path("doc")
 						.get("urn:label").get(0).get("value").asText());
 		assertEquals("urn:lineA",
-				payload.get("operations").get(1)
-						.get("documents").get("urn:sensor1")
+				removePayload.path("script").path("params").path("fields")
 						.get("urn:locatedIn").get(0).get("value").asText());
 	}
 
 	@Test
 	public void rollbackSkipsRequest() throws Exception {
-		HttpFtsSearchService service = new HttpFtsSearchService();
-		service.configure(Map.of(HttpFtsSearchService.PROP_ENDPOINT, endpoint()));
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
 
 		service.begin();
 		service.addRemoveStatements(Set.of(vf.createStatement(
@@ -106,6 +118,31 @@ public class HttpFtsSearchServiceTest {
 		service.shutdown();
 
 		assertEquals(0, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertFalse(files.findAny().isPresent());
+		}
+	}
+
+	@Test
+	public void shutdownDiscardsUncommittedPayload() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+
+		service.begin();
+		service.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		service.shutdown();
+
+		assertEquals(0, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertFalse(files.findAny().isPresent());
+		}
 	}
 
 	@Test
@@ -134,11 +171,12 @@ public class HttpFtsSearchServiceTest {
 
 	@Test
 	public void failOnErrorCanBeDisabled() throws Exception {
-		HttpFtsSearchService service = new HttpFtsSearchService();
-		service.configure(Map.of(
-				HttpFtsSearchService.PROP_ENDPOINT, endpoint(),
-				HttpFtsSearchService.PROP_FAIL_ON_ERROR, "false"
-		));
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				false,
+				outboxDir.toString());
 		responseCode = 500;
 
 		service.begin();
@@ -149,7 +187,129 @@ public class HttpFtsSearchServiceTest {
 		service.commit();
 		service.shutdown();
 
-		assertEquals(1, requests.get());
+		assertEquals(3, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertTrue(files.findAny().isPresent());
+		}
+	}
+
+	@Test
+	public void retriesPendingOutboxAfterFailedCommit() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+
+		responseCode = 500;
+		service.begin();
+		service.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		try {
+			service.commit();
+			fail("Expected exception on HTTP error with failOnError=true");
+		} catch (IOException expected) {
+			assertTrue(expected.getMessage().contains("HTTP 500"));
+		}
+
+		assertEquals(3, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertTrue(files.findAny().isPresent());
+		}
+
+		responseCode = 200;
+		service.commit();
+		service.shutdown();
+
+		assertEquals(4, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertFalse(files.findAny().isPresent());
+		}
+	}
+
+	@Test
+	public void restartsAndDrainsPersistedOutbox() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService first = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+
+		responseCode = 500;
+		first.begin();
+		first.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		try {
+			first.commit();
+			fail("Expected exception on HTTP error with failOnError=true");
+		} catch (IOException expected) {
+			assertTrue(expected.getMessage().contains("HTTP 500"));
+		} finally {
+			first.shutdown();
+		}
+
+		assertEquals(3, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertTrue(files.findAny().isPresent());
+		}
+
+		responseCode = 200;
+		HttpFtsSearchService restarted = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+		restarted.commit();
+		restarted.shutdown();
+
+		assertEquals(4, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertFalse(files.findAny().isPresent());
+		}
+	}
+
+	@Test
+	public void retriesTransientHttpFailuresBeforeSucceeding() throws Exception {
+		AtomicInteger attempt = new AtomicInteger();
+		HttpServer retryServer = HttpServer.create(new InetSocketAddress(0), 0);
+		retryServer.createContext("/_bulk", exchange -> {
+			int current = attempt.incrementAndGet();
+			try (InputStream in = exchange.getRequestBody()) {
+				body.set(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+			}
+			int status = current < 3 ? 503 : 200;
+			byte[] response = current < 3 ? "retry".getBytes(StandardCharsets.UTF_8) : "ok".getBytes(StandardCharsets.UTF_8);
+			exchange.sendResponseHeaders(status, response.length);
+			exchange.getResponseBody().write(response);
+			exchange.close();
+		});
+		retryServer.start();
+
+		try {
+			HttpFtsSearchService service = new HttpFtsSearchService(
+					"http://127.0.0.1:" + retryServer.getAddress().getPort(),
+					"/_bulk",
+					true,
+					Files.createTempDirectory("fts-outbox-test").toString());
+
+			service.begin();
+			service.addRemoveStatements(Set.of(vf.createStatement(
+					vf.createIRI("urn:s"),
+					vf.createIRI("urn:p"),
+					vf.createLiteral("x"))), Set.of());
+			service.commit();
+			service.shutdown();
+
+			assertEquals(3, attempt.get());
+		} finally {
+			retryServer.stop(0);
+		}
 	}
 
 	private String endpoint() {

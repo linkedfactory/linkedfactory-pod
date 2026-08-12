@@ -12,7 +12,7 @@ import static org.junit.Assert.fail;
 
 public class FtsFederatedServiceResolverTest {
 	@Test
-	public void usesConfiguredBackendFactoryAndEndpointOverride() throws Exception {
+	public void resolvesRelativeServicePathAgainstConfiguredEndpoint() throws Exception {
 		AtomicReference<String> endpointRef = new AtomicReference<>();
 		FtsSearchBackendFactory factory = new FtsSearchBackendFactory() {
 			@Override
@@ -30,10 +30,34 @@ public class FtsFederatedServiceResolverTest {
 				new FtsFederatedServiceConfig("custom", "http://default:9200", "/fts/_search", true, 100),
 				List.of(factory));
 
-		var service = resolver.getService("fts:http://override:9200");
+		var service = resolver.getService("fts:/custom/search");
 		assertNotNull(service);
 		assertTrue(service instanceof FtsFederatedService);
-		assertTrue("http://override:9200".equals(endpointRef.get()));
+		assertTrue("http://default:9200/custom/search".equals(endpointRef.get()));
+	}
+
+	@Test
+	public void rejectsAbsoluteServiceUrlOverrides() throws Exception {
+		FtsFederatedServiceResolver resolver = new FtsFederatedServiceResolver(
+				new FtsFederatedServiceConfig("custom", "http://default:9200", "/fts/_search", true, 100),
+				List.of(new FtsSearchBackendFactory() {
+					@Override
+					public String backendType() {
+						return "custom";
+					}
+
+					@Override
+					public FtsSearchBackend create(FtsFederatedServiceConfig config) {
+						return request -> List.of();
+					}
+				}));
+		try {
+			resolver.getService("fts:http://evil.example");
+			fail("Expected QueryEvaluationException");
+		} catch (QueryEvaluationException expected) {
+			assertNotNull(expected.getCause());
+			assertTrue(expected.getCause().getMessage().contains("Absolute FTS service URLs"));
+		}
 	}
 
 	@Test
