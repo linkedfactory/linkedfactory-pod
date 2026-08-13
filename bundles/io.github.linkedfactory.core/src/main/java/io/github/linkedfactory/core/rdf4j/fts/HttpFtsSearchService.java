@@ -9,7 +9,6 @@ import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
-import org.apache.http.entity.FileEntity;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
@@ -45,6 +44,11 @@ public class HttpFtsSearchService implements FtsSearchService {
 	private static final long RETRY_BACKOFF_MILLIS = 100L;
 
 	private static final ContentType NDJSON = ContentType.create("application/x-ndjson", StandardCharsets.UTF_8);
+	private static final String OP_STATEMENTS = "statements";
+	private static final String OP_UPSERT = "upsert";
+	private static final String OP_REMOVE = "remove";
+	private static final String OP_CLEAR = "clear";
+	private static final String OP_CLEAR_CONTEXTS = "clearContexts";
 	private static final String REMOVE_SCRIPT = "for (entry in params.fields.entrySet()) { "
 			+ "def key = entry.getKey(); "
 			+ "if (ctx._source.containsKey(key)) { "
@@ -121,19 +125,15 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	@Override
 	public void addRemoveStatements(Set<Statement> added, Set<Statement> removed) {
-		TransactionState tx = state();
-		if (!added.isEmpty()) {
-			tx.append(statementBatch("upsert", added));
-		}
-		if (!removed.isEmpty()) {
-			tx.append(statementBatch("remove", removed));
+		if (!added.isEmpty() || !removed.isEmpty()) {
+			state().append(statementBatch(added, removed));
 		}
 	}
 
 	@Override
 	public void clearContexts(Resource... contexts) {
 		ObjectNode op = mapper.createObjectNode();
-		op.put("op", "clearContexts");
+		op.put("op", OP_CLEAR_CONTEXTS);
 		ArrayNode ctx = mapper.createArrayNode();
 		if (contexts != null) {
 			for (Resource context : contexts) {
@@ -149,7 +149,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 	@Override
 	public void clear() {
 		ObjectNode op = mapper.createObjectNode();
-		op.put("op", "clear");
+		op.put("op", OP_CLEAR);
 		state().append(op);
 	}
 
@@ -179,55 +179,6 @@ public class HttpFtsSearchService implements FtsSearchService {
 			txState.remove();
 		}
 	}
-	private boolean containsOperation(ArrayNode operations, String opName) {
-		for (JsonNode op : operations) {
-			if (opName.equals(op.path("op").asText())) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private String toBulkNdjson(ArrayNode operations) throws IOException {
-		StringBuilder ndjson = new StringBuilder();
-		for (JsonNode op : operations) {
-			String type = op.path("op").asText();
-			if (!("upsert".equals(type) || "remove".equals(type))) {
-				continue;
-			}
-			JsonNode documents = op.path("documents");
-			if (!documents.isObject()) {
-				continue;
-			}
-
-			var docs = documents.fields();
-			while (docs.hasNext()) {
-				var entry = docs.next();
-				String id = entry.getKey();
-				JsonNode fields = entry.getValue();
-
-				ObjectNode action = mapper.createObjectNode();
-				ObjectNode update = action.putObject("update");
-				update.put("_id", id);
-
-				ObjectNode payload = mapper.createObjectNode();
-				if ("upsert".equals(type)) {
-					payload.set("doc", fields);
-					payload.put("doc_as_upsert", true);
-				} else {
-					ObjectNode script = payload.putObject("script");
-					script.put("lang", "painless");
-					script.put("source", REMOVE_SCRIPT);
-					script.set("params", mapper.createObjectNode().set("fields", fields));
-				}
-
-				ndjson.append(mapper.writeValueAsString(action)).append('\n');
-				ndjson.append(mapper.writeValueAsString(payload)).append('\n');
-			}
-		}
-		return ndjson.toString();
-	}
-
 	private String deleteByQueryPath() {
 		if (bulkPath.endsWith("/_bulk")) {
 			return bulkPath.substring(0, bulkPath.length() - "_bulk".length()) + "_delete_by_query";
@@ -284,12 +235,22 @@ public class HttpFtsSearchService implements FtsSearchService {
 		return state;
 	}
 
-	private JsonNode statementBatch(String operation, Collection<Statement> statements) {
+	private JsonNode statementBatch(Collection<Statement> added, Collection<Statement> removed) {
 		ObjectNode op = mapper.createObjectNode();
-		op.put("op", operation);
-		ObjectNode documents = mapper.createObjectNode();
-		op.set("documents", documents);
+		op.put("op", OP_STATEMENTS);
+		ObjectNode addedDocuments = documentsBySubject(added);
+		if (addedDocuments.size() > 0) {
+			op.set("addedDocuments", addedDocuments);
+		}
+		ObjectNode removedDocuments = documentsBySubject(removed);
+		if (removedDocuments.size() > 0) {
+			op.set("removedDocuments", removedDocuments);
+		}
+		return op;
+	}
 
+	private ObjectNode documentsBySubject(Collection<Statement> statements) {
+		ObjectNode documents = mapper.createObjectNode();
 		Map<String, Map<String, List<JsonNode>>> grouped = new LinkedHashMap<>();
 		for (Statement statement : statements) {
 			Resource subject = statement.getSubject();
@@ -313,7 +274,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 			}
 			documents.set(doc.getKey(), fieldNode);
 		}
-		return op;
+		return documents;
 	}
 
 	private JsonNode statementValue(Value object, Resource context) {
@@ -439,8 +400,9 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 
 		ArrayNode operations = (ArrayNode) operationsNode;
+		PreparedPayload prepared = PreparedPayload.from(operations, mapper);
 
-		if (containsOperation(operations, "clear")) {
+		if (prepared.hasClear()) {
 			sendRequest(
 					endpoint + deleteByQueryPath(),
 					mapper.writeValueAsString(
@@ -457,13 +419,13 @@ public class HttpFtsSearchService implements FtsSearchService {
 			);
 		}
 
-		if (containsOperation(operations, "clearContexts")) {
+		if (prepared.hasClearContexts()) {
 			logger.warn(
 					"clearContexts is not mapped to native Elasticsearch operations and was ignored."
 			);
 		}
 
-		String ndjson = toBulkNdjson(operations);
+		String ndjson = prepared.toBulkNdjson(mapper);
 
 		if (ndjson.isBlank()) {
 			return;
@@ -622,6 +584,180 @@ public class HttpFtsSearchService implements FtsSearchService {
 					Files.deleteIfExists(file);
 				} catch (IOException e) {
 					throw new RuntimeException("Unable to delete FTS bulk payload", e);
+				}
+			}
+		}
+	}
+
+	private static final class PreparedPayload {
+		private final List<StatementOperation> statementOperations = new ArrayList<>();
+		private boolean clear;
+		private boolean clearContexts;
+
+		static PreparedPayload from(ArrayNode operations, ObjectMapper mapper) throws IOException {
+			PreparedPayload prepared = new PreparedPayload();
+			for (JsonNode op : operations) {
+				String type = op.path("op").asText();
+				if (OP_CLEAR.equals(type)) {
+					prepared.clear = true;
+					prepared.statementOperations.clear();
+				} else if (OP_CLEAR_CONTEXTS.equals(type)) {
+					prepared.clearContexts = true;
+				} else if (OP_STATEMENTS.equals(type) || OP_UPSERT.equals(type) || OP_REMOVE.equals(type)) {
+					prepared.addStatementOperation(StatementOperation.from(op, mapper));
+				} else {
+					throw new IOException("Invalid FTS outbox payload: unsupported operation " + type);
+				}
+			}
+			return prepared;
+		}
+
+		boolean hasClear() {
+			return clear;
+		}
+
+		boolean hasClearContexts() {
+			return clearContexts;
+		}
+
+		String toBulkNdjson(ObjectMapper mapper) throws IOException {
+			StringBuilder ndjson = new StringBuilder();
+			for (StatementOperation operation : statementOperations) {
+				operation.appendNdjson(ndjson, mapper);
+			}
+			return ndjson.toString();
+		}
+
+		private void addStatementOperation(StatementOperation current) {
+			if (current.isEmpty()) {
+				return;
+			}
+			if (!statementOperations.isEmpty()) {
+				StatementOperation previous = statementOperations.get(statementOperations.size() - 1);
+				if (previous.canMergeWith(current)) {
+					previous.merge(current);
+					return;
+				}
+			}
+			statementOperations.add(current);
+		}
+
+		private static final class StatementOperation {
+			private final Map<String, Map<String, ArrayNode>> addedDocuments = new LinkedHashMap<>();
+			private final Map<String, Map<String, ArrayNode>> removedDocuments = new LinkedHashMap<>();
+
+			static StatementOperation from(JsonNode op, ObjectMapper mapper) throws IOException {
+				StatementOperation statementOperation = new StatementOperation();
+				String type = op.path("op").asText();
+				if (OP_STATEMENTS.equals(type)) {
+					mergeDocuments(op.get("addedDocuments"), statementOperation.addedDocuments, mapper);
+					mergeDocuments(op.get("removedDocuments"), statementOperation.removedDocuments, mapper);
+				} else if (OP_UPSERT.equals(type)) {
+					mergeDocuments(op.get("documents"), statementOperation.addedDocuments, mapper);
+				} else if (OP_REMOVE.equals(type)) {
+					mergeDocuments(op.get("documents"), statementOperation.removedDocuments, mapper);
+				}
+				return statementOperation;
+			}
+
+			boolean isEmpty() {
+				return addedDocuments.isEmpty() && removedDocuments.isEmpty();
+			}
+
+			boolean canMergeWith(StatementOperation other) {
+				return hasAddedOnly() && other.hasAddedOnly() || hasRemovedOnly() && other.hasRemovedOnly();
+			}
+
+			void merge(StatementOperation other) {
+				mergeDocuments(other.addedDocuments, addedDocuments);
+				mergeDocuments(other.removedDocuments, removedDocuments);
+			}
+
+			void appendNdjson(StringBuilder ndjson, ObjectMapper mapper) throws IOException {
+				appendDocuments(ndjson, addedDocuments, true, mapper);
+				appendDocuments(ndjson, removedDocuments, false, mapper);
+			}
+
+			private boolean hasAddedOnly() {
+				return !addedDocuments.isEmpty() && removedDocuments.isEmpty();
+			}
+
+			private boolean hasRemovedOnly() {
+				return addedDocuments.isEmpty() && !removedDocuments.isEmpty();
+			}
+
+			private void appendDocuments(StringBuilder ndjson, Map<String, Map<String, ArrayNode>> documents, boolean upsert,
+					ObjectMapper mapper) throws IOException {
+				for (Map.Entry<String, Map<String, ArrayNode>> doc : documents.entrySet()) {
+					ObjectNode action = mapper.createObjectNode();
+					ObjectNode update = action.putObject("update");
+					update.put("_id", doc.getKey());
+
+					ObjectNode fields = mapper.createObjectNode();
+					for (Map.Entry<String, ArrayNode> field : doc.getValue().entrySet()) {
+						fields.set(field.getKey(), field.getValue());
+					}
+
+					ObjectNode payload = mapper.createObjectNode();
+					if (upsert) {
+						payload.set("doc", fields);
+						payload.put("doc_as_upsert", true);
+					} else {
+						ObjectNode script = payload.putObject("script");
+						script.put("lang", "painless");
+						script.put("source", REMOVE_SCRIPT);
+						script.set("params", mapper.createObjectNode().set("fields", fields));
+					}
+
+					ndjson.append(mapper.writeValueAsString(action)).append('\n');
+					ndjson.append(mapper.writeValueAsString(payload)).append('\n');
+				}
+			}
+
+			private static void mergeDocuments(JsonNode documentsNode, Map<String, Map<String, ArrayNode>> target,
+					ObjectMapper mapper) throws IOException {
+				if (documentsNode == null || documentsNode.isNull()) {
+					return;
+				}
+				if (!documentsNode.isObject()) {
+					throw new IOException("Invalid FTS outbox payload: documents must be an object");
+				}
+				var documents = documentsNode.fields();
+				while (documents.hasNext()) {
+					var doc = documents.next();
+					if (!doc.getValue().isObject()) {
+						throw new IOException("Invalid FTS outbox payload: document fields must be an object");
+					}
+					Map<String, ArrayNode> mergedFields = target.computeIfAbsent(doc.getKey(), key -> new LinkedHashMap<>());
+					var fields = doc.getValue().fields();
+					while (fields.hasNext()) {
+						var field = fields.next();
+						if (!field.getValue().isArray()) {
+							throw new IOException("Invalid FTS outbox payload: field values must be an array");
+						}
+						ArrayNode mergedValues = mergedFields.computeIfAbsent(field.getKey(),
+								key -> mapper.createArrayNode());
+						for (JsonNode value : field.getValue()) {
+							mergedValues.add(value.deepCopy());
+						}
+					}
+				}
+			}
+
+			private static void mergeDocuments(Map<String, Map<String, ArrayNode>> source,
+					Map<String, Map<String, ArrayNode>> target) {
+				for (Map.Entry<String, Map<String, ArrayNode>> doc : source.entrySet()) {
+					Map<String, ArrayNode> mergedFields = target.computeIfAbsent(doc.getKey(), key -> new LinkedHashMap<>());
+					for (Map.Entry<String, ArrayNode> field : doc.getValue().entrySet()) {
+						ArrayNode mergedValues = mergedFields.computeIfAbsent(field.getKey(),
+								key -> field.getValue().deepCopy());
+						if (mergedValues == field.getValue()) {
+							continue;
+						}
+						for (JsonNode value : field.getValue()) {
+							mergedValues.add(value.deepCopy());
+						}
+					}
 				}
 			}
 		}
