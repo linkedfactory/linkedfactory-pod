@@ -50,6 +50,29 @@ public class HttpFtsSearchService implements FtsSearchService {
 	private static final String OP_CLEAR = "clear";
 	private static final String OP_CLEAR_CONTEXTS = "clearContexts";
 	private static final String SUBJECT_FIELD = "subject";
+	private static final String ADD_SCRIPT = "if (!ctx._source.containsKey('subject')) { ctx._source.subject = params.subject; } "
+			+ "for (entry in params.fields.entrySet()) { "
+			+ "def key = entry.getKey(); "
+			+ "if (!ctx._source.containsKey(key)) { ctx._source[key] = []; } "
+			+ "for (value in entry.getValue()) { "
+			+ "if (!ctx._source[key].contains(value)) { ctx._source[key].add(value); } "
+			+ "} "
+			+ "}";
+	private static final String CLEAR_CONTEXTS_SCRIPT = "for (field in new ArrayList(ctx._source.keySet())) { "
+			+ "if (field == 'subject') { continue; } "
+			+ "def values = ctx._source[field]; "
+			+ "if (values instanceof List) { "
+			+ "for (int i = values.size() - 1; i >= 0; i--) { "
+			+ "def value = values[i]; "
+			+ "if (value instanceof Map && value.containsKey('context') && params.contexts.contains(value.context)) { "
+			+ "values.remove(i); "
+			+ "} "
+			+ "} "
+			+ "if (values.isEmpty()) { ctx._source.remove(field); } "
+			+ "} "
+			+ "} "
+			+ "if (ctx._source.isEmpty() || (ctx._source.size() == 1 && ctx._source.containsKey('subject'))) { "
+			+ "ctx.op = 'delete'; }";
 	private static final String REMOVE_SCRIPT = "for (entry in params.fields.entrySet()) { "
 			+ "def key = entry.getKey(); "
 			+ "if (ctx._source.containsKey(key)) { "
@@ -188,20 +211,25 @@ public class HttpFtsSearchService implements FtsSearchService {
 		return "/_delete_by_query";
 	}
 
-	private void sendRequest(String url, String body, ContentType contentType, String operation) throws IOException {
+	private String updateByQueryPath() {
+		if (bulkPath.endsWith("/_bulk")) {
+			return bulkPath.substring(0, bulkPath.length() - "_bulk".length()) + "_update_by_query";
+		}
+		return "/_update_by_query";
+	}
+
+	private String sendRequest(String url, String body, ContentType contentType, String operation) throws IOException {
 		HttpPost request = new HttpPost(url);
+		request.setConfig(requestConfig);
 		request.setEntity(new StringEntity(body, contentType));
 		try (CloseableHttpResponse response = client().execute(request)) {
 			int status = response.getStatusLine().getStatusCode();
+			HttpEntity entity = response.getEntity();
+			String responseBody = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
 			if (status >= 300) {
-				HttpEntity entity = response.getEntity();
-				String responseBody = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
-				IOException error = new IOException("HTTP " + status + " " + operation + ": " + responseBody);
-				if (failOnError) {
-					throw error;
-				}
-				logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, error);
+				throw new IOException("HTTP " + status + " " + operation + ": " + responseBody);
 			}
+			return responseBody;
 		}
 	}
 
@@ -422,8 +450,20 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 
 		if (prepared.hasClearContexts()) {
-			logger.warn(
-					"clearContexts is not mapped to native Elasticsearch operations and was ignored."
+			sendRequest(
+					endpoint + updateByQueryPath(),
+					mapper.writeValueAsString(
+							Map.of(
+									"query", Map.of("match_all", Map.of()),
+									"script", Map.of(
+											"lang", "painless",
+											"source", CLEAR_CONTEXTS_SCRIPT,
+											"params", Map.of("contexts", prepared.clearedContexts())
+									)
+							)
+					),
+					ContentType.APPLICATION_JSON,
+					"while clearing FTS contexts"
 			);
 		}
 
@@ -445,29 +485,45 @@ public class HttpFtsSearchService implements FtsSearchService {
 				)
 		);
 
-		try (CloseableHttpResponse response = client().execute(request)) {
+		String responseBody = sendRequest(url, ndjson, NDJSON, "while sending FTS updates");
+		validateBulkResponse(responseBody);
+	}
 
-			int status =
-					response.getStatusLine().getStatusCode();
-
-			if (status >= 300) {
-				HttpEntity entity = response.getEntity();
-
-				String body =
-						entity == null
-								? ""
-								: EntityUtils.toString(
-								entity,
-								StandardCharsets.UTF_8
-						);
-
-				throw new IOException(
-						"HTTP "
-								+ status
-								+ " while sending FTS updates: "
-								+ body
-				);
+	private void validateBulkResponse(String responseBody) throws IOException {
+		if (responseBody == null || responseBody.isBlank()) {
+			return;
+		}
+		JsonNode root = mapper.readTree(responseBody);
+		if (!root.path("errors").asBoolean(false)) {
+			return;
+		}
+		JsonNode items = root.path("items");
+		if (!items.isArray()) {
+			throw new IOException("HTTP 500 while sending FTS updates: Elasticsearch bulk response reported errors.");
+		}
+		List<String> failures = new ArrayList<>();
+		for (JsonNode item : items) {
+			if (!item.isObject()) {
+				continue;
 			}
+			var operations = item.fields();
+			while (operations.hasNext()) {
+				var operation = operations.next();
+				JsonNode detail = operation.getValue();
+				int status = detail.path("status").asInt();
+				if (status < 300) {
+					continue;
+				}
+				JsonNode error = detail.path("error");
+				String id = detail.path("_id").asText("");
+				String reason = error.isMissingNode() || error.isNull() ? detail.toString() : error.toString();
+				failures.add("HTTP " + status + " bulk " + operation.getKey()
+						+ (id.isEmpty() ? "" : " for " + id)
+						+ ": " + reason);
+			}
+		}
+		if (!failures.isEmpty()) {
+			throw new IOException(String.join("; ", failures));
 		}
 	}
 
@@ -593,6 +649,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	private static final class PreparedPayload {
 		private final List<StatementOperation> statementOperations = new ArrayList<>();
+		private final List<String> clearedContexts = new ArrayList<>();
 		private boolean clear;
 		private boolean clearContexts;
 
@@ -602,9 +659,19 @@ public class HttpFtsSearchService implements FtsSearchService {
 				String type = op.path("op").asText();
 				if (OP_CLEAR.equals(type)) {
 					prepared.clear = true;
+					prepared.clearContexts = false;
 					prepared.statementOperations.clear();
+					prepared.clearedContexts.clear();
 				} else if (OP_CLEAR_CONTEXTS.equals(type)) {
 					prepared.clearContexts = true;
+					JsonNode contexts = op.path("contexts");
+					if (!contexts.isArray()) {
+						throw new IOException("Invalid FTS outbox payload: clearContexts contexts must be an array");
+					}
+					prepared.clearedContexts.clear();
+					for (JsonNode context : contexts) {
+						prepared.clearedContexts.add(context.asText());
+					}
 				} else if (OP_STATEMENTS.equals(type) || OP_UPSERT.equals(type) || OP_REMOVE.equals(type)) {
 					prepared.addStatementOperation(StatementOperation.from(op, mapper));
 				} else {
@@ -619,7 +686,11 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 
 		boolean hasClearContexts() {
-			return clearContexts;
+			return clearContexts && !clearedContexts.isEmpty();
+		}
+
+		List<String> clearedContexts() {
+			return clearedContexts;
 		}
 
 		String toBulkNdjson(ObjectMapper mapper) throws IOException {
@@ -696,17 +767,21 @@ public class HttpFtsSearchService implements FtsSearchService {
 					update.put("_id", doc.getKey());
 
 					ObjectNode fields = mapper.createObjectNode();
-					if (upsert) {
-						fields.put(SUBJECT_FIELD, doc.getKey());
-					}
 					for (Map.Entry<String, ArrayNode> field : doc.getValue().entrySet()) {
 						fields.set(field.getKey(), field.getValue());
 					}
 
 					ObjectNode payload = mapper.createObjectNode();
 					if (upsert) {
-						payload.set("doc", fields);
-						payload.put("doc_as_upsert", true);
+						ObjectNode script = payload.putObject("script");
+						script.put("lang", "painless");
+						script.put("source", ADD_SCRIPT);
+						ObjectNode params = mapper.createObjectNode();
+						params.put("subject", doc.getKey());
+						params.set("fields", fields);
+						script.set("params", params);
+						payload.put("scripted_upsert", true);
+						payload.set("upsert", mapper.createObjectNode().put(SUBJECT_FIELD, doc.getKey()));
 					} else {
 						ObjectNode script = payload.putObject("script");
 						script.put("lang", "painless");
