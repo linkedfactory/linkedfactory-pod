@@ -100,6 +100,42 @@ public class HttpFtsSearchServiceTest {
 	}
 
 	@Test
+	public void commitCoalescesStatementBatchesForSameDocument() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+
+		Statement first = vf.createStatement(
+				vf.createIRI("urn:sensor1"),
+				vf.createIRI("urn:label"),
+				vf.createLiteral("Battery Sensor"));
+		Statement second = vf.createStatement(
+				vf.createIRI("urn:sensor1"),
+				vf.createIRI("urn:label"),
+				vf.createLiteral("Temperature Sensor"));
+
+		service.begin();
+		service.addRemoveStatements(Set.of(first), Set.of());
+		service.addRemoveStatements(Set.of(second), Set.of());
+		service.commit();
+		service.shutdown();
+
+		assertEquals(1, requests.get());
+		String[] lines = body.get().strip().split("\\n");
+		assertEquals(2, lines.length);
+
+		JsonNode action = mapper.readTree(lines[0]);
+		JsonNode payload = mapper.readTree(lines[1]);
+		assertEquals("urn:sensor1", action.path("update").path("_id").asText());
+		assertEquals(2, payload.path("doc").path("urn:label").size());
+		assertEquals("Battery Sensor", payload.path("doc").path("urn:label").get(0).path("value").asText());
+		assertEquals("Temperature Sensor", payload.path("doc").path("urn:label").get(1).path("value").asText());
+	}
+
+	@Test
 	public void rollbackSkipsRequest() throws Exception {
 		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
 		HttpFtsSearchService service = new HttpFtsSearchService(
@@ -272,6 +308,34 @@ public class HttpFtsSearchServiceTest {
 		try (var files = Files.list(outboxDir)) {
 			assertFalse(files.findAny().isPresent());
 		}
+	}
+
+	@Test
+	public void drainsLegacyOutboxPayload() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		Files.writeString(outboxDir.resolve("legacy.json"),
+				"{\"operations\":["
+						+ "{\"op\":\"upsert\",\"documents\":{\"urn:sensor1\":{\"urn:label\":[{\"kind\":\"literal\",\"value\":\"Battery Sensor\"}]}}},"
+						+ "{\"op\":\"remove\",\"documents\":{\"urn:sensor1\":{\"urn:locatedIn\":[{\"kind\":\"iri\",\"value\":\"urn:lineA\"}]}}}"
+						+ "]}",
+				StandardCharsets.UTF_8);
+
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+		service.commit();
+		service.shutdown();
+
+		assertEquals(1, requests.get());
+		String[] lines = body.get().strip().split("\\n");
+		assertEquals(4, lines.length);
+		assertEquals("Battery Sensor",
+				mapper.readTree(lines[1]).path("doc").path("urn:label").get(0).path("value").asText());
+		assertEquals("urn:lineA",
+				mapper.readTree(lines[3]).path("script").path("params").path("fields")
+						.path("urn:locatedIn").get(0).path("value").asText());
 	}
 
 	@Test
