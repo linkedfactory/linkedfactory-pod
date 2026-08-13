@@ -66,16 +66,18 @@ public class KvinModelSetTest {
     }
 
     private void setUp() throws IOException {
-        server = HttpServer.create(new InetSocketAddress(9200), 0);
+        server = HttpServer.create(new InetSocketAddress(9222), 0);
         server.createContext("/_bulk", this::handleRequest);
         server.createContext("/_search", this::handleRequest);
         server.start();
     }
 
     private void handleRequest(HttpExchange exchange) throws IOException {
-        byte[] response = "ok".getBytes(StandardCharsets.UTF_8);
-        exchange.sendResponseHeaders(200, response.length);
-        exchange.getResponseBody().write(response);
+         final byte[] BULK_SUCCESS_RESPONSE =
+                "{\"errors\":false,\"items\":[]}".getBytes(StandardCharsets.UTF_8);
+
+        exchange.sendResponseHeaders(200, BULK_SUCCESS_RESPONSE.length);
+        exchange.getResponseBody().write(BULK_SUCCESS_RESPONSE);
         exchange.close();
     }
 

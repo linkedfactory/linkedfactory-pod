@@ -30,6 +30,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class FtsSailConcurrentWritersTest {
+	private static final byte[] BULK_SUCCESS_RESPONSE =
+			"{\"errors\":false,\"items\":[]}".getBytes(StandardCharsets.UTF_8);
+
 	private final SimpleValueFactory vf = SimpleValueFactory.getInstance();
 	private HttpServer server;
 	private AtomicInteger requests;
@@ -108,9 +111,8 @@ public class FtsSailConcurrentWritersTest {
 		try (InputStream in = exchange.getRequestBody()) {
 			in.readAllBytes();
 		}
-		byte[] response = "ok".getBytes(StandardCharsets.UTF_8);
-		exchange.sendResponseHeaders(200, response.length);
-		exchange.getResponseBody().write(response);
+		exchange.sendResponseHeaders(200, BULK_SUCCESS_RESPONSE.length);
+		exchange.getResponseBody().write(BULK_SUCCESS_RESPONSE);
 		exchange.close();
 	}
 }

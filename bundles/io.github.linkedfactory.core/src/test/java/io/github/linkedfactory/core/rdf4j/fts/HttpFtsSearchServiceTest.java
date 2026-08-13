@@ -29,19 +29,26 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class HttpFtsSearchServiceTest {
+	private static final String BULK_SUCCESS_RESPONSE = "{\"errors\":false,\"items\":[]}";
+
 	private final ObjectMapper mapper = new ObjectMapper();
 	private final SimpleValueFactory vf = SimpleValueFactory.getInstance();
 	private HttpServer server;
 	private AtomicReference<String> body;
+	private AtomicReference<String> requestPath;
 	private AtomicInteger requests;
 	private volatile int responseCode = 200;
+	private volatile String responseBody = BULK_SUCCESS_RESPONSE;
 
 	@Before
 	public void setUp() throws IOException {
 		body = new AtomicReference<>();
+		requestPath = new AtomicReference<>();
 		requests = new AtomicInteger(0);
 		server = HttpServer.create(new InetSocketAddress(0), 0);
 		server.createContext("/_bulk", this::handleRequest);
+		server.createContext("/_update_by_query", this::handleRequest);
+		server.createContext("/_delete_by_query", this::handleRequest);
 		server.start();
 	}
 
@@ -90,14 +97,16 @@ public class HttpFtsSearchServiceTest {
 
 		assertEquals("urn:sensor1", upsertAction.path("update").path("_id").asText());
 		assertEquals("urn:sensor1", removeAction.path("update").path("_id").asText());
-		assertTrue(upsertPayload.path("doc_as_upsert").asBoolean());
-		assertEquals("urn:sensor1", upsertPayload.path("doc").path("subject").asText());
+		assertTrue(upsertPayload.path("scripted_upsert").asBoolean());
+		assertEquals("urn:sensor1", upsertPayload.path("upsert").path("subject").asText());
+		assertEquals("urn:sensor1", upsertPayload.path("script").path("params").path("subject").asText());
 		assertEquals("Battery Sensor",
-				upsertPayload.path("doc")
+				upsertPayload.path("script").path("params").path("fields")
 						.get("urn:label").get(0).get("value").asText());
 		assertEquals("urn:lineA",
 				removePayload.path("script").path("params").path("fields")
 						.get("urn:locatedIn").get(0).get("value").asText());
+		assertTrue(upsertPayload.path("script").path("source").asText().contains("ctx._source[key].add(value)"));
 		assertTrue(removePayload.path("script").path("source").asText().contains("ctx._source.containsKey('subject')"));
 	}
 
@@ -132,10 +141,10 @@ public class HttpFtsSearchServiceTest {
 		JsonNode action = mapper.readTree(lines[0]);
 		JsonNode payload = mapper.readTree(lines[1]);
 		assertEquals("urn:sensor1", action.path("update").path("_id").asText());
-		assertEquals("urn:sensor1", payload.path("doc").path("subject").asText());
-		assertEquals(2, payload.path("doc").path("urn:label").size());
-		assertEquals("Battery Sensor", payload.path("doc").path("urn:label").get(0).path("value").asText());
-		assertEquals("Temperature Sensor", payload.path("doc").path("urn:label").get(1).path("value").asText());
+		assertEquals("urn:sensor1", payload.path("upsert").path("subject").asText());
+		assertEquals(2, payload.path("script").path("params").path("fields").path("urn:label").size());
+		assertEquals("Battery Sensor", payload.path("script").path("params").path("fields").path("urn:label").get(0).path("value").asText());
+		assertEquals("Temperature Sensor", payload.path("script").path("params").path("fields").path("urn:label").get(1).path("value").asText());
 	}
 
 	@Test
@@ -260,6 +269,7 @@ public class HttpFtsSearchServiceTest {
 		}
 
 		responseCode = 200;
+		responseBody = BULK_SUCCESS_RESPONSE;
 		service.commit();
 		service.shutdown();
 
@@ -299,6 +309,7 @@ public class HttpFtsSearchServiceTest {
 		}
 
 		responseCode = 200;
+		responseBody = BULK_SUCCESS_RESPONSE;
 		HttpFtsSearchService restarted = new HttpFtsSearchService(
 				endpoint(),
 				"/_bulk",
@@ -334,12 +345,62 @@ public class HttpFtsSearchServiceTest {
 		assertEquals(1, requests.get());
 		String[] lines = body.get().strip().split("\\n");
 		assertEquals(4, lines.length);
-		assertEquals("urn:sensor1", mapper.readTree(lines[1]).path("doc").path("subject").asText());
+		assertEquals("urn:sensor1", mapper.readTree(lines[1]).path("upsert").path("subject").asText());
 		assertEquals("Battery Sensor",
-				mapper.readTree(lines[1]).path("doc").path("urn:label").get(0).path("value").asText());
+				mapper.readTree(lines[1]).path("script").path("params").path("fields").path("urn:label").get(0).path("value").asText());
 		assertEquals("urn:lineA",
 				mapper.readTree(lines[3]).path("script").path("params").path("fields")
 						.path("urn:locatedIn").get(0).path("value").asText());
+	}
+
+	@Test
+	public void clearContextsUsesUpdateByQueryApi() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+
+		service.begin();
+		service.clearContexts(vf.createIRI("urn:ctx:A"), vf.createIRI("urn:ctx:B"));
+		service.commit();
+		service.shutdown();
+
+		assertEquals(1, requests.get());
+		assertEquals("/_update_by_query", requestPath.get());
+		JsonNode payload = mapper.readTree(body.get());
+		assertEquals("urn:ctx:A", payload.path("script").path("params").path("contexts").get(0).asText());
+		assertEquals("urn:ctx:B", payload.path("script").path("params").path("contexts").get(1).asText());
+		assertTrue(payload.path("script").path("source").asText().contains("value.containsKey('context')"));
+	}
+
+	@Test
+	public void bulkItemErrorsFailCommit() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(
+				endpoint(),
+				"/_bulk",
+				true,
+				outboxDir.toString());
+		responseBody = """
+				{"errors":true,"items":[{"update":{"_id":"urn:s","status":400,"error":{"type":"mapper_parsing_exception","reason":"bad value"}}}]}
+				""";
+
+		service.begin();
+		service.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		try {
+			service.commit();
+			fail("Expected exception on bulk item error");
+		} catch (IOException expected) {
+			assertTrue(expected.getMessage().contains("HTTP 400 bulk update"));
+			assertTrue(expected.getMessage().contains("urn:s"));
+		} finally {
+			service.shutdown();
+		}
 	}
 
 	@Test
@@ -352,7 +413,9 @@ public class HttpFtsSearchServiceTest {
 				body.set(new String(in.readAllBytes(), StandardCharsets.UTF_8));
 			}
 			int status = current < 3 ? 503 : 200;
-			byte[] response = current < 3 ? "retry".getBytes(StandardCharsets.UTF_8) : "ok".getBytes(StandardCharsets.UTF_8);
+			byte[] response = current < 3
+					? "retry".getBytes(StandardCharsets.UTF_8)
+					: BULK_SUCCESS_RESPONSE.getBytes(StandardCharsets.UTF_8);
 			exchange.sendResponseHeaders(status, response.length);
 			exchange.getResponseBody().write(response);
 			exchange.close();
@@ -386,10 +449,11 @@ public class HttpFtsSearchServiceTest {
 
 	private void handleRequest(HttpExchange exchange) throws IOException {
 		requests.incrementAndGet();
+		requestPath.set(exchange.getRequestURI().getPath());
 		try (InputStream in = exchange.getRequestBody()) {
 			body.set(new String(in.readAllBytes(), StandardCharsets.UTF_8));
 		}
-		byte[] response = "ok".getBytes(StandardCharsets.UTF_8);
+		byte[] response = responseBody.getBytes(StandardCharsets.UTF_8);
 		exchange.sendResponseHeaders(responseCode, response.length);
 		exchange.getResponseBody().write(response);
 		exchange.close();

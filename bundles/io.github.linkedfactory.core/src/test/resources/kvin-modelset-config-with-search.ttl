@@ -19,7 +19,7 @@
          sail:delegate [
             sail:sailType "fts:FtsSail" ;
             fts:backend "elastic" ;
-            fts:endpoint "http://localhost:9200" ;
+            fts:endpoint "http://localhost:9222" ;
             fts:bulkPath "/_bulk" ;
             fts:searchPath "/_search" ;
             fts:defaultLimit 100 ;
