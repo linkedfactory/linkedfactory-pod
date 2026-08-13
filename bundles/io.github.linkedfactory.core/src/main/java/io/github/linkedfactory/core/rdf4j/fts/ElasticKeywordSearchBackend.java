@@ -196,6 +196,9 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 					iri = textOrNull(hit.path("_source").get("iri"));
 				}
 				if (iri == null) {
+					iri = textOrNull(hit.path("_source").get("subject"));
+				}
+				if (iri == null) {
 					continue;
 				}
 				Double score = hit.has("_score") && !hit.get("_score").isNull() ? hit.get("_score").asDouble() : null;

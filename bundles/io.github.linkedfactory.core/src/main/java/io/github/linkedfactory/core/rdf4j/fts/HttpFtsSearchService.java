@@ -49,6 +49,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 	private static final String OP_REMOVE = "remove";
 	private static final String OP_CLEAR = "clear";
 	private static final String OP_CLEAR_CONTEXTS = "clearContexts";
+	private static final String SUBJECT_FIELD = "subject";
 	private static final String REMOVE_SCRIPT = "for (entry in params.fields.entrySet()) { "
 			+ "def key = entry.getKey(); "
 			+ "if (ctx._source.containsKey(key)) { "
@@ -56,7 +57,8 @@ public class HttpFtsSearchService implements FtsSearchService {
 			+ "if (ctx._source[key].isEmpty()) { ctx._source.remove(key); } "
 			+ "} "
 			+ "} "
-			+ "if (ctx._source.isEmpty()) { ctx.op = 'delete'; }";
+			+ "if (ctx._source.isEmpty() || (ctx._source.size() == 1 && ctx._source.containsKey('subject'))) { "
+			+ "ctx.op = 'delete'; }";
 
 	static final String PROP_ENDPOINT = "fts.endpoint";
 	static final String PROP_BULK_PATH = "fts.bulkPath";
@@ -694,6 +696,9 @@ public class HttpFtsSearchService implements FtsSearchService {
 					update.put("_id", doc.getKey());
 
 					ObjectNode fields = mapper.createObjectNode();
+					if (upsert) {
+						fields.put(SUBJECT_FIELD, doc.getKey());
+					}
 					for (Map.Entry<String, ArrayNode> field : doc.getValue().entrySet()) {
 						fields.set(field.getKey(), field.getValue());
 					}

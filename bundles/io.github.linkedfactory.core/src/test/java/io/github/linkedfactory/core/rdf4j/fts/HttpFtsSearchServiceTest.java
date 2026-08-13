@@ -91,12 +91,14 @@ public class HttpFtsSearchServiceTest {
 		assertEquals("urn:sensor1", upsertAction.path("update").path("_id").asText());
 		assertEquals("urn:sensor1", removeAction.path("update").path("_id").asText());
 		assertTrue(upsertPayload.path("doc_as_upsert").asBoolean());
+		assertEquals("urn:sensor1", upsertPayload.path("doc").path("subject").asText());
 		assertEquals("Battery Sensor",
 				upsertPayload.path("doc")
 						.get("urn:label").get(0).get("value").asText());
 		assertEquals("urn:lineA",
 				removePayload.path("script").path("params").path("fields")
 						.get("urn:locatedIn").get(0).get("value").asText());
+		assertTrue(removePayload.path("script").path("source").asText().contains("ctx._source.containsKey('subject')"));
 	}
 
 	@Test
@@ -130,6 +132,7 @@ public class HttpFtsSearchServiceTest {
 		JsonNode action = mapper.readTree(lines[0]);
 		JsonNode payload = mapper.readTree(lines[1]);
 		assertEquals("urn:sensor1", action.path("update").path("_id").asText());
+		assertEquals("urn:sensor1", payload.path("doc").path("subject").asText());
 		assertEquals(2, payload.path("doc").path("urn:label").size());
 		assertEquals("Battery Sensor", payload.path("doc").path("urn:label").get(0).path("value").asText());
 		assertEquals("Temperature Sensor", payload.path("doc").path("urn:label").get(1).path("value").asText());
@@ -331,6 +334,7 @@ public class HttpFtsSearchServiceTest {
 		assertEquals(1, requests.get());
 		String[] lines = body.get().strip().split("\\n");
 		assertEquals(4, lines.length);
+		assertEquals("urn:sensor1", mapper.readTree(lines[1]).path("doc").path("subject").asText());
 		assertEquals("Battery Sensor",
 				mapper.readTree(lines[1]).path("doc").path("urn:label").get(0).path("value").asText());
 		assertEquals("urn:lineA",
