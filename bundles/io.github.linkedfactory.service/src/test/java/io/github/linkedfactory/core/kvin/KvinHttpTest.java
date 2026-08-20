@@ -102,7 +102,7 @@ public class KvinHttpTest extends Mockito {
 		modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"));
 		Globals.contextModelSet().theDefault().set(VendorJ.vendor(new Full(modelSet)));
 	}
-	
+
 	@AfterClass
 	public static void tearDownClass() {
 		modelSet.dispose();

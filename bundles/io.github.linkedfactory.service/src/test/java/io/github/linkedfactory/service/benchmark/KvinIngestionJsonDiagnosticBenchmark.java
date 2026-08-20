@@ -24,8 +24,4 @@ public class KvinIngestionJsonDiagnosticBenchmark {
 		state.postJsonParseOnly();
 	}
 
-	@Benchmark
-	public void putScalar(KvinIngestionBenchmark.BenchmarkState state) {
-		state.putScalar();
-	}
 }

@@ -16,6 +16,7 @@ import io.github.linkedfactory.service.MockHttpServletRequest;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.KommaModule;
 import net.enilink.komma.core.URI;
+import net.enilink.komma.core.URIs;
 import net.enilink.komma.model.IModelSet;
 import net.enilink.komma.model.IModelSetFactory;
 import net.enilink.komma.model.MODELS;
@@ -59,6 +60,8 @@ import java.util.concurrent.TimeUnit;
 @Fork(2)
 @Threads(1)
 public class KvinIngestionCsvDiagnosticBenchmark {
+	private static final URI BASE = URIs.createURI("http://foo.com/linkedfactory/");
+
 	@State(Scope.Thread)
 	public static class BenchmarkState {
 		private static final int EXPECTED_FIELD_COUNT = KvinIngestionWorkload.ROW_COUNT + 1;
@@ -147,17 +150,14 @@ public class KvinIngestionCsvDiagnosticBenchmark {
 		public void parseCsvAndConsumeTuples(Blackhole blackhole) throws IOException {
 			measuredStage = "parseCsvAndConsumeTuples";
 			tupleCount = 0;
-			CsvFormatParser parser = new CsvFormatParser(URIsForBenchmark.BASE, ',',
+			CsvFormatParser parser = new CsvFormatParser(BASE, ',',
 					new ByteArrayInputStream(csvPayload));
 			parser.setContext(KvinIngestionWorkload.CONTEXT);
-			IExtendedIterator<KvinTuple> tuples = parser.parse();
-			try {
+			try (IExtendedIterator<KvinTuple> tuples = parser.parse()) {
 				while (tuples.hasNext()) {
 					blackhole.consume(tuples.next());
 					tupleCount++;
 				}
-			} finally {
-				tuples.close();
 			}
 		}
 
@@ -263,10 +263,6 @@ public class KvinIngestionCsvDiagnosticBenchmark {
 		int tupleCount() {
 			return tupleCount;
 		}
-	}
-
-	private static final class URIsForBenchmark {
-		private static final URI BASE = net.enilink.komma.core.URIs.createURI("http://foo.com/linkedfactory/");
 	}
 
 	@Benchmark

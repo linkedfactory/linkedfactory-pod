@@ -41,10 +41,6 @@ import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 import org.junit.Assert;
-import org.openjdk.jmh.runner.Runner;
-import org.openjdk.jmh.runner.RunnerException;
-import org.openjdk.jmh.runner.options.Options;
-import org.openjdk.jmh.runner.options.OptionsBuilder;
 import scala.Function0;
 import scala.PartialFunction;
 import scala.collection.immutable.Nil$;
@@ -120,8 +116,8 @@ public class KvinIngestionBenchmark {
 			storeDirectory = directory.toFile();
 			store = new KvinLevelDb(storeDirectory);
 			store.put(workload.preseedTuples());
-			service = createService();
-			parseOnlyService = createParseOnlyService();
+			service = new BenchmarkService(false);
+			parseOnlyService = new BenchmarkService(true);
 			measuredWrites = false;
 		}
 
@@ -151,13 +147,6 @@ public class KvinIngestionBenchmark {
 
 		public void putBatch() {
 			store.put(workload.tuples());
-			measuredWrites = true;
-		}
-
-		public void putScalar() {
-			for (KvinTuple tuple : workload.tuples()) {
-				store.put(tuple);
-			}
 			measuredWrites = true;
 		}
 
@@ -207,14 +196,6 @@ public class KvinIngestionBenchmark {
 			if (writesMeasuredTuples) {
 				measuredWrites = true;
 			}
-		}
-
-		private KvinService createService() {
-			return new BenchmarkService(false);
-		}
-
-		private KvinService createParseOnlyService() {
-			return new BenchmarkService(true);
 		}
 
 		private class BenchmarkService extends KvinService {
@@ -297,14 +278,6 @@ public class KvinIngestionBenchmark {
 				}
 			});
 		}
-	}
-
-	public static void main(String[] args) throws RunnerException {
-		Options opt = new OptionsBuilder()
-				.include(KvinIngestionBenchmark.class.getSimpleName() + "\\.") // adapt to control which benchmark tests to run
-				.forks(1)
-				.build();
-		new Runner(opt).run();
 	}
 
 	@Benchmark
