@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter}
+import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator}
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
 import io.github.linkedfactory.service.util.LineProtocolParser
@@ -39,6 +39,7 @@ import scala.jdk.CollectionConverters.*
 
 class KvinService(path: List[String], store: Kvin) extends RestHelper with Loggable {
   val MAX_LIMIT = 500000
+  private val CSV_GROUPING_WINDOW_SIZE = 6000
   val valueProperty: URI = URIs.createURI("value")
 
   val CORS_HEADERS: List[(String, String)] = ("Access-Control-Allow-Origin", "*") :: ("Access-Control-Allow-Credentials", "true") :: //
@@ -289,8 +290,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       val separator = S.param("separator").map(_.trim).filter(_.nonEmpty).map(_.charAt(0)).getOrElse(',')
       val parser = new CsvFormatParser(parentUri, separator, in)
       parser.setContext(contextModelUri)
-      val tuples: IExtendedIterator[KvinTuple] = parser.parse()
-      store.put(tuples)
+      val tuples: IExtendedIterator[KvinTuple] =
+        new KvinTupleGroupingIterator(parser.parse(), CSV_GROUPING_WINDOW_SIZE)
+      try store.put(tuples) finally tuples.close()
       Empty
     } catch {
       case e: Exception => new Failure(e.getMessage, Full(e), Empty)

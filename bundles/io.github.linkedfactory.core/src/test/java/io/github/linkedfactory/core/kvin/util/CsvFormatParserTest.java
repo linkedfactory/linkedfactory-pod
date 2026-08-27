@@ -22,6 +22,7 @@ import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.Assert.*;
@@ -146,6 +147,66 @@ public class CsvFormatParserTest {
 
 		// no more tuples
 		assertFalse(tuples.hasNext());
+	}
+
+	@Test
+	public void shouldPreserveSparseRowsAndTupleFields() throws IOException {
+		String csv = String.join("\n",
+				"time,seqNr,<urn:item:a>@<urn:property>,<urn:item:b>@<urn:property>",
+				"100,1,10",
+				"101,2,,20");
+		CsvFormatParser parser = new CsvFormatParser(URIs.createURI("urn:base:"), ',',
+				new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)));
+		List<KvinTuple> tuples = parser.parse().toList();
+
+		assertEquals(3, tuples.size());
+		assertTuple(tuples.get(0), "urn:item:a", 100, 1, 10L);
+		assertTuple(tuples.get(1), "urn:item:a", 101, 2, "");
+		assertTuple(tuples.get(2), "urn:item:b", 101, 2, 20L);
+	}
+
+	@Test
+	public void shouldRejectMalformedTimeAndSequenceNumberAndCloseInput() throws IOException {
+		assertMalformedCsv("time,value\ninvalid,1", "Invalid time format");
+		assertMalformedCsv("time,seqNr,value\n100,invalid,1", "Invalid seqNr format");
+	}
+
+	@Test
+	public void shouldCloseInputAtEndOfFile() throws IOException {
+		TrackingInputStream input = new TrackingInputStream("time,value\n100,1");
+		CsvFormatParser parser = new CsvFormatParser(URIs.createURI("urn:base:"), ',', input);
+		assertEquals(1, parser.parse().toList().size());
+		assertTrue(input.closed);
+	}
+
+	private static void assertMalformedCsv(String csv, String expectedMessage) throws IOException {
+		TrackingInputStream input = new TrackingInputStream(csv);
+		CsvFormatParser parser = new CsvFormatParser(URIs.createURI("urn:base:"), ',', input);
+		RuntimeException error = assertThrows(RuntimeException.class, () -> parser.parse().hasNext());
+		assertTrue(error.getCause().getMessage().contains(expectedMessage));
+		assertTrue(input.closed);
+	}
+
+	private static void assertTuple(KvinTuple tuple, String item, long time, int seqNr, Object value) {
+		assertEquals(URIs.createURI(item), tuple.item);
+		assertEquals(URIs.createURI("urn:property"), tuple.property);
+		assertEquals(time, tuple.time);
+		assertEquals(seqNr, tuple.seqNr);
+		assertEquals(value, tuple.value);
+	}
+
+	private static final class TrackingInputStream extends ByteArrayInputStream {
+		private boolean closed;
+
+		private TrackingInputStream(String content) {
+			super(content.getBytes(StandardCharsets.UTF_8));
+		}
+
+		@Override
+		public void close() throws IOException {
+			closed = true;
+			super.close();
+		}
 	}
 
 }

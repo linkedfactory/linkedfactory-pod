@@ -2,11 +2,11 @@ package io.github.linkedfactory.service
 
 import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.google.inject.Guice
-import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple}
+import io.github.linkedfactory.core.kvin.{Kvin, KvinListener, KvinTuple}
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.core.kvin.util.JsonFormatParser
 import net.enilink.commons.iterator.NiceIterator
-import net.enilink.komma.core.{KommaModule, URI}
+import net.enilink.komma.core.{KommaModule, URI, URIs}
 import net.enilink.komma.model._
 import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.{Box, Full}
@@ -21,6 +21,8 @@ import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 import jakarta.servlet.http.HttpServletRequest
 import scala.util.Random
 import scala.compiletime.uninitialized
+import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters.*
 
 /**
  * Companion object of unit tests for the KVIN service endpoint
@@ -157,6 +159,52 @@ class KvinServiceTest {
       headers = (("Accept", "application/json" :: Nil) :: Nil).toMap
     }
     assertEquals(Full(200), kvinRest(toReq(getReq))().map(_.toResponse.code))
+  }
+
+  @Test
+  def csvPostPersistsSparseRowsInBoundedSeriesOrder(): Unit = {
+    val itemA = URIs.createURI("urn:csv:test:item:a")
+    val itemB = URIs.createURI("urn:csv:test:item:b")
+    val property = URIs.createURI("urn:csv:test:property")
+    val observed = ArrayBuffer.empty[(URI, URI, Long, Long, Object)]
+    val listener = new KvinListener {
+      override def entityCreated(item: URI): Unit = ()
+
+      override def valueAdded(item: URI, property: URI, context: URI, time: Long,
+                              seqNr: Long, value: Object): Unit = {
+        if (item == itemA || item == itemB) observed += ((item, context, time, seqNr, value))
+      }
+    }
+    val csv = String.join("\n",
+      "time,seqNr,<urn:csv:test:item:a>@<urn:csv:test:property>,<urn:csv:test:item:b>@<urn:csv:test:property>",
+      "100,1,10",
+      "101,2,,20")
+    val request = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      body_=(csv, "text/csv")
+    }
+
+    KvinServiceTest.store.addListener(listener)
+    try assertEquals(200, kvinRest(toReq(request))().map(_.toResponse).openOr(null).code)
+    finally KvinServiceTest.store.removeListener(listener)
+
+    assertEquals(List(
+      (itemA, 100L, 1L, 10L),
+      (itemA, 101L, 2L, ""),
+      (itemB, 101L, 2L, 20L)), observed.map(t => (t._1, t._3, t._4, t._5)).toList)
+
+    val stored = KvinServiceTest.store.fetch(itemA, property, observed.head._2, 0)
+    try assertEquals(List("", 10L), stored.toList.asScala.map(_.value).toList)
+    finally stored.close()
+  }
+
+  @Test
+  def csvPostRejectsMalformedTimestamp(): Unit = {
+    val request = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      body_=("time,value\ninvalid,1", "text/csv")
+    }
+    assertEquals(400, kvinRest(toReq(request))().map(_.toResponse).openOr(null).code)
   }
 
   @Test
