@@ -591,13 +591,28 @@ class KvinLevelDb(path: File) extends KvinLevelDbBase with Kvin {
 
     val idsBatch = ids.createWriteBatch()
     var batch = values.createWriteBatch()
+    var lastItem: URI = null
+    var lastProperty: URI = null
+    var lastContext: URI = null
+    var lastPrefix: Array[Byte] = null
+    var lastLock: ReentrantReadWriteLock = null
     activeWrites.incrementAndGet()
     try {
       entries.asScala.foreach { entry => // encode value first to circumvent problems with locks
         val encodedValue = encode(entry.value)
-        val lock = lockFor(entry.item)
+        val samePrefix = lastPrefix != null && entry.item == lastItem && entry.property == lastProperty &&
+          entry.context == lastContext
+        val lock = if (samePrefix) lastLock else lockFor(entry.item)
         readLock(lock) {
-          val prefix = toId(entry.item, entry.property, entry.context, generate = true, idsBatch)
+          val prefix = if (samePrefix) lastPrefix else {
+            val resolved = toId(entry.item, entry.property, entry.context, generate = true, idsBatch)
+            lastItem = entry.item
+            lastProperty = entry.property
+            lastContext = entry.context
+            lastPrefix = resolved
+            lastLock = lock
+            resolved
+          }
           val key = new Array[Byte](prefix.length + Varint.calcLengthUnsigned(entry.time) +
             Varint.calcLengthUnsigned(entry.seqNr))
           val bb = ByteBuffer.wrap(key).order(BYTE_ORDER)

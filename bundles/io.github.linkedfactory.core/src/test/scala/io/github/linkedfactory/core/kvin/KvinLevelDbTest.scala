@@ -16,7 +16,7 @@
 package io.github.linkedfactory.core.kvin
 
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
-import net.enilink.komma.core.URIs
+import net.enilink.komma.core.{URI, URIs}
 import org.junit.Assert._
 import org.junit.{After, Before, Test}
 
@@ -112,5 +112,78 @@ class KvinLevelDbTest extends KvinTestBase {
 
     val nextIdsLoaded = store.asInstanceOf[KvinLevelDb].nextIds.map(_.get()).toList
     assertEquals(nextIds, nextIdsLoaded)
+  }
+
+  @Test
+  def testBatchWriteSwitchesAndReusesPrefixesAcrossFlush(): Unit = {
+    val item = itemUri(101)
+    val otherItem = itemUri(102)
+    val property = valueProperty
+    val otherProperty = propertyUri(2)
+    val context = URIs.createURI("http://example.org/context/one")
+    val otherContext = URIs.createURI("http://example.org/context/two")
+    val largeValue = "x".repeat(2200)
+
+    // The first and last runs deliberately use the same series.  The middle
+    // run changes every part of the series identity and the write crosses the
+    // one-megabyte value-batch threshold while the cache is in use.
+    val tuples =
+      (0 until 260).map(i => new KvinTuple(item, property, context, i, i, largeValue)) ++
+        Seq(new KvinTuple(otherItem, otherProperty, otherContext, 10000L, 0, largeValue)) ++
+        (0 until 260).map(i => new KvinTuple(item, property, context, 20000L + i, i, largeValue))
+
+    store.put(tuples.asJava)
+
+    def fetched(item: URI, property: URI, context: URI): List[KvinTuple] =
+      store.fetch(item, property, context, 0).toList.asScala.toList
+
+    val firstSeries = fetched(item, property, context)
+    assertEquals(520, firstSeries.size)
+    assertEquals((0 until 260).toList ++ (20000 until 20260).toList, firstSeries.map(_.time).sorted)
+    assertEquals(1, fetched(otherItem, otherProperty, otherContext).size)
+    assertEquals(largeValue, firstSeries.head.value)
+
+    recreateStore()
+
+    assertEquals(520, fetched(item, property, context).size)
+    assertEquals(1, fetched(otherItem, otherProperty, otherContext).size)
+  }
+
+  @Test
+  def testBatchWriteRecoversAfterIteratorFailure(): Unit = {
+    val item = itemUri(103)
+    val tuple = new KvinTuple(item, valueProperty, Kvin.DEFAULT_CONTEXT, 1L, 0, "before failure")
+    val failingEntries = new java.lang.Iterable[KvinTuple] {
+      override def iterator(): java.util.Iterator[KvinTuple] = new java.util.Iterator[KvinTuple] {
+        private var returned = false
+
+        override def hasNext(): Boolean = {
+          if (!returned) true
+          else throw new IllegalStateException("iterator failure")
+        }
+
+        override def next(): KvinTuple = {
+          returned = true
+          tuple
+        }
+
+        override def remove(): Unit = throw new UnsupportedOperationException
+      }
+    }
+
+    try {
+      store.put(failingEntries)
+      fail("Expected the source iterator to fail")
+    } catch {
+      case _: IllegalStateException =>
+    }
+
+    val afterFailure = new KvinTuple(item, valueProperty, Kvin.DEFAULT_CONTEXT, 2L, 0, "after failure")
+    store.put(afterFailure)
+
+    val values = store.fetch(item, valueProperty, Kvin.DEFAULT_CONTEXT, 0).toList.asScala
+    assertEquals(1, values.size)
+    assertEquals(afterFailure.time, values.head.time)
+    assertEquals(afterFailure.value, values.head.value)
   }
 }
