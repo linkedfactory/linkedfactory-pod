@@ -116,7 +116,7 @@
 						<phase>package</phase>
 						<configuration>
 							<target>
-								<echo file="${project.build.directory}/version.txt">${project.version}</echo>
+								<echo file="${project.build.directory}/version.txt">${project.version}-fts</echo>
 							</target>
 						</configuration>
 						<goals>
