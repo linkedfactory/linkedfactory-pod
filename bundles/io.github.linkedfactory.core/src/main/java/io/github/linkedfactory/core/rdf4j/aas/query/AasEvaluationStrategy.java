@@ -58,8 +58,7 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 		this.executorService = executorService;
 	}
 
-	@Override
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(StatementPattern stmt, final BindingSet bs)
+	protected CloseableIteration<BindingSet> evaluate(StatementPattern stmt, final BindingSet bs)
 			throws QueryEvaluationException {
 		// System.out.println("Stmt: " + stmt);
 		final Var subjectVar = stmt.getSubjectVar();
@@ -107,6 +106,10 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 
 			return new AbstractCloseableIteration<>() {
 				CompositeBindingSet next;
+
+				@Override
+				protected void handleClose() {
+				}
 
 				@Override
 				public boolean hasNext() throws QueryEvaluationException {
@@ -158,6 +161,10 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 				return new AbstractCloseableIteration<>() {
 					BindingSet next = null;
 					int i = 0;
+
+					@Override
+					protected void handleClose() {
+					}
 
 					@Override
 					public boolean hasNext() throws QueryEvaluationException {
@@ -235,7 +242,7 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 		return new EmptyIteration<>();
 	}
 
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluateFetch(BindingSet bs, Parameters params, StatementPattern stmt) {
+	public CloseableIteration<BindingSet> evaluateFetch(BindingSet bs, Parameters params, StatementPattern stmt) {
 		final Var predVar = stmt.getPredicateVar();
 		final Var objectVar = stmt.getObjectVar();
 
@@ -243,7 +250,7 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 		final Value predValue = getVarValue(predVar, bs);
 
 		if (subjValue != null) {
-			final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<>() {
+			final CloseableIteration<BindingSet> iteration = new AbstractCloseableIteration<>() {
 				IExtendedIterator<?> it;
 
 				@Override
@@ -286,7 +293,6 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 						it.close();
 						it = null;
 					}
-					super.handleClose();
 				}
 			};
 			return iteration;
@@ -297,7 +303,9 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 	@Override
 	protected QueryEvaluationStep prepare(LeftJoin join, QueryEvaluationContext context) throws QueryEvaluationException {
 		if (useHashJoin(join.getLeftArg(), join.getRightArg())) {
-			return bindingSet -> new HashJoinIteration(AasEvaluationStrategy.this, join.getLeftArg(), join.getRightArg(), bindingSet, true);
+			return bindingSet -> new HashJoinIteration(
+					precompile(join.getLeftArg(), context), precompile(join.getRightArg(), context), bindingSet,
+					true, HashJoinIteration.hashJoinAttributeNames(join), context);
 		} else {
 			return super.prepare(join, context);
 		}
@@ -362,15 +370,6 @@ public class AasEvaluationStrategy extends DefaultEvaluationStrategy {
 			return new AasFetchEvaluationStep(AasEvaluationStrategy.this, (AasFetch) expr);
 		}
 		return super.precompile(expr, context);
-	}
-
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(TupleExpr expr, BindingSet bindings)
-			throws QueryEvaluationException {
-		if (expr instanceof AasFetch) {
-			QueryEvaluationContext context = new Minimal(this.dataset, this.tripleSource.getValueFactory());
-			return precompile(expr, context).evaluate(bindings);
-		}
-		return super.evaluate(expr, bindings);
 	}
 
 	public AasClient getAasClient() {

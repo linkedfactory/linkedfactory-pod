@@ -15,27 +15,27 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatWriter}
+import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter}
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
-import io.github.linkedfactory.service.util.{JsonFormatParser, LineProtocolParser}
+import io.github.linkedfactory.service.util.LineProtocolParser
 import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator}
 import net.enilink.komma.core.{URI, URIs}
 import net.liftweb.common.Box.box2Iterable
-import net.liftweb.common._
+import net.liftweb.common.*
 import net.liftweb.http.rest.RestHelper
 import net.liftweb.http.{InMemoryResponse, JsonResponse, LiftResponse, OkResponse, OutputStreamResponse, Req, S}
-import net.liftweb.json.Extraction.decompose
-import net.liftweb.json.JsonAST._
-import net.liftweb.json.JsonDSL._
-import net.liftweb.util.Helpers._
+import org.json4s.*
+import org.json4s.native.JsonMethods.{compact, render as renderJson}
+import org.json4s.JsonDSL.*
+import net.liftweb.util.Helpers.*
 import org.apache.commons.csv.{CSVFormat, CSVPrinter}
 
 import java.io.{InputStream, OutputStream, OutputStreamWriter}
 import java.text.SimpleDateFormat
 import java.util
 import java.util.Date
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class KvinService(path: List[String], store: Kvin) extends RestHelper with Loggable {
   val MAX_LIMIT = 500000
@@ -45,13 +45,13 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     ("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS") :: //
     ("Access-Control-Allow-Headers", "*") :: Nil
 
-  def responseHeaders: List[(String, String)] = CORS_HEADERS ::: S.getResponseHeaders(Nil)
+  protected def responseHeaders: List[(String, String)] = CORS_HEADERS ::: S.getResponseHeaders(Nil)
 
-  object FailureResponse {
+  protected object FailureResponse {
     def apply(msg: String): LiftResponse = createErrorResponse(400, "INVALID_PAYLOAD", msg)
   }
 
-  def createErrorResponse(status: Int, code: String, message: String, details: Box[String] = Empty): LiftResponse = {
+  protected def createErrorResponse(status: Int, code: String, message: String, details: Box[String] = Empty): LiftResponse = {
     val body = details.filter(_.nonEmpty).map { d =>
       ("code" -> code) ~ ("message" -> message) ~ ("details" -> d)
     } openOr {
@@ -60,7 +60,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     JsonResponse(body, responseHeaders, S.responseCookies, status)
   }
 
-  def createSuccessResponse(code: String = "OK", message: Box[String] = Empty, data: JObject = JObject(Nil)): LiftResponse = {
+  protected def createSuccessResponse(code: String = "OK", message: Box[String] = Empty, data: JObject = JObject(Nil)): LiftResponse = {
     val baseFields = List(
       JField("success", JBool(true)),
       JField("status", JInt(200)),
@@ -93,7 +93,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     }
   }
 
-  def createJsonResponse(json: JValue): LiftResponse = JsonResponse(json, responseHeaders, S.responseCookies, 200)
+  protected def createJsonResponse(json: JValue): LiftResponse = JsonResponse(json, responseHeaders, S.responseCookies, 200)
 
   serve(path prefix {
     // support OPTIONS requests
@@ -110,8 +110,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         case Full("text/csv") =>
           req.rawInputStream.flatMap(saveCsvValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
         case _ =>
-          req.json.flatMap(saveValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
-        // req.rawInputStream.flatMap(saveValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
+          req.rawInputStream.flatMap(saveJsonValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
       }
       result match {
         case Failure(msg, _, _) => FailureResponse(msg)
@@ -133,7 +132,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     // case list Get _ => // TODO return RDF description
   })
 
-  def serveValues(path: List[String], contentType: Box[String]): LiftResponse = {
+  protected def serveValues(path: List[String], contentType: Box[String]): LiftResponse = {
     val limit = S.param("limit") flatMap (v => tryo(v.toLong)) filter (_ > 0) openOr 10000L
 
     if (limit > MAX_LIMIT) {
@@ -154,7 +153,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           // (ts : Long) => ts.toString
           def toString(ts: Long) = ts.toString
 
-          toString _
+          toString
         }
       }
 
@@ -162,7 +161,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         JField(e.getProperty.toString, e.getValue match {
           case r: Record => recordToJson(r)
           case uri: URI => JObject(JField("@id", uri.toString))
-          case other => decompose(other)
+          case other => Extraction.decompose(other)
         })
       }.toList)
 
@@ -171,11 +170,11 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
         case null => "null"
         case b: Boolean => b.toString
         case n: Number => n.toString
-        case uri: URI => compactRender(JObject(JField("@id", uri.toString)))
-        case x: JValue => compactRender(x)
-        case e: Record => compactRender(recordToJson(e))
-        case a: Array[_] => a.view.map(value2Str(_, quoteStrings)).mkString("[", ",", "]")
-        case other if quoteStrings => compactRender(JString(other.toString))
+        case uri: URI => compact(renderJson(JObject(JField("@id", uri.toString))))
+        case x: JValue => compact(renderJson(x))
+        case e: Record => compact(renderJson(recordToJson(e)))
+        case a: Array[?] => a.view.map(value2Str(_, quoteStrings)).mkString("[", ",", "]")
+        case other if quoteStrings => compact(renderJson(JString(other.toString)))
         case other => other.toString
       }
 
@@ -188,7 +187,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             try {
               values.forEach(writer.writeTuple(_))
             } catch {
-              case e : Exception => logger.error("Error while writing JSON data", e)
+              case e: Exception => logger.error("Error while writing JSON data", e)
             } finally {
               try {
                 values.close()
@@ -232,7 +231,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
             var finished = false
             while (!finished) {
               val nextTuples = itemData.keys.filter(_ != null)
-              val maxTuple = if (nextTuples.isEmpty) null else nextTuples.max(ordering)
+              val maxTuple = if (nextTuples.isEmpty) null else nextTuples.max(using ordering)
               if (maxTuple != null) {
                 // print the row, properties without values at row timestamp stay unset
                 csvPrinter.printRecord((formatDate(maxTuple.time) :: itemData.map(d => {
@@ -266,22 +265,14 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   // handle JSON post content
-  def saveValues(json: JValue, path: List[String], currentTime: Long): Box[_] = {
-    var parentUri = Data.pathToURI(path)
-    if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
-
-    JsonFormatParser.parseItem(parentUri, contextModelUri, json, currentTime) map (_.foreach { tuple =>
-      store.put(tuple)
-    })
-  }
-
-  // handle JSON post content
-  def saveValues(in: InputStream, path: List[String], currentTime: Long): Box[_] = {
+  protected def saveJsonValues(in: InputStream, path: List[String], currentTime: Long): Box[?] = {
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
     try {
-      val tuples: IExtendedIterator[KvinTuple] = new io.github.linkedfactory.core.kvin.util.JsonFormatParser(in).parse(currentTime)
+      val tuples: IExtendedIterator[KvinTuple] = new JsonFormatParser(in, parentUri)
+        .setContext(contextModelUri)
+        .parse(currentTime)
       store.put(tuples)
       Empty
     } catch {
@@ -290,7 +281,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   // handle CSV post content
-  def saveCsvValues(in: InputStream, path: List[String], currentTime: Long): Box[_] = {
+  protected def saveCsvValues(in: InputStream, path: List[String], currentTime: Long): Box[?] = {
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
@@ -307,7 +298,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   }
 
   // handle InfluxDB line protocol content
-  def saveLineValues(is: InputStream, path: List[String], currentTime: Long): Box[_] = {
+  protected def saveLineValues(is: InputStream, path: List[String], currentTime: Long): Box[?] = {
     var parentUri = Data.pathToURI(path)
     if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
 
@@ -316,9 +307,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     })
   }
 
-  def getSingleItem(path: List[String]): URI = S.param("item") flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(path)
+  protected def getSingleItem(path: List[String]): URI = S.param("item") flatMap { s => tryo(URIs.createURI(s)) } openOr Data.pathToURI(path)
 
-  def getValues(path: List[String], limit: Long): IExtendedIterator[KvinTuple] = {
+  protected def getValues(path: List[String], limit: Long): IExtendedIterator[KvinTuple] = {
     val items = (S.param("item") or S.param("items")).map {
       _.split("\\s+").flatMap { i => tryo(URIs.createURI(i)) }.toList
     } openOr List(Data.pathToURI(path))
@@ -354,7 +345,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     }
   }
 
-  def getValuesMap(path: List[String], limit: Long): Map[String, Map[String, IExtendedIterator[KvinTuple]]] = {
+  protected def getValuesMap(path: List[String], limit: Long): Map[String, Map[String, IExtendedIterator[KvinTuple]]] = {
     val items = (S.param("item") or S.param("items")).map {
       _.split("\\s+").flatMap { i => tryo(URIs.createURI(i)) }.toList
     } openOr List(Data.pathToURI(path))
@@ -385,7 +376,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     }.toMap
   }
 
-  def deleteValues(path: List[String]): JObject = {
+  protected def deleteValues(path: List[String]): JObject = {
     val items = (S.param("item") or S.param("items")).map {
       _.split("\\s+").flatMap { i => tryo(URIs.createURI(i)) }.toList
     } openOr List(Data.pathToURI(path))
@@ -409,7 +400,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     JObject(JField("deleted", deletedRows) :: Nil)
   }
 
-  def getDescendants(path: List[String]): JArray = {
+  protected def getDescendants(path: List[String]): JArray = {
     val uri = path match {
       // retrieve all items if path is the root path
       case p if p == this.path && S.param("item").isEmpty => URIs.createURI("")
@@ -425,7 +416,7 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     JArray(descendants.toList)
   }
 
-  def getProperties(path: List[String]): JArray = {
+  protected def getProperties(path: List[String]): JArray = {
     val uri = getSingleItem(path)
     val properties = store.properties(uri, contextModelUri).iterator.asScala.map {
       uri => JObject(JField("@id", uri.toString) :: Nil)
@@ -433,5 +424,5 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
     JArray(properties.toList)
   }
 
-  def contextModelUri: URI = Data.currentModel.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT)
+  protected def contextModelUri: URI = Data.currentModel.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT)
 }

@@ -20,7 +20,6 @@ import io.github.linkedfactory.core.kvin.http.KvinHttp;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.core.kvin.util.KvinTupleGenerator;
 import io.github.linkedfactory.service.KvinService;
-import io.github.linkedfactory.service.KvinServiceTestBase;
 import io.github.linkedfactory.service.MockHttpServletRequest;
 import net.enilink.komma.core.KommaModule;
 import net.enilink.komma.core.URI;
@@ -93,10 +92,12 @@ public class KvinHttpTest extends Mockito {
 	}
 
 	@BeforeClass
-	public static void setupClass() throws ClassNotFoundException {
+	public static void setupClass() {
 		// create configuration and a model set factory
-		KommaModule module = ModelPlugin.createModelSetModule(Class.forName("net.enilink.komma.model.ModelPlugin").getClassLoader());
-		IModelSetFactory factory = (IModelSetFactory) Guice.createInjector(new ModelSetModule(module)).getInstance(Class.forName("net.enilink.komma.model.IModelSetFactory"));
+		KommaModule module = ModelPlugin.createModelSetModule(ModelPlugin.class.getClassLoader());
+		IModelSetFactory factory =
+				Guice.createInjector(new ModelSetModule(module))
+						.getInstance(IModelSetFactory.class);
 		// create a model set with an in-memory repository
 		modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"));
 		Globals.contextModelSet().theDefault().set(VendorJ.vendor(new Full(modelSet)));

@@ -30,14 +30,14 @@ public class InnerJoinIteratorEvaluationStep implements BatchQueryEvaluationStep
 	}
 
 	@Override
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bindingSet) {
+	public CloseableIteration<BindingSet> evaluate(BindingSet bindingSet) {
 		return new InnerJoinIterator(strategy, executorService,
 				leftPrepared, rightPrepared, List.of(bindingSet), lateral, async
 		);
 	}
 
 	@Override
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(List<BindingSet> bindingSets) {
+	public CloseableIteration<BindingSet> evaluate(List<BindingSet> bindingSets) {
 		return new InnerJoinIterator(strategy, executorService,
 				leftPrepared, rightPrepared, bindingSets, lateral, async
 		);

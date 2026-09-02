@@ -15,9 +15,6 @@
  */
 package io.github.linkedfactory.service
 
-import net.enilink.komma.core.URI
-import org.osgi.service.event.Event
-
 /**
  * Constants to send item data events with OSGi event admin.
  */

@@ -6,7 +6,7 @@
 	<parent>
 		<groupId>io.github.linkedfactory</groupId>
 		<artifactId>linkedfactory-parent</artifactId>
-		<version>1.2.0-SNAPSHOT</version>
+		<version>1.3.0-SNAPSHOT</version>
 		<relativePath>../../pom.xml</relativePath>
 	</parent>
 
@@ -18,11 +18,17 @@
 			<artifactId>net.enilink.platform.feature</artifactId>
 			<version>${enilink.version}</version>
 			<type>pom</type>
+			<exclusions>
+				<exclusion>
+					<groupId>org.opendaylight.controller</groupId>
+					<artifactId>scala3-library</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.paho</groupId>
 			<artifactId>org.eclipse.paho.client.mqttv3</artifactId>
-			<version>1.0.2</version>
+			<version>1.2.5</version>
 		</dependency>
 		<dependency>
 			<groupId>io.github.linkedfactory</groupId>
@@ -32,13 +38,27 @@
 		<dependency>
 			<groupId>org.osgi</groupId>
 			<artifactId>osgi.core</artifactId>
-			<version>7.0.0</version>
+			<version>8.0.0</version>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.osgi</groupId>
-			<artifactId>osgi.cmpn</artifactId>
-			<version>7.0.0</version>
+			<artifactId>org.osgi.service.component</artifactId>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>org.osgi.service.component.annotations</artifactId>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>org.osgi.service.cm</artifactId>
+			<!-- required at runtime by Apache HTTP Client and therefore not provided -->
+		</dependency>
+		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>org.osgi.service.event</artifactId>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
@@ -49,12 +69,12 @@
 		<dependency>
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-csv</artifactId>
-			<version>1.8</version>
+			<version>1.14.1</version>
 		</dependency>
 		<dependency>
 			<groupId>org.webjars.npm</groupId>
 			<artifactId>slickgrid</artifactId>
-			<version>2.4.9</version>
+			<version>5.18.6</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -66,25 +86,25 @@
 		<dependency>
 			<groupId>org.webjars.npm</groupId>
 			<artifactId>select2</artifactId>
-			<version>4.0.13</version>
+			<version>4.1.0</version>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.webjars.npm</groupId>
 			<artifactId>moment</artifactId>
-			<version>2.29.3</version>
+			<version>2.30.1</version>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.webjars.npm</groupId>
 			<artifactId>moment-timezone</artifactId>
-			<version>0.5.34</version>
+			<version>0.6.2</version>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.webjars.npm</groupId>
 			<artifactId>eonasdan-bootstrap-datetimepicker</artifactId>
-			<version>4.17.47</version>
+			<version>4.17.49</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -102,7 +122,7 @@
 		<dependency>
 			<groupId>org.webjars.npm</groupId>
 			<artifactId>d3</artifactId>
-			<version>7.4.4</version>
+			<version>7.9.0</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -113,50 +133,50 @@
 		<dependency>
 			<groupId>junit</groupId>
 			<artifactId>junit</artifactId>
-			<version>4.12</version>
+			<version>4.13.2</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.mockito</groupId>
 			<artifactId>mockito-core</artifactId>
-			<version>4.8.0</version>
+			<version>5.23.0</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.openjdk.jmh</groupId>
 			<artifactId>jmh-core</artifactId>
-			<version>1.35</version>
+			<version>1.37</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.openjdk.jmh</groupId>
 			<artifactId>jmh-generator-annprocess</artifactId>
-			<version>1.35</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>javax.servlet</groupId>
-			<artifactId>javax.servlet-api</artifactId>
-			<version>4.0.1</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.scalatest</groupId>
-			<artifactId>scalatest_${scala.major.version}</artifactId>
-			<version>3.1.1</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.scalatestplus</groupId>
-			<artifactId>scalatestplus-junit_${scala.major.version}</artifactId>
-			<version>1.0.0-M2</version>
+			<version>1.37</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>net.liftweb</groupId>
 			<artifactId>lift-testkit_${scala.major.version}</artifactId>
-			<version>3.5.0</version>
+			<version>4.0.0</version>
 			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>jakarta.servlet</groupId>
+			<artifactId>jakarta.servlet-api</artifactId>
+			<version>6.1.0</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.github.pcmind</groupId>
+			<artifactId>leveldb</artifactId>
+			<version>1.2</version>
+			<exclusions>
+				<exclusion>
+					<groupId>com.google.guava</groupId>
+					<artifactId>*</artifactId>
+				</exclusion>
+			</exclusions>
+			<scope>provided</scope>
 		</dependency>
 	</dependencies>
 
@@ -202,4 +222,55 @@
 			</plugin>
 		</plugins>
 	</build>
+
+	<profiles>
+		<profile>
+			<id>jmh</id>
+			<properties>
+				<jmh.includes>io.github.linkedfactory.service.benchmark.KvinIngestionBenchmark</jmh.includes>
+				<jmh.result.format>json</jmh.result.format>
+				<jmh.result.file>${project.build.directory}/jmh-result.json</jmh.result.file>
+				<jmh.warmups>3</jmh.warmups>
+				<jmh.warmup.time>3s</jmh.warmup.time>
+				<jmh.measurements>5</jmh.measurements>
+				<jmh.measurement.time>3s</jmh.measurement.time>
+				<jmh.forks>2</jmh.forks>
+				<jmh.temp.root></jmh.temp.root>
+			</properties>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.codehaus.mojo</groupId>
+						<artifactId>exec-maven-plugin</artifactId>
+						<version>3.5.0</version>
+						<configuration>
+							<executable>${java.home}/bin/java</executable>
+							<classpathScope>test</classpathScope>
+							<arguments>
+								<argument>-Djmh.temp.root=${jmh.temp.root}</argument>
+								<argument>-cp</argument>
+								<classpath/>
+								<argument>org.openjdk.jmh.Main</argument>
+								<argument>${jmh.includes}</argument>
+								<argument>-wi</argument>
+								<argument>${jmh.warmups}</argument>
+								<argument>-w</argument>
+								<argument>${jmh.warmup.time}</argument>
+								<argument>-i</argument>
+								<argument>${jmh.measurements}</argument>
+								<argument>-r</argument>
+								<argument>${jmh.measurement.time}</argument>
+								<argument>-f</argument>
+								<argument>${jmh.forks}</argument>
+								<argument>-rf</argument>
+								<argument>${jmh.result.format}</argument>
+								<argument>-rff</argument>
+								<argument>${jmh.result.file}</argument>
+							</arguments>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>

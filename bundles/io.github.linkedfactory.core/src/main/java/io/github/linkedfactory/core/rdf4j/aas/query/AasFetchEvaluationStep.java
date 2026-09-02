@@ -17,7 +17,7 @@ public class AasFetchEvaluationStep implements QueryEvaluationStep {
 	}
 
 	@Override
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(BindingSet bs) {
+	public CloseableIteration<BindingSet> evaluate(BindingSet bs) {
 		final Value subjectValue = AasEvaluationStrategy.getVarValue(fetch.getStatement().getSubjectVar(), bs);
 		if (subjectValue != null && subjectValue.stringValue().startsWith("aas-api:")) {
 			// this is an API call

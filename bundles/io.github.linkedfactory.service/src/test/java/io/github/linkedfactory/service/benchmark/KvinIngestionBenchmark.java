@@ -1,0 +1,312 @@
+package io.github.linkedfactory.service.benchmark;
+
+import com.google.inject.Guice;
+import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
+import io.github.linkedfactory.core.kvin.util.CsvFormatParser;
+import io.github.linkedfactory.core.kvin.util.JsonFormatParser;
+import io.github.linkedfactory.service.KvinService;
+import io.github.linkedfactory.service.MockHttpServletRequest;
+import net.enilink.commons.iterator.IExtendedIterator;
+import net.enilink.komma.core.KommaModule;
+import net.enilink.komma.core.URI;
+import net.enilink.komma.core.URIs;
+import net.enilink.komma.model.IModelSet;
+import net.enilink.komma.model.IModelSetFactory;
+import net.enilink.komma.model.MODELS;
+import net.enilink.komma.model.ModelPlugin;
+import net.enilink.komma.model.ModelSetModule;
+import net.enilink.platform.lift.util.Globals;
+import net.liftweb.common.Box;
+import net.liftweb.common.Empty$;
+import net.liftweb.common.Full;
+import net.liftweb.http.CurrentReq$;
+import net.liftweb.http.LiftResponse;
+import net.liftweb.http.Req;
+import net.liftweb.http.provider.servlet.HTTPRequestServlet;
+import net.liftweb.util.VendorJ;
+import org.json4s.JValue;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.OperationsPerInvocation;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
+import org.junit.Assert;
+import scala.Function0;
+import scala.PartialFunction;
+import scala.collection.immutable.Nil$;
+
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+@BenchmarkMode(Mode.Throughput)
+@OutputTimeUnit(TimeUnit.SECONDS)
+@Warmup(iterations = 3)
+@Measurement(iterations = 5)
+@Fork(2)
+@Threads(1)
+public class KvinIngestionBenchmark {
+	private static final int SEQUENTIAL_CSV_FILE_COUNT = 10;
+
+	@State(Scope.Thread)
+	public static class BenchmarkState {
+		private List<KvinIngestionWorkload> workloads;
+		private List<byte[]> jsonPayloadVariants;
+		private List<byte[]> csvPayloadVariants;
+		private List<List<byte[]>> csvPayloadPartitionVariants;
+		private int nextVariantIndex;
+		private KvinIngestionWorkload workload;
+		private IModelSet modelSet;
+		private KvinLevelDb store;
+		private File storeDirectory;
+		private KvinService service;
+		private KvinService parseOnlyService;
+		private byte[] jsonPayload;
+		private byte[] csvPayload;
+		private List<byte[]> csvPayloads;
+		private boolean measuredWrites;
+
+		@Setup(Level.Trial)
+		public void setupTrial() {
+			workloads = KvinIngestionWorkload.variants();
+			jsonPayloadVariants = workloads.stream().map(KvinIngestionWorkload::jsonPayload).toList();
+			csvPayloadVariants = workloads.stream().map(KvinIngestionWorkload::csvPayload).toList();
+			csvPayloadPartitionVariants = workloads.stream()
+					.map(variant -> variant.csvPayloads(SEQUENTIAL_CSV_FILE_COUNT)).toList();
+			nextVariantIndex = 0;
+			KommaModule module = ModelPlugin.createModelSetModule(getClass().getClassLoader());
+			IModelSetFactory factory = Guice.createInjector(new ModelSetModule(module))
+					.getInstance(IModelSetFactory.class);
+			modelSet = factory.createModelSet(MODELS.NAMESPACE_URI.appendFragment("MemoryModelSet"));
+			Globals.contextModelSet().theDefault().set(VendorJ.vendor(new Full(modelSet)));
+		}
+
+		@Setup(Level.Invocation)
+		public void setupInvocation() throws IOException {
+			int variantIndex = nextVariantIndex;
+			nextVariantIndex = (nextVariantIndex + 1) % KvinIngestionWorkload.VARIANT_COUNT;
+			workload = workloads.get(variantIndex);
+			jsonPayload = jsonPayloadVariants.get(variantIndex);
+			csvPayload = csvPayloadVariants.get(variantIndex);
+			csvPayloads = csvPayloadPartitionVariants.get(variantIndex);
+			String tempRoot = System.getProperty("jmh.temp.root", "");
+			Path directory = tempRoot.isEmpty()
+					? Files.createTempDirectory("kvin-ingestion-jmh-")
+					: Files.createTempDirectory(Path.of(tempRoot), "kvin-ingestion-jmh-");
+			storeDirectory = directory.toFile();
+			store = new KvinLevelDb(storeDirectory);
+			store.put(workload.preseedTuples());
+			service = new BenchmarkService(false);
+			parseOnlyService = new BenchmarkService(true);
+			measuredWrites = false;
+		}
+
+		@TearDown(Level.Invocation)
+		public void teardownInvocation() throws IOException {
+			try {
+				validateStore();
+			} finally {
+				if (store != null) {
+					store.close();
+					store = null;
+				}
+				if (storeDirectory != null) {
+					deleteDirectory(storeDirectory.toPath());
+					storeDirectory = null;
+				}
+			}
+		}
+
+		@TearDown(Level.Trial)
+		public void teardownTrial() {
+			if (modelSet != null) {
+				modelSet.dispose();
+				modelSet = null;
+			}
+		}
+
+		public void putBatch() {
+			store.put(workload.tuples());
+			measuredWrites = true;
+		}
+
+		public void postJson() throws IOException {
+			post(jsonPayload, "application/json", service, true);
+		}
+
+		public void postJsonParseOnly() throws IOException {
+			post(jsonPayload, "application/json", parseOnlyService, false);
+		}
+
+		public void postCsv() throws IOException {
+			post(csvPayload, "text/csv", service, true);
+		}
+
+		public void putCsvDirect() throws IOException {
+			CsvFormatParser parser = new CsvFormatParser(
+					URIs.createURI("http://foo.com/linkedfactory/"), ',',
+					new ByteArrayInputStream(csvPayload));
+			parser.setContext(KvinIngestionWorkload.CONTEXT);
+			try (IExtendedIterator<KvinTuple> tuples = parser.parse()) {
+				store.put(tuples);
+			}
+			measuredWrites = true;
+		}
+
+		public void postCsvSequentialFiles() throws IOException {
+			for (byte[] payload : csvPayloads) {
+				post(payload, "text/csv", service, true);
+			}
+		}
+
+		private void post(byte[] payload, String contentType, KvinService targetService,
+				boolean writesMeasuredTuples) throws IOException {
+			MockHttpServletRequest request = new MockHttpServletRequest("http://foo.com/linkedfactory/values");
+			request.method_$eq("POST");
+			request.body_$eq(payload);
+			request.contentType_$eq(contentType);
+			Req req = Req.apply(new HTTPRequestServlet(request, null),
+					Nil$.MODULE$.$colon$colon(PartialFunction.empty()), System.nanoTime());
+			Box<LiftResponse> result = targetService.apply(req).apply();
+			LiftResponse response = result.openOr(null);
+			if (response == null || response.toResponse().code() != 200) {
+				int status = response == null ? -1 : response.toResponse().code();
+				throw new IOException("KVIN ingestion request failed with HTTP status " + status);
+			}
+			if (writesMeasuredTuples) {
+				measuredWrites = true;
+			}
+		}
+
+		private class BenchmarkService extends KvinService {
+			private final boolean parseOnly;
+
+			private BenchmarkService(boolean parseOnly) {
+				super(Nil$.MODULE$.$colon$colon("linkedfactory"), store);
+				this.parseOnly = parseOnly;
+			}
+
+			@Override
+			public URI contextModelUri() {
+				return KvinIngestionWorkload.CONTEXT;
+			}
+
+			@Override
+			public Box<?> saveJsonValues(InputStream in, scala.collection.immutable.List<String> path, long currentTime) {
+				if (!parseOnly) {
+					return super.saveJsonValues(in, path, currentTime);
+				}
+				try {
+					new JsonFormatParser(in).parse(currentTime).toList(); // parse and discard the tuples
+				} catch (IOException e) {
+					throw new RuntimeException(e);
+				}
+				return Empty$.MODULE$;
+			}
+
+			@Override
+			public Function0<Box<LiftResponse>> apply(Req in) {
+				IModelSet currentModelSet = Globals.contextModelSet().vend().openOr(null);
+				return CurrentReq$.MODULE$.doWith(in, () -> {
+					try {
+						currentModelSet.getUnitOfWork().begin();
+						if (isDefinedAt(in)) {
+							return super.apply(in);
+						}
+						return (Function0) (() -> Box.legacyNullTest((LiftResponse) null));
+					} finally {
+						currentModelSet.getUnitOfWork().end();
+					}
+				});
+			}
+		}
+
+		private void validateStore() {
+			Set<KvinTuple> expected = new HashSet<>(workload.preseedTuples());
+			if (measuredWrites) {
+				expected.addAll(workload.tuples());
+			}
+			Set<KvinTuple> actual = new HashSet<>();
+			for (URI item : workload.items()) {
+				try (IExtendedIterator<KvinTuple> iterator = store.fetch(item, workload.property(),
+						KvinIngestionWorkload.CONTEXT, 0)) {
+					while (iterator.hasNext()) {
+						actual.add(iterator.next());
+					}
+				}
+			}
+			Assert.assertEquals("Unexpected persisted KVIN tuples", expected, actual);
+			Assert.assertEquals((measuredWrites ? KvinIngestionWorkload.TUPLE_COUNT : 0)
+					+ KvinIngestionWorkload.CHANNEL_COUNT, actual.size());
+		}
+
+		private static void deleteDirectory(Path directory) throws IOException {
+			if (!Files.exists(directory)) {
+				return;
+			}
+			Files.walkFileTree(directory, new SimpleFileVisitor<>() {
+				@Override
+				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+					Files.deleteIfExists(file);
+					return FileVisitResult.CONTINUE;
+				}
+
+				@Override
+				public FileVisitResult postVisitDirectory(Path dir, IOException exception) throws IOException {
+					Files.deleteIfExists(dir);
+					return FileVisitResult.CONTINUE;
+				}
+			});
+		}
+	}
+
+	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
+	public void putBatch(BenchmarkState state) {
+		state.putBatch();
+	}
+
+	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
+	public void postJson(BenchmarkState state) throws IOException {
+		state.postJson();
+	}
+
+	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
+	public void postCsv(BenchmarkState state) throws IOException {
+		state.postCsv();
+	}
+
+	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
+	public void putCsvDirect(BenchmarkState state) throws IOException {
+		state.putCsvDirect();
+	}
+
+	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
+	public void postCsvSequentialFiles(BenchmarkState state) throws IOException {
+		state.postCsvSequentialFiles();
+	}
+}

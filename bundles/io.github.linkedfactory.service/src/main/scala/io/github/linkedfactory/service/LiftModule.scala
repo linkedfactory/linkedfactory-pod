@@ -64,7 +64,7 @@ class LiftModule {
 
   var shutdownHooks: List[() => Any] = Nil
 
-  def boot {
+  def boot(): Unit = {
     // provide current context for Kvin operations
     Option(FrameworkUtil.getBundle(getClass)).foreach { bundle =>
       bundle.getBundleContext.registerService(classOf[ContextProvider], new ContextProvider {
@@ -114,9 +114,9 @@ class LiftModule {
               case _ => "http://localhost:" + s.port + "/"
             }
             val actor = new MockingDataActor(serverUrl, machines)
-            actor.start
+            actor.start()
             shutdownHooks :+= (() => {
-              actor.stop
+              actor.stop()
             })
             close()
             null
@@ -126,7 +126,7 @@ class LiftModule {
     }
   }
 
-  def shutdown {
+  def shutdown(): Unit = {
     shutdownHooks.reverse foreach (_())
   }
 }

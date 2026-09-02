@@ -191,6 +191,7 @@ select ?time ?value {
 ## Building
 * This is a plain Maven project
 * a full build can be executed via `mvn package`
+* KVIN ingestion benchmark instructions are in [docs/benchmarks/kvin-ingestion.md](docs/benchmarks/kvin-ingestion.md)
 
 ## Running 
 * change to the folder `launch/equinox`

@@ -41,7 +41,7 @@ public class FtsFederatedService implements FederatedService {
 		if (service.getBindingNames().isEmpty()) {
 			return false;
 		}
-		final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
+		final CloseableIteration<BindingSet> iter = evaluate(service,
 				new SingletonIteration<>(bindings), baseUri);
 		try {
 			while (iter.hasNext()) {
@@ -56,14 +56,14 @@ public class FtsFederatedService implements FederatedService {
 	}
 
 	@Override
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(Service service,
-			CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri) throws QueryEvaluationException {
+	public CloseableIteration<BindingSet> evaluate(Service service,
+			CloseableIteration<BindingSet> bindings, String baseUri) throws QueryEvaluationException {
 		if (!bindings.hasNext()) {
 			return new EmptyIteration<>();
 		}
 
 		FtsPattern pattern = extractPattern(service);
-		List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
+		List<CloseableIteration<BindingSet>> resultIters = new ArrayList<>();
 		while (bindings.hasNext()) {
 			BindingSet input = bindings.next();
 			FtsSearchRequest request = pattern.toRequest(input);
@@ -127,9 +127,9 @@ public class FtsFederatedService implements FederatedService {
 	}
 
 	@Override
-	public CloseableIteration<BindingSet, QueryEvaluationException> select(Service service, Set<String> projectionVars,
+	public CloseableIteration<BindingSet> select(Service service, Set<String> projectionVars,
 			BindingSet bindings, String baseUri) throws QueryEvaluationException {
-		final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
+		final CloseableIteration<BindingSet> iter = evaluate(service,
 				new SingletonIteration<>(bindings), baseUri);
 		if (service.getBindingNames().equals(projectionVars)) {
 			return iter;
@@ -250,7 +250,7 @@ public class FtsFederatedService implements FederatedService {
 		return a.getName().equals(b.getName());
 	}
 
-	private static CloseableIteration<BindingSet, QueryEvaluationException> toIteration(List<BindingSet> results) {
+	private static CloseableIteration<BindingSet> toIteration(List<BindingSet> results) {
 		return new CloseableIteration<>() {
 			private final Iterator<BindingSet> iterator = results.iterator();
 

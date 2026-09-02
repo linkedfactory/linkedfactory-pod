@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>io.github.linkedfactory</groupId>
 	<artifactId>linkedfactory-parent</artifactId>
-	<version>1.2.0-SNAPSHOT</version>
+	<version>1.3.0-SNAPSHOT</version>
 	<packaging>pom</packaging>
 
 	<organization>
@@ -16,17 +16,20 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<komma.version>1.9.0-SNAPSHOT</komma.version>
-		<enilink.version>1.7.0-SNAPSHOT</enilink.version>
-		<scala.major.version>2.13</scala.major.version>
-		<scala.version>2.13.12</scala.version>
-		<scala.plugin.version>4.8.1</scala.plugin.version>
-		<karaf.tooling.version>4.4.7</karaf.tooling.version>
-		<karaf.version>4.4.7</karaf.version>
+		<komma.version>1.10.0-SNAPSHOT</komma.version>
+		<enilink.version>1.8.0-SNAPSHOT</enilink.version>
+		<scala.major.version>3</scala.major.version>
+		<scala.version>3.8.4</scala.version>
+		<scala.plugin.version>4.9.10</scala.plugin.version>
+		<karaf.tooling.version>4.5.0-SNAPSHOT</karaf.tooling.version>
+		<karaf.version>4.5.0-SNAPSHOT</karaf.version>
+		<bnd.version>7.3.0</bnd.version>
+		<slf4j.version>2.0.18</slf4j.version>
 
-		<bnd.version>7.1.0</bnd.version>
-		<linkedfactory.scm.connection>scm:git:git://github.com:linkedfactory/linkedfactory-pod.git</linkedfactory.scm.connection>
-		<linkedfactory.scm.developerConnection>scm:git:git@github.com:linkedfactory/linkedfactory-pod.git</linkedfactory.scm.developerConnection>
+		<linkedfactory.scm.connection>scm:git:git://github.com:linkedfactory/linkedfactory-pod.git
+		</linkedfactory.scm.connection>
+		<linkedfactory.scm.developerConnection>scm:git:git@github.com:linkedfactory/linkedfactory-pod.git
+		</linkedfactory.scm.developerConnection>
 		<linkedfactory.scm.url>https://github.com/linkedfactory/linkedfactory-pod</linkedfactory.scm.url>
 	</properties>
 
@@ -85,7 +88,8 @@
 				</executions>
 				<configuration>
 					<generateGitPropertiesFile>true</generateGitPropertiesFile>
-					<generateGitPropertiesFilename>${project.build.outputDirectory}/git.properties</generateGitPropertiesFilename>
+					<generateGitPropertiesFilename>${project.build.outputDirectory}/git.properties
+					</generateGitPropertiesFilename>
 					<includeOnlyProperties>
 						<includeOnlyProperty>^git.build.(time|version)$</includeOnlyProperty>
 						<includeOnlyProperty>^git.commit.id.(abbrev|full)$</includeOnlyProperty>
@@ -100,9 +104,9 @@
 				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-compiler-plugin</artifactId>
-					<version>3.12.1</version>
+					<version>3.15.0</version>
 					<configuration>
-						<release>17</release>
+						<release>21</release>
 					</configuration>
 				</plugin>
 
@@ -181,7 +185,7 @@
 				<plugin>
 					<groupId>org.codehaus.mojo</groupId>
 					<artifactId>versions-maven-plugin</artifactId>
-					<version>2.16.2</version>
+					<version>2.21.0</version>
 				</plugin>
 
 				<!-- Configuration for Eclipse M2E -->
@@ -237,11 +241,41 @@
 		</resources>
 	</build>
 
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>osgi.core</artifactId>
+				<version>8.0.0</version>
+			</dependency>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>org.osgi.service.component</artifactId>
+				<version>1.5.1</version>
+			</dependency>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>org.osgi.service.component.annotations</artifactId>
+				<version>1.5.1</version>
+			</dependency>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>org.osgi.service.cm</artifactId>
+				<version>1.6.1</version>
+			</dependency>
+			<dependency>
+				<groupId>org.osgi</groupId>
+				<artifactId>org.osgi.service.event</artifactId>
+				<version>1.4.1</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
 	<dependencies>
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-simple</artifactId>
-			<version>1.7.30</version>
+			<version>2.1.0-alpha1</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -296,6 +330,19 @@
 		</profile>
 	</profiles>
 
+	<pluginRepositories>
+		<pluginRepository>
+			<releases>
+				<enabled>false</enabled>
+			</releases>
+			<snapshots>
+				<enabled>true</enabled>
+			</snapshots>
+			<id>apache-snapshots</id>
+			<url>https://repository.apache.org/snapshots/</url>
+		</pluginRepository>
+	</pluginRepositories>
+
 	<repositories>
 		<repository>
 			<releases>
@@ -306,6 +353,16 @@
 			</snapshots>
 			<id>central-snapshots</id>
 			<url>https://central.sonatype.com/repository/maven-snapshots/</url>
+		</repository>
+		<repository>
+			<releases>
+				<enabled>false</enabled>
+			</releases>
+			<snapshots>
+				<enabled>true</enabled>
+			</snapshots>
+			<id>apache-snapshots</id>
+			<url>https://repository.apache.org/snapshots/</url>
 		</repository>
 	</repositories>
 

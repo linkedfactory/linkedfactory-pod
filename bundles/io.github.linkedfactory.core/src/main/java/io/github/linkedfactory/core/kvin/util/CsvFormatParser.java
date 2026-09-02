@@ -43,7 +43,7 @@ import java.util.regex.Pattern;
 
 public class CsvFormatParser {
 	protected final static Logger logger = LoggerFactory.getLogger(CsvFormatParser.class);
-	protected final static Pattern itemProperty = Pattern.compile("(?:((?:\\@|\\>|[^>@])+)@)?((?:\\@|\\>|[^>@])+)");
+	protected final static Pattern itemProperty = Pattern.compile("(?:((?:@|>|[^>@])+)@)?((?:@|>|[^>@])+)");
 	protected final URI base;
 	protected final List<Pair<URI, URI>> itemProperties;
 	protected CSVReader csvReader;
@@ -58,7 +58,6 @@ public class CsvFormatParser {
 				.withSeparator(separator)
 				.withIgnoreQuotations(true)
 				.build();
-
 		csvReader = new CSVReaderBuilder(new InputStreamReader(content))
 				.withSkipLines(0)
 				.withCSVParser(parser)
@@ -82,22 +81,38 @@ public class CsvFormatParser {
 		}
 		URI uri;
 		if (uriOrName.startsWith("<") && uriOrName.endsWith(">")) {
-			uri = JsonFormatParser.createURI(uriOrName.substring(1, uriOrName.length() - 1));
+			uri = createURI(uriOrName.substring(1, uriOrName.length() - 1));
 		} else if (uriOrName.isEmpty()) {
 			uri = base;
 		} else {
-			uri = JsonFormatParser.createURI(uriOrName);
-			if (uri.isRelative()) {
-				uri = base.appendLocalPart(uriOrName);
-			}
+			uri = createURI(uriOrName);
 		}
 		return uri;
+	}
+
+	protected URI createURI(String uriString) {
+		if (uriString == null || uriString.isEmpty()) {
+			throw new IllegalArgumentException("URI string is null or empty");
+		}
+		if (containsWhitespace(uriString)) {
+			throw new IllegalArgumentException("URI string contains whitespace: '" + uriString + "'");
+		}
+		// Further URI validation can be added here if needed
+		var result = URIs.createURI(uriString);
+		if (result.isRelative()) {
+			if (base.isHierarchical()) {
+				return result.resolve(base);
+			} else {
+				return base.appendLocalPart(uriString);
+			}
+		}
+		return result;
 	}
 
 	int findSeqNrColumn(String[] header) {
 		// first column is time column
 		for (int i = 1; i < header.length; i++) {
-			if (header [i] != null && header[i].trim().equals("seqNr")) {
+			if (header[i] != null && header[i].trim().equals("seqNr")) {
 				return i;
 			}
 		}
@@ -115,7 +130,6 @@ public class CsvFormatParser {
 				itemProperties.add(null);
 				continue;
 			}
-
 			Matcher m = itemProperty.matcher(header[i].trim());
 			if (m.matches()) {
 				URI itemUri = toUri(m.group(1));
@@ -182,7 +196,6 @@ public class CsvFormatParser {
 									break;
 								}
 							}
-
 							Pair<URI, URI> itemProperty = itemProperties.get(column);
 							if (itemProperty != null && column < line.length) {
 								String valueStr = line[column].trim();
@@ -254,11 +267,11 @@ public class CsvFormatParser {
 			String cleanedValueStr;
 			if (valueStr.lastIndexOf(',') < valueStr.lastIndexOf('.')) {
 				// convert numbers like 123,456.78 to 123456.78
-				cleanedValueStr = valueStr.replaceAll(",", "");
+				cleanedValueStr = valueStr.replace(",", "");
 			} else {
 				// convert numbers like 123.456,78 to 123456.78
-				cleanedValueStr = valueStr.replaceAll("[.]", "")
-						.replaceAll(",", ".");
+				cleanedValueStr = valueStr.replace(".", "")
+						.replace(",", ".");
 			}
 			doubleValue = Doubles.tryParse(cleanedValueStr);
 		}
@@ -280,5 +293,19 @@ public class CsvFormatParser {
 
 	public URI getContext() {
 		return context;
+	}
+
+	protected static boolean containsWhitespace(String str) {
+		if (str == null || str.isEmpty()) {
+			return false;
+		}
+
+		int length = str.length();
+		for (int i = 0; i < length; i++) {
+			if (Character.isWhitespace(str.charAt(i))) {
+				return true; // Short-circuits the moment whitespace is found
+			}
+		}
+		return false;
 	}
 }

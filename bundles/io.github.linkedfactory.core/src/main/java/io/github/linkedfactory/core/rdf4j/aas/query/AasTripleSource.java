@@ -14,7 +14,7 @@ class AasTripleSource implements TripleSource {
 	}
 
 	@Override
-	public CloseableIteration<? extends Statement, QueryEvaluationException> getStatements(Resource s, IRI p, Value o,
+	public CloseableIteration<? extends Statement> getStatements(Resource s, IRI p, Value o,
 			Resource... ctx) throws QueryEvaluationException {
 		return new EmptyIteration<>();
 	}

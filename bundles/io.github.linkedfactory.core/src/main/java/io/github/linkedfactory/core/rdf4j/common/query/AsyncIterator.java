@@ -12,7 +12,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-public class AsyncIterator<T> implements CloseableIteration<T, QueryEvaluationException> {
+public class AsyncIterator<T> implements CloseableIteration<T> {
 	static final Logger log = LoggerFactory.getLogger(AsyncIterator.class);
 
 	static final Object NULL_ELEMENT = new Object();
@@ -20,7 +20,7 @@ public class AsyncIterator<T> implements CloseableIteration<T, QueryEvaluationEx
 	volatile boolean closed = false;
 	T next;
 
-	public AsyncIterator(Supplier<CloseableIteration<T, QueryEvaluationException>> base, Supplier<ExecutorService> executorService) {
+	public AsyncIterator(Supplier<CloseableIteration<T>> base, Supplier<ExecutorService> executorService) {
 		nextElements = new ArrayBlockingQueue<>(100);
 		var currentAsync = InnerJoinIterator.asyncDepth.get();
 		executorService.get().submit(() -> {

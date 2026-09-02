@@ -18,16 +18,17 @@ import org.junit.{AfterClass, BeforeClass, Test}
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, File, IOException}
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
-import javax.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletRequest
 import scala.util.Random
+import scala.compiletime.uninitialized
 
 /**
  * Companion object of unit tests for the KVIN service endpoint
  */
 object KvinServiceTest {
   var modelSet: IModelSet = null
-  var storeDirectory: File = _
-  var store: Kvin = _
+  var storeDirectory: File = uninitialized
+  var store: Kvin = uninitialized
   val base: KvinServiceTestBase = new KvinServiceTestBase()
 
   @BeforeClass
@@ -44,7 +45,7 @@ object KvinServiceTest {
     TestData.item1 = KvinServiceTest.base.generateJsonFromSingleTuple()
     TestData.itemSet = KvinServiceTest.base.generateJsonFromTupleSet()
 
-    createStore
+    createStore()
   }
 
   @AfterClass
@@ -52,18 +53,18 @@ object KvinServiceTest {
     modelSet.dispose()
     modelSet = null
 
-    store.close
+    store.close()
     store = null
     deleteDirectory(storeDirectory.toPath)
   }
 
-  def createStore {
+  def createStore(): Unit = {
     storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis + "-" + Random.nextInt(1000) + "/")
-    storeDirectory.deleteOnExit
+    storeDirectory.deleteOnExit()
     store = new KvinLevelDb(storeDirectory)
   }
 
-  def deleteDirectory(dir: Path) {
+  def deleteDirectory(dir: Path): Unit = {
     // delete store directory
     Files.walkFileTree(dir, new SimpleFileVisitor[Path]() {
       override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = {
@@ -88,7 +89,7 @@ object TestData {
  * Unit tests for the KVIN service endpoint
  */
 class KvinServiceTest {
-  val kvinService = new KvinService("linkedfactory" :: Nil, KvinServiceTest.store) {
+  private val kvinService: KvinService = new KvinService("linkedfactory" :: Nil, KvinServiceTest.store) {
     override def apply(in: Req): () => Box[LiftResponse] = {
       try {
         Globals.contextModelSet.vend.map(_.getUnitOfWork.begin)
@@ -257,19 +258,18 @@ class KvinServiceTest {
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
     val stringResponse: String = responseBody(response)
 
-    val kvinTuples: NiceIterator[KvinTuple] = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
+    val kvinTuples = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
     while (kvinTuples.hasNext) {
       val tuple: KvinTuple = kvinTuples.next()
       assertEquals(tuple.item.toString, "http://example.org/item1")
       assertEquals(tuple.property.toString, "http://example.org/properties/p1")
-      assertEquals(tuple.time, 1619424246120l)
+      assertEquals(tuple.time, 1619424246120L)
       assertEquals(tuple.value.toString, "57.934878949512196")
     }
   }
 
   @Test
   def queryDataWithLimitTest(): Unit = {
-
     val postReq = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       body_=(TestData.itemSet, "application/json")
@@ -285,13 +285,12 @@ class KvinServiceTest {
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
     val stringResponse: String = responseBody(response)
 
-    val kvinTuples: NiceIterator[KvinTuple] = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
+    val kvinTuples = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
     assertEquals(kvinTuples.toList.size(), 2)
   }
 
   @Test
   def queryDataWithOpTest(): Unit = {
-
     val postReq = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       body_=(TestData.itemSet, "application/json")
@@ -308,7 +307,7 @@ class KvinServiceTest {
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
     val stringResponse: String = responseBody(response)
 
-    val kvinTuples: NiceIterator[KvinTuple] = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
+    val kvinTuples = new JsonFormatParser(new ByteArrayInputStream(stringResponse.getBytes())).parse()
     var count = 0
     while (kvinTuples.hasNext) {
       val tuple: KvinTuple = kvinTuples.next()
@@ -324,8 +323,7 @@ class KvinServiceTest {
   }
 
   @Test
-  def getPropertiesTest(): Unit = {
-
+  def retrievePropertiesTest(): Unit = {
     val postReq = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       body_=(TestData.item1, "application/json")

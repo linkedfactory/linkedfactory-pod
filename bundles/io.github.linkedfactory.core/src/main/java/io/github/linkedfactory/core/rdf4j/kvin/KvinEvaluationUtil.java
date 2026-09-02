@@ -69,7 +69,7 @@ public class KvinEvaluationUtil {
 		return null;
 	}
 
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
+	public CloseableIteration<BindingSet> evaluate(
 			KvinEvaluationStrategy strategy,
 			BindingSet bs, Parameters params, StatementPattern stmt, Dataset dataset) {
 		net.enilink.komma.core.URI item = toKommaUri(getVarValue(stmt.getSubjectVar(), bs));
@@ -92,7 +92,7 @@ public class KvinEvaluationUtil {
 				toKommaUri(contextValue), pv, params, bs, stmt, dataset);
 	}
 
-	protected CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
+	protected CloseableIteration<BindingSet> evaluate(
 			KvinEvaluationStrategy strategy, List<URI> items, List<URI> properties, URI context,
 			ParameterValues pv, Parameters params, BindingSet baseBindings, StatementPattern stmt, Dataset dataset) {
 		final ValueFactory vf = strategy.getValueFactory();
@@ -148,7 +148,7 @@ public class KvinEvaluationUtil {
 				(!objectVar.isAnonymous() || strategy.getScanner().hasReferences(objectVar));
 		final Var predVar = stmt.getPredicateVar();
 		final long beginFinal = begin, endFinal = end, limitFinal = limit;
-		final CloseableIteration<BindingSet, QueryEvaluationException> iteration = new AbstractCloseableIteration<BindingSet, QueryEvaluationException>() {
+		final CloseableIteration<BindingSet> iteration = new AbstractCloseableIteration<BindingSet>() {
 			final Thread creator = Thread.currentThread();
 			IExtendedIterator<KvinTuple> it;
 			URI currentProperty;
@@ -302,7 +302,7 @@ public class KvinEvaluationUtil {
 		return iteration;
 	}
 
-	public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(
+	public CloseableIteration<BindingSet> evaluate(
 			KvinEvaluationStrategy strategy, List<BindingSet> bindingSets, Parameters params,
 			StatementPattern stmt, Dataset dataset) {
 		final Var subjectVar = stmt.getSubjectVar();
@@ -311,8 +311,8 @@ public class KvinEvaluationUtil {
 		return new AbstractCloseableIteration<>() {
 			ParameterValues pv;
 			Value contextValue;
-			final List<CloseableIteration<BindingSet, QueryEvaluationException>> iterators = new ArrayList<>(5);
-			CloseableIteration<BindingSet, QueryEvaluationException> it;
+			final List<CloseableIteration<BindingSet>> iterators = new ArrayList<>(5);
+			CloseableIteration<BindingSet> it;
 			BindingSet last, savedNext;
 			final Map<Value, Set<Value>> currentItems = new LinkedHashMap<>();
 

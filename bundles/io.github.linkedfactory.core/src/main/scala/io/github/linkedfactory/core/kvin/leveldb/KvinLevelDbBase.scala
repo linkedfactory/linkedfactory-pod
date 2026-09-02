@@ -25,6 +25,7 @@ import java.util
 import java.util.Collections
 import java.util.concurrent.{ConcurrentHashMap, Executors, ScheduledExecutorService}
 import scala.util.matching.Regex
+import scala.compiletime.uninitialized
 
 /**
  * Common base functions for LevelDB based value stores.
@@ -38,7 +39,7 @@ trait KvinLevelDbBase {
 
   abstract class StoreIterator[T](base: DBIterator) extends NiceIterator[T] {
     var open = true
-    var current: T = _
+    var current: T = uninitialized
 
     override def hasNext: Boolean = {
       if (current != null) true

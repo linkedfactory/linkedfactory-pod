@@ -50,7 +50,7 @@ public class AasFederatedService implements FederatedService {
         // ensures that original expression string is used
         service = parseExpression(service, baseUri);
 
-        final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
+        final CloseableIteration<BindingSet> iter = evaluate(service,
                 new SingletonIteration<>(bindings), baseUri);
         try {
             while (iter.hasNext()) {
@@ -86,8 +86,8 @@ public class AasFederatedService implements FederatedService {
     }
 
     @Override
-    public CloseableIteration<BindingSet, QueryEvaluationException> evaluate(Service service,
-                                                                             CloseableIteration<BindingSet, QueryEvaluationException> bindings, String baseUri)
+    public CloseableIteration<BindingSet> evaluate(Service service,
+                                                                             CloseableIteration<BindingSet> bindings, String baseUri)
             throws QueryEvaluationException {
         if (!bindings.hasNext()) {
             return new EmptyIteration<>();
@@ -121,12 +121,12 @@ public class AasFederatedService implements FederatedService {
         }
 
         // for debugging purposes
-        System.out.println(service);
+        // System.out.println(service);
 
         Map<Value, Object> valueToData = new WeakHashMap<>();
         EvaluationStrategy strategy = new AasEvaluationStrategy(client, executorService, scanner, vf, null, null, valueToData);
 
-        List<CloseableIteration<BindingSet, QueryEvaluationException>> resultIters = new ArrayList<>();
+        List<CloseableIteration<BindingSet>> resultIters = new ArrayList<>();
         while (bindings.hasNext()) {
             BindingSet bs = bindings.next();
             resultIters.add(strategy.evaluate(service.getArg(), bs));
@@ -146,12 +146,12 @@ public class AasFederatedService implements FederatedService {
     }
 
     @Override
-    public CloseableIteration<BindingSet, QueryEvaluationException> select(Service service,
+    public CloseableIteration<BindingSet> select(Service service,
                                                                            final Set<String> projectionVars, BindingSet bindings, String baseUri) throws QueryEvaluationException {
         // ensures that original expression string is used
         service = parseExpression(service, baseUri);
 
-        final CloseableIteration<BindingSet, QueryEvaluationException> iter = evaluate(service,
+        final CloseableIteration<BindingSet> iter = evaluate(service,
                 new SingletonIteration<>(bindings), baseUri);
         if (service.getBindingNames().equals(projectionVars)) {
             return iter;

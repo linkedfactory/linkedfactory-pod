@@ -9,7 +9,7 @@
 @prefix config: <enilink:config/> .
 
 # set query timeout to 60 seconds
-config: config:queryTimeout 60000 .
+config: config:queryTimeout 200000 .
 
 # import definition of administrators group
 <> owl:imports <platform:/plugin/net.enilink.platform.core/config/group-admin.ttl> .
@@ -38,11 +38,11 @@ group:Administrators foaf:member user:admin .
 
 <urn:enilink:metadata> a models:PersistentModelSet ;
     models:inference false ;
-    models:repository <workspace:/dtsc-test/meta/> .
+    models:repository <workspace:/genius/meta/> .
 
 <urn:enilink:data> a models:KvinPersistentModelSet ;
     models:inference false ;
-    models:repository <workspace:/dtsc-test/data/> .
+    models:repository <workspace:/genius/data/> .
 
 @prefix login: <plugin://net.enilink.platform.core/Login/> .
 login: login:jaasConfigUrl <jaas.conf> ;

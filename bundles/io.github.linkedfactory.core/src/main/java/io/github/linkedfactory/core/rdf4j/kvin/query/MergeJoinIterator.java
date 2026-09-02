@@ -32,7 +32,7 @@ import org.eclipse.rdf4j.query.algebra.evaluation.impl.QueryEvaluationContext;
  * @author Håvard M. Ottestad
  */
 @Experimental
-public class MergeJoinIterator<V> implements CloseableIteration<BindingSet, QueryEvaluationException> {
+public class MergeJoinIterator<V> implements CloseableIteration<BindingSet> {
 
 	private final PeekMarkIterator<BindingSet> leftIterator;
 	private final PeekMarkIterator<BindingSet> rightIterator;
@@ -58,17 +58,17 @@ public class MergeJoinIterator<V> implements CloseableIteration<BindingSet, Quer
 		this.leftOuter = leftOuter;
 	}
 
-	public static <V> CloseableIteration<BindingSet, QueryEvaluationException> getInstance(QueryEvaluationStep leftPrepared, QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp, Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService) {
+	public static <V> CloseableIteration<BindingSet> getInstance(QueryEvaluationStep leftPrepared, QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp, Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService) {
 		return getInstance(leftPrepared, preparedRight, bindings, cmp, value, context, executorService, false);
 	}
 
-	public static <V> CloseableIteration<BindingSet, QueryEvaluationException> getInstance(QueryEvaluationStep leftPrepared, QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp, Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService, boolean leftOuter) {
-		CloseableIteration<BindingSet, QueryEvaluationException> leftIter = leftPrepared.evaluate(bindings);
+	public static <V> CloseableIteration<BindingSet> getInstance(QueryEvaluationStep leftPrepared, QueryEvaluationStep preparedRight, BindingSet bindings, Comparator<V> cmp, Function<BindingSet, V> value, QueryEvaluationContext context, Supplier<ExecutorService> executorService, boolean leftOuter) {
+		CloseableIteration<BindingSet> leftIter = leftPrepared.evaluate(bindings);
 		if (leftIter == QueryEvaluationStep.EMPTY_ITERATION) {
 			return leftIter;
 		}
 
-		CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
+		CloseableIteration<BindingSet> rightIter;
 		if (InnerJoinIterator.asyncDepth.get() == null || InnerJoinIterator.asyncDepth.get() < InnerJoinIterator.MAX_ASYNC_DEPTH) {
 			rightIter = new AsyncIterator<>(() -> preparedRight.evaluate(bindings), executorService);
 		} else {

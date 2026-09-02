@@ -20,7 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvaluationException> {
+public class InnerJoinIterator extends LookAheadIteration<BindingSet> {
 	private static final Logger log = LoggerFactory.getLogger(InnerJoinIterator.class);
 
 	/*-----------*
@@ -33,10 +33,10 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 	public static final int BATCH_SIZE = 200;
 	private final EvaluationStrategy strategy;
 	private final Supplier<ExecutorService> executorService;
-	private final CloseableIteration<BindingSet, QueryEvaluationException> leftIter;
+	private final CloseableIteration<BindingSet> leftIter;
 	private final QueryEvaluationStep preparedJoinArg;
 	private final List<BlockingQueue<BindingSet>> joined;
-	private volatile CloseableIteration<BindingSet, QueryEvaluationException> rightIter;
+	private volatile CloseableIteration<BindingSet> rightIter;
 
 	/*--------------*
 	 * Constructors *
@@ -47,7 +47,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 		this.strategy = strategy;
 		this.executorService = executorService;
 
-		CloseableIteration<BindingSet, QueryEvaluationException> leftIt = BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets);
+		CloseableIteration<BindingSet> leftIt = BatchQueryEvaluationStep.evaluate(leftPrepared, bindingSets);
 		if (leftIt.hasNext() || lateral) {
 			preparedJoinArg = rightPrepared;
 		} else {
@@ -150,7 +150,7 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 			var currentAsync = asyncDepth.get();
 			executorService.get().submit(() -> {
 				asyncDepth.set(currentAsync != null ? currentAsync + 1 : 1);
-				CloseableIteration<BindingSet, QueryEvaluationException> rightIt = null;
+				CloseableIteration<BindingSet> rightIt = null;
 				try {
 					rightIt = useBatch && nextLefts.size() > 1 ?
 							((BatchQueryEvaluationStep) preparedJoinArg).evaluate(nextLefts) :
@@ -189,8 +189,6 @@ public class InnerJoinIterator extends LookAheadIteration<BindingSet, QueryEvalu
 
 	@Override
 	protected void handleClose() throws QueryEvaluationException {
-		super.handleClose();
-
 		leftIter.close();
 		rightIter.close();
 	}

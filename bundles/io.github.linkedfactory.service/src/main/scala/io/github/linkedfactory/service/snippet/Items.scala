@@ -36,7 +36,6 @@ class Items {
       val result = if (item.getURI != null && Data.kvin.isDefined) {
         if (Data.kvin.get.delete(item.getURI, Globals.contextModel.vend.map(_.getURI).openOr(Kvin.DEFAULT_CONTEXT))) {
           item.getEntityManager.removeRecursive(item, true)
-          Full(Alert("Test"))
         }
         Empty
       } else Empty

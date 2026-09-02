@@ -39,9 +39,10 @@ import java.util.concurrent.Executors
 import javax.security.auth.Subject
 import scala.jdk.CollectionConverters._
 import scala.reflect.{ClassTag, classTag}
+import scala.compiletime.uninitialized
 
 object Data {
-  val log = LoggerFactory.getLogger(getClass)
+  private val log = LoggerFactory.getLogger(getClass)
 
   val NAMESPACE = "http://linkedfactory.github.io/vocab#"
   val PROPERTY_CONTAINS = URIs.createURI(NAMESPACE + "contains")
@@ -49,13 +50,13 @@ object Data {
   val cfgUri = URIs.createURI("plugin://io.github.linkedfactory.service/data/")
   val dateFormat = new SimpleDateFormat("dd/MM/yyyy hh:mm:ss")
 
-  val bundleContext = Option(FrameworkUtil.getBundle(getClass)).map(_.getBundleContext).getOrElse(null)
+  val bundleContext = Option(FrameworkUtil.getBundle(getClass)).map(_.getBundleContext).orNull
   val instanceLoc = if (bundleContext != null) Platform.getInstanceLocation else null
 
-  def toPEA[T](func: () => T): PrivilegedExceptionAction[T] = { () => func() }
+  private def toPEA[T](func: () => T): PrivilegedExceptionAction[T] = { () => func() }
 
   // FIXME: make withPluginConfig return a result, use val from result
-  private var _modelURI: URI = _
+  private var _modelURI: URI = uninitialized
 
   if (bundleContext != null) {
     // configure default model
@@ -80,12 +81,12 @@ object Data {
     .expireAfterWrite(10, TimeUnit.SECONDS)
     .build[URI, Any]()
 
-  val modelURI = _modelURI
+  private val modelURI = _modelURI
 
   // caches currentModel for each request
   object modelForRequest extends RequestVar[Box[IModel]](currentModel)
 
-  def getKvin(): Option[Kvin] = {
+  private def getKvin(): Option[Kvin] = {
     Option(bundleContext).flatMap(ctx =>
       Option(ctx.getServiceReference(classOf[Kvin])).map(ref => ctx.getService(ref)))
   }
@@ -123,7 +124,7 @@ object Data {
           // disable change support
           modelSet.getDataChangeSupport.setDefaultEnabled(false)
 
-          modelSet.getUnitOfWork.begin
+          modelSet.getUnitOfWork.begin()
 
           modelSet.getModule.includeModule(new KommaModule() {
             addConcept(classOf[Observation])
@@ -139,14 +140,14 @@ object Data {
 
           init(dataModel, kvin)
         } finally {
-          modelSet.getUnitOfWork.end
+          modelSet.getUnitOfWork.end()
         }
       }
     ))
     kvin
   }
 
-  private def createHierarchy(uri: URI, em: IEntityManager) {
+  private def createHierarchy(uri: URI, em: IEntityManager): Unit = {
     // add hierarchy to RDF store
     var current = uri
     var done = false
@@ -161,7 +162,7 @@ object Data {
     }
   }
 
-  private def init(model: IModel, kvin: Kvin) {
+  private def init(model: IModel, kvin: Kvin): Unit = {
     import io.github.linkedfactory.service.util.ResourceHelpers._
     withTransaction(model.getManager) {
       manager =>
@@ -181,7 +182,7 @@ object Data {
   }
 
   // FIXME: move these into helper class(es)
-  def withService[S: ClassTag](f: (S) => Any) {
+  def withService[S: ClassTag](f: (S) => Any): Unit = {
     val svcRef = bundleContext.getServiceReference(classTag[S].runtimeClass)
     if (svcRef != null) {
       try {
@@ -193,9 +194,11 @@ object Data {
     }
   }
 
-  def currentModel: Box[IModel] = Globals.contextModel.vend or Globals.contextModelSet.vend.map(_.getModel(modelURI, false)).filter(_ != null)
+  def currentModel: Box[IModel] = {
+    Globals.contextModel.vend.or(Globals.contextModelSet.vend.map(_.getModel(modelURI, false)).filter(_ != null))
+  }
 
-  def pathToURI(relativePath: Seq[String]) = {
-    S.request map { r => r.hostAndPath } map (URIs.createURI(_).appendSegments(relativePath.toArray)) openOrThrowException ("Invocation outside of request.")
+  def pathToURI(relativePath: Seq[String]): URI = {
+    S.request.map { r => r.hostAndPath }.map(URIs.createURI(_).appendSegments(relativePath.toArray)).openOrThrowException("Invocation outside of request.")
   }
 }
