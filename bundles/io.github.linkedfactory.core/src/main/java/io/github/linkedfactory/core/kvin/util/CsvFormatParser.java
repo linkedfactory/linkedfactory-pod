@@ -16,7 +16,6 @@
 package io.github.linkedfactory.core.kvin.util;
 
 import com.google.common.math.DoubleMath;
-import com.google.common.primitives.Doubles;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.opencsv.CSVParser;
@@ -262,7 +261,7 @@ public class CsvFormatParser {
 			return false;
 		}
 		Object value = valueStr;
-		Double doubleValue = Doubles.tryParse(valueStr);
+		Double doubleValue = tryParseDouble(valueStr);
 		if (doubleValue == null && valueStr.contains(",")) {
 			String cleanedValueStr;
 			if (valueStr.lastIndexOf(',') < valueStr.lastIndexOf('.')) {
@@ -273,7 +272,7 @@ public class CsvFormatParser {
 				cleanedValueStr = valueStr.replace(".", "")
 						.replace(",", ".");
 			}
-			doubleValue = Doubles.tryParse(cleanedValueStr);
+			doubleValue = tryParseDouble(cleanedValueStr);
 		}
 		if (doubleValue != null) {
 			if (DoubleMath.isMathematicalInteger(doubleValue) && !valueStr.contains(".")) {
@@ -284,6 +283,22 @@ public class CsvFormatParser {
 		}
 		// TODO - support json values
 		return value;
+	}
+
+	private static Double tryParseDouble(String value) {
+		if (value.isEmpty() || value.charAt(value.length() - 1) <= ' ') {
+			return null;
+		}
+		char first = value.charAt(0);
+		if (!((first >= '0' && first <= '9') || first == '+' || first == '-'
+				|| first == '.' || first == 'N' || first == 'I')) {
+			return null;
+		}
+		try {
+			return Double.parseDouble(value);
+		} catch (NumberFormatException ignored) {
+			return null;
+		}
 	}
 
 	public CsvFormatParser setContext(URI context) {
