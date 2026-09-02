@@ -253,26 +253,27 @@ public class CsvFormatParser {
 			// this is definitely a string
 			return valueStr.substring(1, valueStr.length() - 1);
 		}
-		// handle boolean values
-		String valueStrLowerCase = valueStr.toLowerCase();
-		if ("true".equals(valueStrLowerCase)) {
-			return true;
-		} else if ("false".equals(valueStrLowerCase)) {
-			return false;
-		}
 		Object value = valueStr;
 		Double doubleValue = tryParseDouble(valueStr);
-		if (doubleValue == null && valueStr.contains(",")) {
-			String cleanedValueStr;
-			if (valueStr.lastIndexOf(',') < valueStr.lastIndexOf('.')) {
-				// convert numbers like 123,456.78 to 123456.78
-				cleanedValueStr = valueStr.replace(",", "");
-			} else {
-				// convert numbers like 123.456,78 to 123456.78
-				cleanedValueStr = valueStr.replace(".", "")
-						.replace(",", ".");
+		if (doubleValue == null) {
+			String valueStrLowerCase = valueStr.toLowerCase();
+			if ("true".equals(valueStrLowerCase)) {
+				return true;
+			} else if ("false".equals(valueStrLowerCase)) {
+				return false;
 			}
-			doubleValue = tryParseDouble(cleanedValueStr);
+			if (valueStr.contains(",")) {
+				String cleanedValueStr;
+				if (valueStr.lastIndexOf(',') < valueStr.lastIndexOf('.')) {
+					// convert numbers like 123,456.78 to 123456.78
+					cleanedValueStr = valueStr.replace(",", "");
+				} else {
+					// convert numbers like 123.456,78 to 123456.78
+					cleanedValueStr = valueStr.replace(".", "")
+							.replace(",", ".");
+				}
+				doubleValue = tryParseDouble(cleanedValueStr);
+			}
 		}
 		if (doubleValue != null) {
 			if (DoubleMath.isMathematicalInteger(doubleValue) && !valueStr.contains(".")) {

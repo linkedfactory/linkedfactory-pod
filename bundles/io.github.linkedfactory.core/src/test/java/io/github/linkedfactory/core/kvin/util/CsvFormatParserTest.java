@@ -160,6 +160,7 @@ public class CsvFormatParserTest {
 				{"1,234.56", 1234.56d}, {"1.234,56", 1234.56d},
 				{"NaN", Double.NaN}, {"-NaN", Double.NaN},
 				{"Infinity", Double.POSITIVE_INFINITY}, {"-Infinity", Double.NEGATIVE_INFINITY},
+				{"true", true}, {"FALSE", false}, {"'quoted'", "quoted"},
 				{"plain text", "plain text"}, {"NAN", "NAN"}, {"infinity", "infinity"},
 				{"0x1", "0x1"}, {"1e", "1e"}, {"1_0", "1_0"}, {"1x", "1x"},
 				{" 1", " 1"}, {"1 ", "1 "}, {"\t1", "\t1"}, {"1\u0000", "1\u0000"}
