@@ -1,4 +1,4 @@
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:21-jre-alpine
 EXPOSE 8080
 
 #RUN apk update && apk add --no-cache libstdc++ bash
