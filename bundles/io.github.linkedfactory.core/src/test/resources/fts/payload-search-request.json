@@ -1,0 +1,29 @@
+{
+  "size": 20,
+  "_source": false,
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "query_string": {
+            "query": "some keywords",
+            "default_field": "label",
+            "boost": 1.5
+          }
+        }
+      ],
+      "filter": [
+        {
+          "term": {
+            "_id": "urn:item1"
+          }
+        }
+      ]
+    }
+  },
+  "highlight": {
+    "fields": {
+      "*": {}
+    }
+  }
+}
