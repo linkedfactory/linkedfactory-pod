@@ -150,6 +150,28 @@ public class CsvFormatParserTest {
 	}
 
 	@Test
+	public void shouldParseCommonCsvValueForms() throws IOException {
+		CsvFormatParser parser = new CsvFormatParser(URIs.createURI("urn:base:"), ',',
+				new ByteArrayInputStream("time,value\n".getBytes(StandardCharsets.UTF_8)));
+		Object[][] cases = {
+				{"42", 42L}, {"+42", 42L}, {"-42", -42L},
+				{"+.5", 0.5d}, {"1.", 1d}, {"3.14", 3.14d}, {"1e3", 1000L},
+				{"1f", 1L}, {"0x1.8p1", 3d},
+				{"1,234.56", 1234.56d}, {"1.234,56", 1234.56d},
+				{"NaN", Double.NaN}, {"-NaN", Double.NaN},
+				{"Infinity", Double.POSITIVE_INFINITY}, {"-Infinity", Double.NEGATIVE_INFINITY},
+				{"true", true}, {"FALSE", false}, {"'quoted'", "quoted"},
+				{"plain text", "plain text"}, {"NAN", "NAN"}, {"infinity", "infinity"},
+				{"0x1", "0x1"}, {"1e", "1e"}, {"1_0", "1_0"}, {"1x", "1x"},
+				{" 1", " 1"}, {"1 ", "1 "}, {"\t1", "\t1"}, {"1\u0000", "1\u0000"}
+		};
+		for (Object[] testCase : cases) {
+			assertEquals("Unexpected value for " + testCase[0], testCase[1],
+					parser.parseValue((String) testCase[0]));
+		}
+	}
+
+	@Test
 	public void shouldPreserveSparseRowsAndTupleFields() throws IOException {
 		String csv = String.join("\n",
 				"time,seqNr,<urn:item:a>@<urn:property>,<urn:item:b>@<urn:property>",
