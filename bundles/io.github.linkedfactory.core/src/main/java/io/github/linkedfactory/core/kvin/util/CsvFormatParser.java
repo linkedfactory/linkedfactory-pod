@@ -16,7 +16,6 @@
 package io.github.linkedfactory.core.kvin.util;
 
 import com.google.common.math.DoubleMath;
-import com.google.common.primitives.Doubles;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.opencsv.CSVParser;
@@ -254,26 +253,27 @@ public class CsvFormatParser {
 			// this is definitely a string
 			return valueStr.substring(1, valueStr.length() - 1);
 		}
-		// handle boolean values
-		String valueStrLowerCase = valueStr.toLowerCase();
-		if ("true".equals(valueStrLowerCase)) {
-			return true;
-		} else if ("false".equals(valueStrLowerCase)) {
-			return false;
-		}
 		Object value = valueStr;
-		Double doubleValue = Doubles.tryParse(valueStr);
-		if (doubleValue == null && valueStr.contains(",")) {
-			String cleanedValueStr;
-			if (valueStr.lastIndexOf(',') < valueStr.lastIndexOf('.')) {
-				// convert numbers like 123,456.78 to 123456.78
-				cleanedValueStr = valueStr.replace(",", "");
-			} else {
-				// convert numbers like 123.456,78 to 123456.78
-				cleanedValueStr = valueStr.replace(".", "")
-						.replace(",", ".");
+		Double doubleValue = tryParseDouble(valueStr);
+		if (doubleValue == null) {
+			String valueStrLowerCase = valueStr.toLowerCase();
+			if ("true".equals(valueStrLowerCase)) {
+				return true;
+			} else if ("false".equals(valueStrLowerCase)) {
+				return false;
 			}
-			doubleValue = Doubles.tryParse(cleanedValueStr);
+			if (valueStr.contains(",")) {
+				String cleanedValueStr;
+				if (valueStr.lastIndexOf(',') < valueStr.lastIndexOf('.')) {
+					// convert numbers like 123,456.78 to 123456.78
+					cleanedValueStr = valueStr.replace(",", "");
+				} else {
+					// convert numbers like 123.456,78 to 123456.78
+					cleanedValueStr = valueStr.replace(".", "")
+							.replace(",", ".");
+				}
+				doubleValue = tryParseDouble(cleanedValueStr);
+			}
 		}
 		if (doubleValue != null) {
 			if (DoubleMath.isMathematicalInteger(doubleValue) && !valueStr.contains(".")) {
@@ -284,6 +284,22 @@ public class CsvFormatParser {
 		}
 		// TODO - support json values
 		return value;
+	}
+
+	private static Double tryParseDouble(String value) {
+		if (value.isEmpty() || value.charAt(value.length() - 1) <= ' ') {
+			return null;
+		}
+		char first = value.charAt(0);
+		if (!((first >= '0' && first <= '9') || first == '+' || first == '-'
+				|| first == '.' || first == 'N' || first == 'I')) {
+			return null;
+		}
+		try {
+			return Double.parseDouble(value);
+		} catch (NumberFormatException ignored) {
+			return null;
+		}
 	}
 
 	public CsvFormatParser setContext(URI context) {
