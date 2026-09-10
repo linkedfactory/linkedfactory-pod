@@ -6,6 +6,9 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.http.KvinHttp;
 import io.github.linkedfactory.core.rdf4j.aas.AasFederatedService;
 import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver;
+import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceConfig;
+import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceResolver;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSail;
 import io.github.linkedfactory.core.rdf4j.io.SPARQLResultsParquetWriterFactory;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinFederatedService;
 import io.github.linkedfactory.core.rdf4j.kvin.functions.DateTimeFunction;
@@ -17,6 +20,9 @@ import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedServiceRes
 import org.eclipse.rdf4j.query.algebra.evaluation.function.FunctionRegistry;
 import org.eclipse.rdf4j.query.resultio.TupleQueryResultWriterRegistry;
 import org.eclipse.rdf4j.repository.Repository;
+import org.eclipse.rdf4j.repository.sail.SailRepository;
+import org.eclipse.rdf4j.sail.Sail;
+import org.eclipse.rdf4j.sail.StackableSail;
 import org.osgi.service.component.annotations.*;
 
 import java.util.Optional;
@@ -29,6 +35,7 @@ public class FederatedServiceComponent {
 	IModelSet ms;
 	Kvin kvin;
 	AbstractFederatedServiceResolver serviceResolver;
+	AbstractFederatedServiceResolver ftsServiceResolver;
 	@Reference(cardinality = ReferenceCardinality.OPTIONAL)
 	volatile ContextProvider contextProvider;
 
@@ -57,6 +64,7 @@ public class FederatedServiceComponent {
 		if (repositoryBinding != null) {
 			final Repository repository = repositoryBinding.getProvider().get();
 			if (repository instanceof FederatedServiceResolverClient) {
+				ftsServiceResolver = new FtsFederatedServiceResolver(readFtsFederatedConfig(repository));
 				serviceResolver = new BaseFederatedServiceResolver() {
 					@Override
 					protected FederatedService createService(String serviceUrl)
@@ -73,6 +81,8 @@ public class FederatedServiceComponent {
 							return new KvinFederatedService(new KvinHttp(url), this::getExecutorService,
 									() -> contextProvider == null ? Kvin.DEFAULT_CONTEXT : contextProvider.getContext(),
 									true);
+						} else if (serviceUrl.startsWith("fts:")) {
+							return ftsServiceResolver.getService(serviceUrl);
 						}
 						return null;
 					}
@@ -88,6 +98,10 @@ public class FederatedServiceComponent {
 			serviceResolver.shutDown();
 			serviceResolver = null;
 		}
+		if (ftsServiceResolver != null) {
+			ftsServiceResolver.shutDown();
+			ftsServiceResolver = null;
+		}
 	}
 
 	private Optional<String> getKvinServiceUrl(String serviceUrl) {
@@ -96,6 +110,26 @@ public class FederatedServiceComponent {
 			url = Optional.of(serviceUrl.replace("kvin:", ""));
 		}
 		return url;
+	}
+
+	private FtsFederatedServiceConfig readFtsFederatedConfig(Repository repository) {
+		if (repository instanceof SailRepository sailRepository) {
+			FtsSail ftsSail = findSailOfType(sailRepository.getSail(), FtsSail.class);
+			if (ftsSail != null) {
+				return ftsSail.getFederatedServiceConfig();
+			}
+		}
+		return FtsFederatedServiceConfig.defaults();
+	}
+
+	private <T> T findSailOfType(Sail sail, Class<T> type) {
+		if (type.isInstance(sail)) {
+			return type.cast(sail);
+		}
+		if (sail instanceof StackableSail stackableSail && stackableSail.getBaseSail() != null) {
+			return findSailOfType(stackableSail.getBaseSail(), type);
+		}
+		return null;
 	}
 
 	@Reference

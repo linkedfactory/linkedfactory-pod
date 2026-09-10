@@ -1,0 +1,33 @@
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>.
+@prefix rep: <http://www.openrdf.org/config/repository#>.
+@prefix sr: <http://www.openrdf.org/config/repository/sail#>.
+@prefix sail: <http://www.openrdf.org/config/sail#>.
+@prefix ms: <http://www.openrdf.org/config/sail/memory#>.
+@prefix fts: <http://linkedfactory.github.io/config/sail/fts#>.
+@prefix models: <http://enilink.net/vocab/komma/models#> .
+
+<urn:enilink:data> a models:RepositoryModelSet ;
+	models:repository <test:repo> .
+
+<test:repo> a rep:Repository ;
+   rep:repositoryID "memory-with-search" ;
+   rdfs:label "LinkedFactory data repository (Kvin + FTS)" ;
+   rep:repositoryImpl [
+      rep:repositoryType "openrdf:SailRepository" ;
+      sr:sailImpl [
+         sail:sailType "kvin:KvinSail" ;
+         sail:delegate [
+            sail:sailType "fts:FtsSail" ;
+            fts:backend "elastic" ;
+            fts:endpoint "http://localhost:9222" ;
+            fts:bulkPath "/_bulk" ;
+            fts:searchPath "/_search" ;
+            fts:defaultLimit 100 ;
+            fts:failOnError true ;
+            sail:delegate [
+               sail:sailType "openrdf:MemoryStore" ;
+               ms:persist false
+            ]
+         ]
+      ]
+   ] .

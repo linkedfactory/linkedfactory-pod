@@ -1,0 +1,11 @@
+prefix fts: <fts:>
+prefix dtsc: <https://example.org/dtsc/>
+
+select ?iri ?score where {
+  service <fts:> {
+    ?iri fts:keywords "some keywords" ;
+         fts:score ?score .
+  }
+  ?iri dtsc:weight ?weight .
+  filter (?weight > 50)
+}

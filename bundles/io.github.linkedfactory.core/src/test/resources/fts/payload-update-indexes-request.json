@@ -1,0 +1,35 @@
+{
+  "operations": [
+    {
+      "op": "upsert",
+      "documents": {
+        "http://example.org/person1": {
+          "http://example.org/firstName": [
+            {
+              "kind": "literal",
+              "value": "John",
+              "datatype": "http://www.w3.org/2001/XMLSchema#string",
+              "context": "http://lf.test.com/data/"
+            }
+          ],
+          "http://example.org/lastName": [
+            {
+              "kind": "literal",
+              "value": "Smith",
+              "datatype": "http://www.w3.org/2001/XMLSchema#string",
+              "context": "http://lf.test.com/data/"
+            }
+          ],
+          "http://example.org/description": [
+            {
+              "kind": "literal",
+              "value": "Software engineer",
+              "datatype": "http://www.w3.org/2001/XMLSchema#string",
+              "context": "http://lf.test.com/data/"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
