@@ -11,6 +11,89 @@ The core idea is to use an RDF knowledge graph for describing the structure of s
 
 <img style="background-color: white; padding: 15px; width: 100%; max-width: 800px" alt="LinkedFactory semantic linking" src="docs/assets/lf-linking.svg">
 
+## Data representation
+Formally, the triple-based data model of RDF _(S, P, O)_ is extended to a quad-based data model _(S, P, T, O)_. If named graphs are used to manage multiple RDF datasets then an additional context **C** can be introduced to extend the data model to _(C, S, P, T, O)_. We call this the **Kvin** data model.
+
+### JSON format
+The primary data format is the __LF JSON format__ that uses a nested structure where the first level contains the items and the second level the associated properties with their values:
+
+```json
+{
+    "http://example.org/resource1": {
+       "http://example.org/properties/p1": [
+           { "value": 20.4, "time": 1619424246120 },
+           { "value": 20.3, "time": 1619424246100 }
+       ],
+       "http://example.org/properties/p2": [
+           { "value": { "msg" : "Error 1", "nr" : 1 }, "time": 1619424246100 }
+       ]
+    }
+}
+```
+
+A concrete example for modeling the captured force data of a strain gauge could be represented as:
+```json
+{
+  "https://example.org/Press/Frame/StrainGauge": {
+    "p:force" : [{ "value": 7.10096884, "time": 1541521440000 }]
+  }
+}
+```
+### RDF format
+For representing time-series data in plain RDF the following encoding is used:
+```
+S P [ <kvin:value> O ; <kvin:time> T ] .
+```
+
+The data of the strain gauge example above could then expressed as:
+```
+@base <https://example.org/Press/Frame/> .
+
+<StrainGauge> <p:force> [ <kvin:value> 7.10096884 ; <kvin:time> 1541521440000 ] .
+```
+
+## Data insertion and retrieval
+### HTTP APIs
+The data can be inserted and queried by using __[HTTP-based APIs](https://linkedfactory.github.io/specification/overview/1/timeseries/api)__.
+
+For inserting the data the LF JSON format can be used as follows:
+```sh
+curl -H "Content-Type:application/json" http://localhost:8080/linkedfactory/values -d '{
+  "https://example.org/Press/Frame/StrainGauge": {
+    "p:force" : [{ "value": 7.10096884, "time": 1541521440000 }]
+  }
+}'
+```
+If data with the same timestamps should be inserted then the CSV format is more concise:
+```sh
+curl -H "Content-Type:text/csv" http://localhost:8080/linkedfactory/values -d 'time,<https://example.org/Press/Frame/StrainGauge>@<p:force>
+1541521440000, 7.10096884'
+```
+
+Retrieving the data in JSON format is possible through a simple GET request:
+```sh
+curl -G -d "item=https://example.org/Press/Frame/StrainGauge" -d "property=p:force" http://localhost:8080/linkedfactory/values
+```
+
+Just specify an accept header to retrieve data in CSV format:
+```sh
+curl -G -H "Accept:text/csv" -d "item=https://example.org/Press/Frame/StrainGauge" -d "property=p:force" http://localhost:8080/linkedfactory/values
+```
+
+### SPARQL
+Additionaly, due to the compatiblity with RDF, it is possible to query the data with SPARQL.
+
+```
+curl -H "Accept:text/csv" http://localhost:8080/sparql --data-urlencode 'query=
+base <https://example.org/Press/Frame/>
+
+select ?time ?value {
+  service <kvin:> {
+    <StrainGauge> <p:force> [ <kvin:value> ?value ; <kvin:time> ?time ] .
+  }
+}' --data-urlencode 'model=http://linkedfactory.github.io/data/'
+```
+
 ## Full-text search
 LinkedFactory Pod can index RDF statements for full-text search and expose them to SPARQL via **`SERVICE <fts:...>`**.
 
@@ -100,89 +183,6 @@ The bulk request format is an `operations` array containing `upsert`, `remove`, 
 Query-time endpoint override is also supported with `SERVICE <fts:http://host:9200>`, but internal backends can ignore that value.
 
 _**Note**_: the payload (JSON) of the search request used by the federated service is just now for testing and need to be discussed or agreed on. The same applies to the bulk request payload. see examples in `bundles/io.github.linkedfactory.core/src/test/resources/fts/`
-
-## Data representation
-Formally, the triple-based data model of RDF _(S, P, O)_ is extended to a quad-based data model _(S, P, T, O)_. If named graphs are used to manage multiple RDF datasets then an additional context **C** can be introduced to extend the data model to _(C, S, P, T, O)_. We call this the **Kvin** data model.
-
-### JSON format
-The primary data format is the __LF JSON format__ that uses a nested structure where the first level contains the items and the second level the associated properties with their values:
-
-```json
-{
-    "http://example.org/resource1": {
-       "http://example.org/properties/p1": [
-           { "value": 20.4, "time": 1619424246120 },
-           { "value": 20.3, "time": 1619424246100 }
-       ],
-       "http://example.org/properties/p2": [
-           { "value": { "msg" : "Error 1", "nr" : 1 }, "time": 1619424246100 }
-       ]
-    }
-}
-```
-
-A concrete example for modeling the captured force data of a strain gauge could be represented as:
-```json
-{
-  "https://example.org/Press/Frame/StrainGauge": {
-    "p:force" : [{ "value": 7.10096884, "time": 1541521440000 }]
-  }
-}
-```
-### RDF format
-For representing time-series data in plain RDF the following encoding is used:
-```
-S P [ <kvin:value> O ; <kvin:time> T ] .
-```
-
-The data of the strain gauge example above could then expressed as:
-```
-@base <https://example.org/Press/Frame/> .
-
-<StrainGauge> <p:force> [ <kvin:value> 7.10096884 ; <kvin:time> 1541521440000 ] .
-```
-
-## Data insertion and retrieval
-### HTTP APIs
-The data can be inserted and queried by using __[HTTP-based APIs](https://linkedfactory.github.io/specification/overview/1/timeseries/api)__.
-
-For inserting the data the LF JSON format can be used as follows:
-```sh
-curl -H "Content-Type:application/json" http://localhost:8080/linkedfactory/values -d '{
-  "https://example.org/Press/Frame/StrainGauge": {
-    "p:force" : [{ "value": 7.10096884, "time": 1541521440000 }]
-  }
-}'
-```
-If data with the same timestamps should be inserted then the CSV format is more concise:
-```sh
-curl -H "Content-Type:text/csv" http://localhost:8080/linkedfactory/values -d 'time,<https://example.org/Press/Frame/StrainGauge>@<p:force>
-1541521440000, 7.10096884'
-```
-
-Retrieving the data in JSON format is possible through a simple GET request:
-```sh
-curl -G -d "item=https://example.org/Press/Frame/StrainGauge" -d "property=p:force" http://localhost:8080/linkedfactory/values
-```
-
-Just specify an accept header to retrieve data in CSV format:
-```sh
-curl -G -H "Accept:text/csv" -d "item=https://example.org/Press/Frame/StrainGauge" -d "property=p:force" http://localhost:8080/linkedfactory/values
-```
-
-### SPARQL
-Additionaly, due to the compatiblity with RDF, it is possible to query the data with SPARQL.
-
-```
-curl -H "Accept:text/csv" http://localhost:8080/sparql --data-urlencode 'query=
-base <https://example.org/Press/Frame/>
-
-select ?time ?value {
-  service <kvin:> {
-    <StrainGauge> <p:force> [ <kvin:value> ?value ; <kvin:time> ?time ] .
-  }
-}' --data-urlencode 'model=http://linkedfactory.github.io/data/'
-```
 
 ## Docker
 * We provide containers on [Docker Hub](https://hub.docker.com/r/linkedfactory/linkedfactory-pod)
