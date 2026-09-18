@@ -4,9 +4,7 @@ import io.github.linkedfactory.core.kvin.DelegatingKvin;
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinSail;
 import net.enilink.composition.annotations.Iri;
-import net.enilink.komma.core.IReference;
-import net.enilink.komma.core.URI;
-import net.enilink.komma.core.URIs;
+import net.enilink.komma.core.*;
 import net.enilink.komma.model.MODELS;
 import net.enilink.komma.model.rdf4j.PersistentModelSetSupport;
 import org.eclipse.core.runtime.FileLocator;
@@ -20,6 +18,8 @@ import org.eclipse.rdf4j.sail.nativerdf.NativeStore;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.FrameworkUtil;
 import org.osgi.framework.ServiceReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.net.URL;
@@ -27,38 +27,27 @@ import java.util.function.Supplier;
 
 @Iri(MODELS.NAMESPACE + "KvinPersistentModelSet")
 public abstract class KvinPersistentModelSet extends PersistentModelSetSupport {
+    private static final Logger log = LoggerFactory.getLogger(KvinPersistentModelSet.class);
     static BundleContext bundleContext = FrameworkUtil.getBundle(KvinPersistentModelSet.class).getBundleContext();
     static Kvin kvin;
 
     public Repository createRepository() throws RepositoryException {
-	    final IReference repo = getRepository();
-	    if (repo == null || repo.getURI() == null) {
+	    IValue repo = getRepository();
+	    if (repo == null) {
+		    repo = getDataDir();
+	    }
+	    if (repo == null) {
 		    throw new RepositoryException("No repository location specified");
 	    }
-	    URI repoUri = repo.getURI();
-	    if ("workspace".equals(repoUri.scheme())) {
-		    try {
-			    String instanceFilter = "(type=osgi.instance.area)";
-			    BundleContext context = FrameworkUtil.getBundle(PersistentModelSetSupport.class).getBundleContext();
-			    ServiceReference<?>[] refs = context
-					    .getServiceReferences("org.eclipse.osgi.service.datalocation.Location", instanceFilter);
-			    if (refs.length > 0) {
-				    Object location = context.getService(refs[0]);
-				    URL loc = (URL) location.getClass().getMethod("getURL").invoke(location);
-				    URI workspace = URIs.createURI(FileLocator.resolve(loc).toString());
-				    if ("".equals(workspace.lastSegment())) {
-					    workspace = workspace.trimSegments(1);
-				    }
-				    repoUri = workspace.appendSegments(repoUri.segments());
-			    }
-		    } catch (Exception e) {
-			    throw new RepositoryException(e);
-		    }
+	    String dataDir;
+	    if (repo instanceof IReference && ((IReference) repo).getURI() != null) {
+		    dataDir = resolveWorkspaceURI(((IReference) repo).getURI()).toFileString();
 	    } else {
-		    throw new RepositoryException("Location service for workspace scheme not found");
+		    dataDir = repo instanceof ILiteral ? ((ILiteral) repo).getLabel() : repo.toString();
 	    }
+	    log.info("Using data directory: " + dataDir);
 
-        NotifyingSail store = new NativeStore(new File(repoUri.toFileString()), "cspo,cpos,spoc,posc");
+        NotifyingSail store = new NativeStore(new File(dataDir), "cspo,cpos,spoc,posc");
         if (! Boolean.FALSE.equals(getInference())) {
             store = new SchemaCachingRDFSInferencer(store);
         }
