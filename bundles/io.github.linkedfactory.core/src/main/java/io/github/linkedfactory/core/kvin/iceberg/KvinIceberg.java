@@ -66,10 +66,25 @@ public class KvinIceberg implements Kvin {
 	private static final Logger log = LoggerFactory.getLogger(KvinIceberg.class);
 	private static final int BATCH_SIZE = 8192;
 	private static final PartitionSpec SPEC = PartitionSpec.unpartitioned();
-	private static final Schema ID_SCHEMA = new Schema(Types.NestedField.required(1, "id", Types.LongType.get()), Types.NestedField.required(2, "value", Types.StringType.get()));
-	private static final Schema SCHEMA = new Schema(Types.NestedField.required(1, "itemId", Types.LongType.get()), Types.NestedField.required(2, "contextId", Types.LongType.get()), Types.NestedField.required(3, "propertyId", Types.LongType.get()), Types.NestedField.required(4, "time", Types.LongType.get()), Types.NestedField.required(5, "seqNr", Types.IntegerType.get()), Types.NestedField.required(6, "first", Types.BooleanType.get()), Types.NestedField.optional(7, "valueInt", Types.IntegerType.get()), Types.NestedField.optional(8, "valueLong", Types.LongType.get()), Types.NestedField.optional(9, "valueFloat", Types.FloatType.get()), Types.NestedField.optional(10, "valueDouble", Types.DoubleType.get()), Types.NestedField.optional(11, "valueString", Types.StringType.get()), Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()), Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
+	private static final Schema ID_SCHEMA = new Schema(
+			Types.NestedField.required(1, "id", Types.LongType.get()),
+			Types.NestedField.required(2, "value", Types.StringType.get()));
+	private static final Schema SCHEMA = new Schema(
+			Types.NestedField.required(1, "itemId", Types.LongType.get()),
+			Types.NestedField.required(2, "contextId", Types.LongType.get()),
+			Types.NestedField.required(3, "propertyId", Types.LongType.get()),
+			Types.NestedField.required(4, "time", Types.LongType.get()),
+			Types.NestedField.required(5, "seqNr", Types.IntegerType.get()),
+			Types.NestedField.required(6, "first", Types.BooleanType.get()),
+			Types.NestedField.optional(7, "valueInt", Types.IntegerType.get()),
+			Types.NestedField.optional(8, "valueLong", Types.LongType.get()),
+			Types.NestedField.optional(9, "valueFloat", Types.FloatType.get()),
+			Types.NestedField.optional(10, "valueDouble", Types.DoubleType.get()),
+			Types.NestedField.optional(11, "valueString", Types.StringType.get()),
+			Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()),
+			Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
 	private static final Comparator<org.apache.iceberg.data.Record> ORDER = Comparator.comparingLong((org.apache.iceberg.data.Record r) -> (Long) r.get(0)).thenComparingLong(r -> (Long) r.get(1)).thenComparingLong(r -> (Long) r.get(2)).thenComparing((a, b) -> Long.compare((Long) b.get(3), (Long) a.get(3))).thenComparing((a, b) -> Integer.compare((Integer) b.get(4), (Integer) a.get(4)));
-
+	private static final Comparator<KvinRow> ROW_ORDER = Comparator.comparingLong(KvinRow::itemId).thenComparingLong(KvinRow::contextId).thenComparingLong(KvinRow::propertyId).thenComparing((a, b) -> Long.compare(b.time(), a.time())).thenComparingInt(KvinRow::seqNr);
 	private final Path root;
 	private final Table table;
 	private final IdTable[] ids = new IdTable[3];
@@ -120,7 +135,10 @@ public class KvinIceberg implements Kvin {
 	}
 
 	private static Map<String, String> tableProperties() {
-		return Map.of(TableProperties.DEFAULT_FILE_FORMAT, FileFormat.PARQUET.name(), TableProperties.FORMAT_VERSION, "2", TableProperties.PARQUET_COMPRESSION, "zstd");
+		return Map.of(
+				TableProperties.DEFAULT_FILE_FORMAT, FileFormat.PARQUET.name(),
+				TableProperties.FORMAT_VERSION, "2",
+				TableProperties.PARQUET_COMPRESSION, "zstd");
 	}
 
 	private long id(int kind, URI uri) {
@@ -376,13 +394,13 @@ public class KvinIceberg implements Kvin {
 		if (begin != null) filter = Expressions.and(filter, Expressions.greaterThanOrEqual("time", begin));
 		if (end != null) filter = Expressions.and(filter, Expressions.lessThanOrEqual("time", end));
 		table.refresh();
-		PriorityQueue<RowCursor> cursors = new PriorityQueue<>(Comparator.comparing(c -> c.row, ORDER));
+		PriorityQueue<RowCursor> cursors = new PriorityQueue<>(Comparator.comparing(c -> c.row, ROW_ORDER));
 		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter).planFiles()) {
 			for (FileScanTask task : tasks) {
 				if (!task.deletes().isEmpty()) {
 					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
 				}
-				CloseableIterable<org.apache.iceberg.data.Record> rows = Parquet.read(table.io().newInputFile(task.file().location())).project(SCHEMA).filter(filter).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build();
+				CloseableIterable<KvinRow> rows = Parquet.<KvinRow>read(table.io().newInputFile(task.file().location())).project(SCHEMA).filter(filter).createReaderFunc(schema -> KvinRowReader.buildReader(SCHEMA, schema)).build();
 				RowCursor cursor = new RowCursor(rows);
 				try {
 					if (cursor.advance()) cursors.add(cursor);
@@ -417,23 +435,18 @@ public class KvinIceberg implements Kvin {
 							cursor.close();
 							throw e;
 						}
-						long itemId = (Long) row.get(0);
-						long propertyId = (Long) row.get(2);
-						long time = (Long) row.get(3);
-						int seqNr = (Integer) row.get(4);
+						long itemId = row.itemId();
+						long propertyId = row.propertyId();
+						long time = row.time();
+						int seqNr = row.seqNr();
 						String key = itemId + ":" + propertyId;
 						String rowKey = key + ":" + time + ":" + seqNr;
-						if (!itemIds.contains(itemId) || (Long) row.get(1) != contextId || (!properties.isEmpty() && !propertyIds.contains(propertyId)) || (begin != null && time < begin) || (end != null && time > end) || rowKey.equals(previous) || (limit > 0 && counts.getOrDefault(key, 0L) >= limit))
+						if (!itemIds.contains(itemId) || row.contextId() != contextId || (!properties.isEmpty() && !propertyIds.contains(propertyId)) || (begin != null && time < begin) || (end != null && time > end) || rowKey.equals(previous) || (limit > 0 && counts.getOrDefault(key, 0L) >= limit))
 							continue;
 						previous = rowKey;
 						counts.merge(key, 1L, Long::sum);
-						Object value = null;
-						for (int i = 6; i <= 12; i++) {
-							if (row.get(i) != null) {
-								value = i == 12 ? Records.decodeRecord(((ByteBuffer) row.get(i)).duplicate()) : row.get(i);
-								break;
-							}
-						}
+						Object value = row.value();
+						if (value instanceof ByteBuffer bytes) value = Records.decodeRecord(bytes.duplicate());
 						next = new KvinTuple(ids[0].uri(itemId), ids[2].uri(propertyId), requestedContext, time, seqNr, value);
 						return true;
 					}
@@ -467,11 +480,11 @@ public class KvinIceberg implements Kvin {
 	}
 
 	private static class RowCursor implements AutoCloseable {
-		final CloseableIterable<org.apache.iceberg.data.Record> rows;
-		final CloseableIterator<org.apache.iceberg.data.Record> iterator;
-		org.apache.iceberg.data.Record row;
+		final CloseableIterable<KvinRow> rows;
+		final CloseableIterator<KvinRow> iterator;
+		KvinRow row;
 
-		RowCursor(CloseableIterable<org.apache.iceberg.data.Record> rows) {
+		RowCursor(CloseableIterable<KvinRow> rows) {
 			this.rows = rows;
 			this.iterator = rows.iterator();
 		}
