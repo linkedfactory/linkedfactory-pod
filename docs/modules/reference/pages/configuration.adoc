@@ -144,6 +144,14 @@ Example with the default model and a LevelDB store:
    ] .
 ----
 
+=== Iceberg storage
+
+To use Iceberg instead of the default value store, configure `<store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ]`.
+KvinIceberg maintains a value table in `iceberg/` and separate URI-ID tables in `iceberg-ids/items/`, `iceberg-ids/properties/`, and `iceberg-ids/contexts/`, with bounded in-memory lookup caches.
+Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots.
+Use a new store directory rather than pointing it at an existing KvinParquet archive.
+Retention-period cleanup is not supported by KvinIceberg.
+
 eniLINK watches bundle configuration files.
 When one changes, the affected bundles are stopped and restarted, which interrupts their service.
 Prepare changes completely and apply storage changes in a maintenance window.

@@ -9,3 +9,4 @@
 <> <store> [ a <KvinLevelDb> ; <dirName> "linkedfactory-valuestore" ] .
 
 # <> <store> [ a <KvinPartitioned> ; <dirName> "linkedfactory-partitioned" ; <archiveInterval> "P7D" ; <retentionPeriod> "P30D"] .
+# <> <store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ] .
