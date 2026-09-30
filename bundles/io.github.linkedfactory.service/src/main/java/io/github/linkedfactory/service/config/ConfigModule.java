@@ -9,5 +9,6 @@ public class ConfigModule extends KommaModule {
 		addBehaviour(KvinLevelDbFactory.class);
 		addBehaviour(KvinPartitionedFactory.class);
 		addBehaviour(KvinParquetFactory.class);
+		addBehaviour(KvinIcebergFactory.class);
 	}
 }

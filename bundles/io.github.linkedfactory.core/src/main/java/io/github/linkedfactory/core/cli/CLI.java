@@ -3,6 +3,7 @@ package io.github.linkedfactory.core.cli;
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.http.KvinHttp;
+import io.github.linkedfactory.core.kvin.iceberg.KvinIceberg;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
 import io.github.linkedfactory.core.kvin.util.JsonFormatWriter;
@@ -56,6 +57,11 @@ public class CLI {
 				Files.createDirectories(path);
 			}
 			return new KvinLevelDb(path.toFile());
+		} else if ("iceberg".equals(type) || Files.isDirectory(path.resolve("iceberg").resolve("metadata"))) {
+			if (!Files.isDirectory(path)) {
+				Files.createDirectories(path);
+			}
+			return new KvinIceberg(path.toString());
 		} else if ("parquet".equals(type) || Files.isDirectory(path.resolve("metadata"))) {
 			if (!Files.isDirectory(path)) {
 				Files.createDirectories(path);
@@ -102,7 +108,7 @@ public class CLI {
 	static class Copy extends FetchBase implements Runnable {
 		@Parameters(paramLabel = "<sink>", description = "location of the sink KVIN store")
 		protected String sinkLocation;
-		@Option(names = {"--sink-type"}, description = "type of the sink KVIN store (if newly created): leveldb, parquet")
+		@Option(names = {"--sink-type"}, description = "type of the sink KVIN store (if newly created): leveldb, parquet, iceberg")
 		String sinkType;
 
 		@Override

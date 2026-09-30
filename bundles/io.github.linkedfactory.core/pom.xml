@@ -13,6 +13,7 @@
 	<properties>
 		<parquet.version>1.17.1</parquet.version>
 		<hadoop.version>3.5.0</hadoop.version>
+		<iceberg.version>1.8.1</iceberg.version>
 		<lwjgl.version>3.3.3</lwjgl.version>
 	</properties>
 
@@ -128,6 +129,18 @@
 					<groupId>com.fasterxml.jackson.module</groupId>
 				</exclusion>
 			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.iceberg</groupId>
+			<artifactId>iceberg-core</artifactId>
+			<version>${iceberg.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.iceberg</groupId>
+			<artifactId>iceberg-parquet</artifactId>
+			<version>${iceberg.version}</version>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.openjdk.jmh</groupId>
@@ -252,6 +265,7 @@
 								org.iq80.snappy,
 								org.xerial.snappy,
 								org.apache.parquet,
+								org.apache.iceberg,
 								org.apache.avro,
 								org.apache.hadoop,
 								com.fasterxml.woodstox,
