@@ -132,6 +132,32 @@ public class KvinIcebergTest {
 	}
 
 	@Test
+	public void readsOptionalValuesWithoutCarryingValuesBetweenRows() {
+		store.put(
+				new KvinTuple(item, property, null, 1, 0, 42),
+				new KvinTuple(item, property, null, 2, 1, null),
+				new KvinTuple(item, property, null, 2, 0, true),
+				new KvinTuple(item, property, null, 3, 0, 1.5f),
+				new KvinTuple(item, property, null, 4, 0, 2.5),
+				new KvinTuple(item, property, null, 5, 0, "text"),
+				new KvinTuple(item, property, null, 6, 123L));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
+			List<KvinTuple> rows = values.toList();
+			assertEquals(7, rows.size());
+			assertEquals(123L, rows.get(0).value);
+			assertEquals("text", rows.get(1).value);
+			assertEquals(2.5, (Double) rows.get(2).value, 0);
+			assertEquals(1.5f, (Float) rows.get(3).value, 0);
+			assertEquals(2, rows.get(4).time);
+			assertEquals(1, rows.get(4).seqNr);
+			assertNull(rows.get(4).value);
+			assertEquals(0, rows.get(5).seqNr);
+			assertEquals(true, rows.get(5).value);
+			assertEquals(42, rows.get(6).value);
+		}
+	}
+
+	@Test
 	public void mergesSortedBatchesWithBoundedWriteMemory() {
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int i = 0; i < 8193; i++) {
