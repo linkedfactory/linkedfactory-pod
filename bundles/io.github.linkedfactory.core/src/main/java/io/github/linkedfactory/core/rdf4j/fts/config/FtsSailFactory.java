@@ -10,6 +10,8 @@ import org.eclipse.rdf4j.sail.config.SailImplConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Set;
+
 public class FtsSailFactory implements SailFactory {
 	public static final String SAIL_TYPE = "fts:FtsSail";
 	private static final Logger logger = LoggerFactory.getLogger(FtsSailFactory.class);
@@ -43,7 +45,8 @@ public class FtsSailFactory implements SailFactory {
 							ftsConfig.getEndpoint(),
 							ftsConfig.getSearchPath(),
 							ftsConfig.isFailOnError(),
-							ftsConfig.getDefaultLimit()));
+							ftsConfig.getDefaultLimit()),
+					Set.copyOf(ftsConfig.getExcludedModels()));
 		} else {
 			logger.warn("Config is instance of {} and not FtsSailConfig, using defaults.", config.getClass().getName());
 			sail = new FtsSail(new HttpFtsSearchService());

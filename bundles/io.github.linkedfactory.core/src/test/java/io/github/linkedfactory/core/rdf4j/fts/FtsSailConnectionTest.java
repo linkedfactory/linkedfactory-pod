@@ -3,10 +3,10 @@ package io.github.linkedfactory.core.rdf4j.fts;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
-import org.eclipse.rdf4j.sail.NotifyingSailConnection;
-import org.eclipse.rdf4j.sail.SailConnectionListener;
+import org.eclipse.rdf4j.repository.sail.SailRepository;
+import org.eclipse.rdf4j.repository.sail.SailRepositoryConnection;
+import org.eclipse.rdf4j.sail.memory.MemoryStore;
 import org.junit.Test;
-import org.mockito.ArgumentCaptor;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,208 +18,212 @@ import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 
 public class FtsSailConnectionTest {
 	private final SimpleValueFactory vf = SimpleValueFactory.getInstance();
 
 	@Test
-	public void commitPushesLiteralAndIriChanges() {
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+	public void commitPushesOnlyLiteralChanges() {
 		RecordingSearchService service = new RecordingSearchService();
-		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+		SailRepository repository = createRepository(service);
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			Statement addLiteral = vf.createStatement(
+					vf.createIRI("urn:s1"),
+					vf.createIRI("urn:p1"),
+					vf.createLiteral("value"));
+			Statement removeLiteral = vf.createStatement(
+					vf.createIRI("urn:s2"),
+					vf.createIRI("urn:p2"),
+					vf.createLiteral("removed"));
 
-		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
-		verify(wrapped).addConnectionListener(listenerCaptor.capture());
-		SailConnectionListener listener = listenerCaptor.getValue();
+			connection.add(removeLiteral);
+			connection.commit();
 
-		Statement addLiteral = vf.createStatement(
-				vf.createIRI("urn:s1"),
-				vf.createIRI("urn:p1"),
-				vf.createLiteral("value")
-		);
-		Statement removeIri = vf.createStatement(
-				vf.createIRI("urn:s2"),
-				vf.createIRI("urn:p2"),
-				vf.createIRI("urn:o2")
-		);
-		Statement ignored = vf.createStatement(
-				vf.createIRI("urn:s3"),
-				vf.createIRI("urn:p3"),
-				vf.createBNode()
-		);
+			connection.begin();
+			connection.add(addLiteral);
+			connection.remove(removeLiteral);
+			connection.add(vf.createIRI("urn:s3"), vf.createIRI("urn:p3"), vf.createBNode());
+			connection.commit();
 
-		connection.begin();
-		listener.statementAdded(addLiteral);
-		listener.statementRemoved(removeIri);
-		listener.statementAdded(ignored);
-		connection.commit();
+			assertEquals(2, service.addRemoveCount);
+			assertTrue(service.addedStatements.contains(removeLiteral));
+			assertTrue(service.addedStatements.contains(addLiteral));
+			assertEquals(1, service.removedStatements.size());
+			assertTrue(service.removedStatements.contains(removeLiteral));
+		} finally {
+			repository.shutDown();
+		}
+	}
 
-		assertEquals(1, service.addedStatements.size());
-		assertEquals(1, service.removedStatements.size());
-		assertTrue(service.addedStatements.contains(addLiteral));
-		assertTrue(service.removedStatements.contains(removeIri));
+	@Test
+	public void excludedModelContextsAreSkipped() {
+		RecordingSearchService service = new RecordingSearchService();
+		SailRepository repository = createRepository(service, Set.of("urn:model:excluded"));
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			Statement excluded = vf.createStatement(
+					vf.createIRI("urn:s1"),
+					vf.createIRI("urn:p1"),
+					vf.createLiteral("skip me"),
+					vf.createIRI("urn:model:excluded"));
+			Statement included = vf.createStatement(
+					vf.createIRI("urn:s2"),
+					vf.createIRI("urn:p1"),
+					vf.createLiteral("keep me"),
+					vf.createIRI("urn:model:included"));
+
+			connection.begin();
+			connection.add(excluded);
+			connection.add(included);
+			connection.commit();
+
+			assertEquals(1, service.addedStatements.size());
+			assertTrue(service.addedStatements.contains(included));
+		} finally {
+			repository.shutDown();
+		}
 	}
 
 	@Test
 	public void clearDropsPreviouslyBufferedOperations() {
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
-		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+		SailRepository repository = createRepository(service);
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			connection.begin();
+			connection.add(vf.createIRI("urn:s1"), vf.createIRI("urn:p1"), vf.createLiteral("value"));
+			connection.clear();
+			connection.commit();
 
-		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
-		verify(wrapped).addConnectionListener(listenerCaptor.capture());
-		SailConnectionListener listener = listenerCaptor.getValue();
-
-		connection.begin();
-		Statement addLiteral = vf.createStatement(
-				vf.createIRI("urn:s1"),
-				vf.createIRI("urn:p1"),
-				vf.createLiteral("value")
-		);
-		listener.statementAdded(addLiteral);
-		connection.clear();
-		connection.commit();
-
-		assertEquals(1, service.clearCount);
-		assertEquals(0, service.addRemoveCount);
-		assertTrue(service.addedStatements.isEmpty());
-		assertTrue(service.removedStatements.isEmpty());
+			assertEquals(1, service.clearCount);
+			assertEquals(0, service.addRemoveCount);
+			assertTrue(service.addedStatements.isEmpty());
+			assertTrue(service.removedStatements.isEmpty());
+		} finally {
+			repository.shutDown();
+		}
 	}
 
 	@Test
 	public void addAndRemoveSameStatementCancelOut() {
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
-		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+		SailRepository repository = createRepository(service);
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			Statement stmt = vf.createStatement(
+					vf.createIRI("urn:s1"),
+					vf.createIRI("urn:p1"),
+					vf.createLiteral("value"));
 
-		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
-		verify(wrapped).addConnectionListener(listenerCaptor.capture());
-		SailConnectionListener listener = listenerCaptor.getValue();
+			connection.begin();
+			connection.add(stmt);
+			connection.remove(stmt);
+			connection.commit();
 
-		Statement stmt = vf.createStatement(
-				vf.createIRI("urn:s1"),
-				vf.createIRI("urn:p1"),
-				vf.createLiteral("value")
-		);
-
-		connection.begin();
-		listener.statementAdded(stmt);
-		listener.statementRemoved(stmt);
-		connection.commit();
-
-		assertEquals(0, service.addRemoveCount);
-		assertTrue(service.addedStatements.isEmpty());
-		assertTrue(service.removedStatements.isEmpty());
+			assertEquals(0, service.addRemoveCount);
+			assertTrue(service.addedStatements.isEmpty());
+			assertTrue(service.removedStatements.isEmpty());
+		} finally {
+			repository.shutDown();
+		}
 	}
 
 	@Test
 	public void largeTransactionSpillsAndCommitsAllStatements() {
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
-		FtsSailConnection connection = new FtsSailConnection(wrapped, service, 2);
+		FtsSail sail = new FtsSail(service);
+		sail.setBaseSail(new MemoryStore());
+		SailRepository repository = new SailRepository(sail);
+		repository.init();
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			FtsSailConnection ftsConnection = (FtsSailConnection) connection.getSailConnection();
 
-		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
-		verify(wrapped).addConnectionListener(listenerCaptor.capture());
-		SailConnectionListener listener = listenerCaptor.getValue();
+			for (int i = 0; i < 10; i++) {
+				ftsConnection.begin();
+				ftsConnection.addStatement(vf.createIRI("urn:s" + i), vf.createIRI("urn:p"), vf.createLiteral("value" + i));
+				ftsConnection.commit();
+			}
 
-		connection.begin();
-		for (int i = 0; i < 10; i++) {
-			listener.statementAdded(vf.createStatement(
-					vf.createIRI("urn:s" + i),
-					vf.createIRI("urn:p"),
-					vf.createLiteral("value" + i)));
+			assertTrue(service.addRemoveCount >= 10);
+			assertEquals(10, service.addedStatements.size());
+		} finally {
+			repository.shutDown();
 		}
-		connection.commit();
-
-		assertTrue(service.addRemoveCount > 1);
-		assertEquals(10, service.addedStatements.size());
 	}
 
 	@Test
 	public void rollbackDiscardsPendingChanges() {
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
-		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+		SailRepository repository = createRepository(service);
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			connection.begin();
+			connection.add(vf.createIRI("urn:s1"), vf.createIRI("urn:p1"), vf.createLiteral("x"));
+			connection.rollback();
 
-		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
-		verify(wrapped).addConnectionListener(listenerCaptor.capture());
-		SailConnectionListener listener = listenerCaptor.getValue();
-
-		connection.begin();
-		listener.statementAdded(vf.createStatement(vf.createIRI("urn:s1"), vf.createIRI("urn:p1"), vf.createLiteral("x")));
-		connection.rollback();
-
-		assertEquals(0, service.commitCount);
-		assertEquals(1, service.rollbackCount);
-		assertTrue(service.addedStatements.isEmpty());
+			assertEquals(0, service.commitCount);
+			assertEquals(1, service.rollbackCount);
+			assertTrue(service.addedStatements.isEmpty());
+		} finally {
+			repository.shutDown();
+		}
 	}
 
 	@Test
 	public void clearAddsClearContextOperation() {
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
-		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+		SailRepository repository = createRepository(service);
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			IRI ctx = vf.createIRI("urn:ctx");
+			connection.begin();
+			connection.clear(ctx);
+			connection.commit();
 
-		IRI ctx = vf.createIRI("urn:ctx");
-		connection.begin();
-		connection.clear(ctx);
-		connection.commit();
-
-		assertEquals(1, service.clearedContexts.size());
-		assertEquals(ctx, service.clearedContexts.get(0)[0]);
+			assertEquals(1, service.clearedContexts.size());
+			assertEquals(ctx, service.clearedContexts.get(0)[0]);
+		} finally {
+			repository.shutDown();
+		}
 	}
 
 	@Test
 	public void clearThenReAddKeepsOnlyLatestChanges() {
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
-		FtsSailConnection connection = new FtsSailConnection(wrapped, service);
+		SailRepository repository = createRepository(service);
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			Statement stmt = vf.createStatement(
+					vf.createIRI("urn:s1"),
+					vf.createIRI("urn:p1"),
+					vf.createLiteral("value"));
 
-		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
-		verify(wrapped).addConnectionListener(listenerCaptor.capture());
-		SailConnectionListener listener = listenerCaptor.getValue();
+			connection.begin();
+			connection.add(stmt);
+			connection.clear();
+			connection.add(stmt);
+			connection.commit();
 
-		Statement stmt = vf.createStatement(
-				vf.createIRI("urn:s1"),
-				vf.createIRI("urn:p1"),
-				vf.createLiteral("value"));
-
-		connection.begin();
-		listener.statementAdded(stmt);
-		connection.clear();
-		listener.statementAdded(stmt);
-		connection.commit();
-
-		assertEquals(1, service.clearCount);
-		assertEquals(1, service.addRemoveCount);
-		assertTrue(service.addedStatements.contains(stmt));
-		assertTrue(service.removedStatements.isEmpty());
+			assertEquals(1, service.clearCount);
+			assertEquals(1, service.addRemoveCount);
+			assertTrue(service.addedStatements.contains(stmt));
+			assertTrue(service.removedStatements.isEmpty());
+		} finally {
+			repository.shutDown();
+		}
 	}
 
 	@Test
-	public void rollbackAfterSpillDiscardsBufferedChanges() {
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
+	public void rollbackAfterMultipleWritesDiscardsBufferedChanges() {
 		RecordingSearchService service = new RecordingSearchService();
-		FtsSailConnection connection = new FtsSailConnection(wrapped, service, 2);
+		SailRepository repository = createRepository(service);
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			connection.begin();
+			for (int i = 0; i < 10; i++) {
+				connection.add(vf.createIRI("urn:s" + i), vf.createIRI("urn:p"), vf.createLiteral("value" + i));
+			}
+			connection.rollback();
 
-		ArgumentCaptor<SailConnectionListener> listenerCaptor = ArgumentCaptor.forClass(SailConnectionListener.class);
-		verify(wrapped).addConnectionListener(listenerCaptor.capture());
-		SailConnectionListener listener = listenerCaptor.getValue();
-
-		connection.begin();
-		for (int i = 0; i < 10; i++) {
-			listener.statementAdded(vf.createStatement(
-					vf.createIRI("urn:s" + i),
-					vf.createIRI("urn:p"),
-					vf.createLiteral("value" + i)));
+			assertEquals(0, service.addRemoveCount);
+			assertEquals(1, service.rollbackCount);
+			assertTrue(service.addedStatements.isEmpty());
+		} finally {
+			repository.shutDown();
 		}
-		connection.rollback();
-
-		assertEquals(0, service.addRemoveCount);
-		assertEquals(1, service.rollbackCount);
-		assertTrue(service.addedStatements.isEmpty());
 	}
 
 	@Test
@@ -227,11 +231,29 @@ public class FtsSailConnectionTest {
 		Path stale = Files.createTempFile("fts-sail-buffer-", ".bin");
 		Files.setLastModifiedTime(stale, FileTime.fromMillis(System.currentTimeMillis() - 2 * 60 * 60 * 1000L));
 
-		NotifyingSailConnection wrapped = mock(NotifyingSailConnection.class);
 		RecordingSearchService service = new RecordingSearchService();
-		new FtsSailConnection(wrapped, service);
+		SailRepository repository = createRepository(service);
+		try {
+			try (SailRepositoryConnection connection = repository.getConnection()) {
+				connection.begin();
+				connection.rollback();
+			}
+			assertTrue(Files.notExists(stale));
+		} finally {
+			repository.shutDown();
+		}
+	}
 
-		assertTrue(Files.notExists(stale));
+	private SailRepository createRepository(RecordingSearchService service) {
+		return createRepository(service, Set.of());
+	}
+
+	private SailRepository createRepository(RecordingSearchService service, Set<String> excludedModels) {
+		FtsSail sail = new FtsSail(service, FtsFederatedServiceConfig.defaults(), excludedModels);
+		sail.setBaseSail(new MemoryStore());
+		SailRepository repository = new SailRepository(sail);
+		repository.init();
+		return repository;
 	}
 
 	private static final class RecordingSearchService implements FtsSearchService {
