@@ -47,10 +47,20 @@ public class ElasticKeywordSearchBackendIntegrationTest {
 	@Test
 	public void queriesARealElasticSearchBackend() throws Exception {
 		send("PUT", "/" + indexName, """
-				{"settings":{"number_of_shards":1,"number_of_replicas":0}}
+				{
+				  "settings":{"number_of_shards":1,"number_of_replicas":0},
+				  "mappings":{
+				    "properties":{
+				      "subject":{"type":"keyword"},
+				      "predicate":{"type":"keyword"},
+				      "value":{"type":"text"},
+				      "sortValue":{"type":"keyword"}
+				    }
+				  }
+				}
 				""");
 		send("PUT", "/" + indexName + "/_doc/urn:item1?refresh=true", """
-				{"label":"motor data integration","category":"urn:label"}
+				{"subject":"urn:item1","predicate":"urn:label","value":"motor data integration","sortValue":"motor data integration"}
 				""");
 
 		ElasticKeywordSearchBackend backend = new ElasticKeywordSearchBackend(
@@ -59,7 +69,7 @@ public class ElasticKeywordSearchBackendIntegrationTest {
 				true,
 				10);
 		try {
-			List<FtsSearchHit> hits = backend.search(new FtsSearchRequest("motor data", "label", 10, null, true, null));
+			List<FtsSearchHit> hits = backend.search(new FtsSearchRequest("motor data", "urn:label", 10, null, true, null));
 			assertFalse(hits.isEmpty());
 			assertEquals("urn:item1", hits.get(0).getIri());
 			assertTrue(hits.get(0).getScore() != null);

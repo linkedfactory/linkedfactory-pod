@@ -54,10 +54,12 @@ public class ElasticKeywordSearchBackendTest {
 		Assert.assertEquals(3, payload.get("size").asInt());
 		Assert.assertEquals("motor data", payload.path("query").path("bool").path("must").get(0)
 				.path("query_string").path("query").asText());
-		Assert.assertEquals("urn:label", payload.path("query").path("bool").path("must").get(0)
+		Assert.assertEquals("value", payload.path("query").path("bool").path("must").get(0)
 				.path("query_string").path("default_field").asText());
-		Assert.assertEquals("urn:item1", payload.path("query").path("bool").path("filter").get(0)
-				.path("term").path("_id").asText());
+		Assert.assertEquals("urn:label", payload.path("query").path("bool").path("filter").get(0)
+				.path("term").path("predicate").asText());
+		Assert.assertEquals("urn:item1", payload.path("query").path("bool").path("filter").get(1)
+				.path("term").path("subject").asText());
 	}
 
 	@Test
@@ -74,10 +76,13 @@ public class ElasticKeywordSearchBackendTest {
 					  "hits": {
 					    "hits": [
 					      {
-					        "_id": "urn:item1",
+					        "_id": "doc-1",
 					        "_score": 0.87,
+					        "fields": {
+					          "subject": ["urn:item1"]
+					        },
 					        "highlight": {
-					          "urn:label": ["matched snippet"]
+					          "value": ["matched snippet"]
 					        }
 					      }
 					    ]
@@ -156,10 +161,13 @@ public class ElasticKeywordSearchBackendTest {
 				  "hits": {
 				    "hits": [
 				      {
-				        "_id": "urn:item1",
+				        "_id": "doc-1",
 				        "_score": 0.87,
+				        "fields": {
+				          "subject": ["urn:item1"]
+				        },
 				        "highlight": {
-				          "urn:label": ["matched snippet"]
+				          "value": ["matched snippet"]
 				        }
 				      }
 				    ]

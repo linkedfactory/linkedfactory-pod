@@ -11,7 +11,11 @@ import org.eclipse.rdf4j.sail.config.AbstractDelegatingSailImplConfig;
 import org.eclipse.rdf4j.sail.config.SailConfigException;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	public static final String CONFIG_NS = "http://linkedfactory.github.io/config/sail/fts#";
@@ -22,6 +26,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private static final IRI SEARCH_PATH = VF.createIRI(CONFIG_NS, "searchPath");
 	private static final IRI FAIL_ON_ERROR = VF.createIRI(CONFIG_NS, "failOnError");
 	private static final IRI OUTBOX_DIR = VF.createIRI(CONFIG_NS, "outboxDir");
+	private static final IRI EXCLUDED_MODELS = VF.createIRI(CONFIG_NS, "excludedModels");
 	private static final IRI DEFAULT_LIMIT = VF.createIRI(CONFIG_NS, "defaultLimit");
 	private static final String DEFAULT_OUTBOX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
 			"linkedfactory-fts-outbox").toString();
@@ -30,6 +35,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private String endpoint;
 	private String bulkPath = "/fts/bulk";
 	private String searchPath = "/fts/_search";
+	private List<String> excludedModels = new ArrayList<>();
 	private boolean failOnError = true;
 	private String outboxDir = DEFAULT_OUTBOX_DIR;
 	private int defaultLimit = 100;
@@ -94,6 +100,24 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 		}
 	}
 
+	public List<String> getExcludedModels() {
+		return excludedModels;
+	}
+
+	public void setExcludedModels(List<String> excludedModels) {
+		this.excludedModels.clear();
+		if (excludedModels == null) {
+			return;
+		}
+		Set<String> uniqueModels = new LinkedHashSet<>();
+		for (String excludedModel : excludedModels) {
+			if (excludedModel != null && !excludedModel.isBlank()) {
+				uniqueModels.add(excludedModel.trim());
+			}
+		}
+		this.excludedModels.addAll(uniqueModels);
+	}
+
 	public int getDefaultLimit() {
 		return defaultLimit;
 	}
@@ -117,6 +141,11 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 		if (searchPath != null && !searchPath.isBlank()) {
 			model.add(implNode, SEARCH_PATH, VF.createLiteral(searchPath));
 		}
+		if(excludedModels != null && !excludedModels.isEmpty()) {
+			for (String modelUri : excludedModels) {
+				model.add(implNode, EXCLUDED_MODELS, VF.createIRI(modelUri));
+			}
+		}
 		model.add(implNode, FAIL_ON_ERROR, VF.createLiteral(failOnError));
 		model.add(implNode, OUTBOX_DIR, VF.createLiteral(outboxDir));
 		model.add(implNode, DEFAULT_LIMIT, VF.createLiteral(defaultLimit));
@@ -138,6 +167,14 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 
 		Optional<Literal> searchPathLiteral = Models.objectLiteral(model.filter(implNode, SEARCH_PATH, null));
 		searchPathLiteral.ifPresent(literal -> searchPath = literal.getLabel());
+
+		List<String> parsedExcludedModels = new ArrayList<>();
+		model.filter(implNode, EXCLUDED_MODELS, null).objects().forEach(value -> {
+			if (value instanceof IRI) {
+				parsedExcludedModels.add(value.stringValue());
+			}
+		});
+		setExcludedModels(parsedExcludedModels);
 
 		Optional<Literal> failOnErrorLiteral = Models.objectLiteral(model.filter(implNode, FAIL_ON_ERROR, null));
 		if (failOnErrorLiteral.isPresent()) {

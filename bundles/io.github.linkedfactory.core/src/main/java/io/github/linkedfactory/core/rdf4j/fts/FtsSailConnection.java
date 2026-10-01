@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.rdf4j.fts;
 
+import net.enilink.komma.common.util.ILogger;
 import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
@@ -9,7 +10,6 @@ import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.sail.NotifyingSailConnection;
-import org.eclipse.rdf4j.sail.SailConnectionListener;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.helpers.NotifyingSailConnectionWrapper;
 
@@ -23,6 +23,7 @@ import java.nio.file.attribute.FileTime;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -35,52 +36,54 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 
 	private final FtsSearchService searchService;
 	private final FtsSailBuffer buffer;
-
-	protected final SailConnectionListener connectionListener = new SailConnectionListener() {
-		@Override
-		public void statementAdded(Statement statement) {
-			if (isIndexedStatement(statement)) {
-				buffer.add(statement);
-			}
-		}
-
-		@Override
-		public void statementRemoved(Statement statement) {
-			if (isIndexedStatement(statement)) {
-				buffer.remove(statement);
-			}
-		}
-	};
+	private final Set<String> excludedModels;
 
 	public FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsSearchService searchService) {
-		this(wrappedConnection, searchService, DEFAULT_MAX_BUFFERED_STATEMENTS);
+		this(wrappedConnection, searchService, Collections.emptySet(), DEFAULT_MAX_BUFFERED_STATEMENTS);
+	}
+
+	public FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsSearchService searchService,
+			Set<String> excludedModels) {
+		this(wrappedConnection, searchService, excludedModels, DEFAULT_MAX_BUFFERED_STATEMENTS);
 	}
 
 	FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsSearchService searchService,
+			Set<String> excludedModels,
 			int maxBufferedStatements) {
 		super(wrappedConnection);
 		cleanupStaleSpillFiles();
 		this.searchService = searchService == null ? FtsSearchService.NOOP : searchService;
+		this.excludedModels = excludedModels == null || excludedModels.isEmpty()
+				? Collections.emptySet()
+				: Set.copyOf(excludedModels);
 		this.buffer = new FtsSailBuffer(maxBufferedStatements);
-		wrappedConnection.addConnectionListener(connectionListener);
 	}
-
-	/*
-	  FIXME do we want to push literal properties and their linked IRIs to search.
-      object instanceof IRI ensures statements like:
-        ex:sensor1 ex:locatedIn ex:lineA .
-        are captured for indexing as references/keywords (not full-text),
-        so search can filter/join on linked resources.
-      If only full-text over literal values is needed, remove that part and keep only object instanceof Literal.
+	
+	/**
+	 * Determines whether a statement should be indexed for full-text search.
+	 * <p>
+	 * A statement is considered indexable if its object is a literal,
+	 * has a context (belongs to a named graph) and its context is not in the excluded models set. 
+	 *
+	 * @param statement the statement to check
+	 * @return true if the statement should be indexed, false otherwise
 	 */
 	private boolean isIndexedStatement(Statement statement) {
 		Value object = statement.getObject();
-		return object instanceof Literal || object instanceof IRI;
+		if (!(object instanceof Literal)) {
+			return false;
+		}
+		Resource context = statement.getContext();
+		return context != null && !excludedModels.contains(context.stringValue());
 	}
 
 	private void cleanupStaleSpillFiles() {
+		cleanupStaleSpillFiles(System.currentTimeMillis());
+	}
+
+	private static void cleanupStaleSpillFiles(long nowMillis) {
 		Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
-		long cutoff = System.currentTimeMillis() - STALE_SPILL_FILE_MILLIS;
+		long cutoff = nowMillis - STALE_SPILL_FILE_MILLIS;
 		try (var files = Files.list(tmpDir)) {
 			files.filter(path -> path.getFileName().toString().startsWith("fts-sail-buffer-"))
 					.filter(path -> path.getFileName().toString().endsWith(".bin"))
@@ -102,23 +105,30 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 	@Override
 	public synchronized void addStatement(Resource subj, IRI pred, Value obj, Resource... contexts) throws SailException {
 		super.addStatement(subj, pred, obj, contexts);
+		if (contexts == null || contexts.length == 0) {
+			recordAddedStatement(subj, pred, obj, null);
+			return;
+		}
+		for (Resource context : contexts) {
+			recordAddedStatement(subj, pred, obj, context);
+		}
 	}
 
 	@Override
 	public synchronized void removeStatements(Resource subj, IRI pred, Value obj, Resource... contexts) throws SailException {
+		List<Statement> removedStatements = collectStatementsForRemoval(subj, pred, obj, contexts);
 		super.removeStatements(subj, pred, obj, contexts);
+		for (Statement statement : removedStatements) {
+			if (isIndexedStatement(statement)) {
+				buffer.remove(statement);
+			}
+		}
 	}
 
 	@Override
 	public synchronized void clear(Resource... contexts) throws SailException {
-		NotifyingSailConnection wrappedConnection = (NotifyingSailConnection) getWrappedConnection();
-		wrappedConnection.removeConnectionListener(connectionListener);
-		try {
-			super.clear(contexts);
-			buffer.clear(contexts);
-		} finally {
-			wrappedConnection.addConnectionListener(connectionListener);
-		}
+		super.clear(contexts);
+		buffer.clear(contexts);
 	}
 
 	@Override
@@ -192,11 +202,31 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 	@Override
 	public void close() throws SailException {
 		try {
-			((NotifyingSailConnection) getWrappedConnection()).removeConnectionListener(connectionListener);
-		} finally {
 			buffer.reset();
+		} finally {
 			super.close();
 		}
+	}
+
+	private void recordAddedStatement(Resource subj, IRI pred, Value obj, Resource context) {
+		Statement statement = SimpleValueFactory.getInstance().createStatement(subj, pred, obj, context);
+		if (isIndexedStatement(statement)) {
+			buffer.add(statement);
+		}
+	}
+
+	private List<Statement> collectStatementsForRemoval(Resource subj, IRI pred, Value obj, Resource... contexts)
+			throws SailException {
+		List<Statement> statements = new ArrayList<>();
+		try (var results = getWrappedConnection().getStatements(subj, pred, obj, false, contexts)) {
+			while (results.hasNext()) {
+				Statement statement = results.next();
+				if (isIndexedStatement(statement)) {
+					statements.add(statement);
+				}
+			}
+		}
+		return statements;
 	}
 
 	private static final class FtsSailBuffer {

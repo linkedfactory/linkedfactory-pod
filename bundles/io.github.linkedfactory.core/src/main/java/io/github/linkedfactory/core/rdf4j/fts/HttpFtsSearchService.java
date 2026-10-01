@@ -13,11 +13,9 @@ import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
-import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
-import org.eclipse.rdf4j.model.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,62 +24,35 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class HttpFtsSearchService implements FtsSearchService {
 	private static final Logger logger = LoggerFactory.getLogger(HttpFtsSearchService.class);
 
 	private static final int MAX_ATTEMPTS = 3;
 	private static final long RETRY_BACKOFF_MILLIS = 100L;
-
 	private static final ContentType NDJSON = ContentType.create("application/x-ndjson", StandardCharsets.UTF_8);
 	private static final String OP_STATEMENTS = "statements";
 	private static final String OP_UPSERT = "upsert";
 	private static final String OP_REMOVE = "remove";
 	private static final String OP_CLEAR = "clear";
 	private static final String OP_CLEAR_CONTEXTS = "clearContexts";
-	private static final String SUBJECT_FIELD = "subject";
-	private static final String ADD_SCRIPT = "if (!ctx._source.containsKey('subject')) { ctx._source.subject = params.subject; } "
-			+ "for (entry in params.fields.entrySet()) { "
-			+ "def key = entry.getKey(); "
-			+ "if (!ctx._source.containsKey(key)) { ctx._source[key] = []; } "
-			+ "for (value in entry.getValue()) { "
-			+ "if (!ctx._source[key].contains(value)) { ctx._source[key].add(value); } "
-			+ "} "
-			+ "}";
-	private static final String CLEAR_CONTEXTS_SCRIPT = "for (field in new ArrayList(ctx._source.keySet())) { "
-			+ "if (field == 'subject') { continue; } "
-			+ "def values = ctx._source[field]; "
-			+ "if (values instanceof List) { "
-			+ "for (int i = values.size() - 1; i >= 0; i--) { "
-			+ "def value = values[i]; "
-			+ "if (value instanceof Map && value.containsKey('context') && params.contexts.contains(value.context)) { "
-			+ "values.remove(i); "
-			+ "} "
-			+ "} "
-			+ "if (values.isEmpty()) { ctx._source.remove(field); } "
-			+ "} "
-			+ "} "
-			+ "if (ctx._source.isEmpty() || (ctx._source.size() == 1 && ctx._source.containsKey('subject'))) { "
-			+ "ctx.op = 'delete'; }";
-	private static final String REMOVE_SCRIPT = "for (entry in params.fields.entrySet()) { "
-			+ "def key = entry.getKey(); "
-			+ "if (ctx._source.containsKey(key)) { "
-			+ "ctx._source[key].removeAll(entry.getValue()); "
-			+ "if (ctx._source[key].isEmpty()) { ctx._source.remove(key); } "
-			+ "} "
-			+ "} "
-			+ "if (ctx._source.isEmpty() || (ctx._source.size() == 1 && ctx._source.containsKey('subject'))) { "
-			+ "ctx.op = 'delete'; }";
+	private static final String FIELD_ID = "id";
+	private static final String FIELD_SUBJECT = "subject";
+	private static final String FIELD_PREDICATE = "predicate";
+	private static final String FIELD_VALUE = "value";
+	private static final String FIELD_CONTEXT = "context";
+	private static final String FIELD_DATATYPE = "datatype";
+	private static final String FIELD_LANGUAGE = "language";
+	private static final String FIELD_SORT_VALUE = "sortValue";
 
 	static final String PROP_ENDPOINT = "fts.endpoint";
 	static final String PROP_BULK_PATH = "fts.bulkPath";
@@ -150,8 +121,9 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	@Override
 	public void addRemoveStatements(Set<Statement> added, Set<Statement> removed) {
-		if (!added.isEmpty() || !removed.isEmpty()) {
-			state().append(statementBatch(added, removed));
+		ObjectNode batch = statementBatch(added, removed);
+		if (batch.has("addedDocuments") || batch.has("removedDocuments")) {
+			state().append(batch);
 		}
 	}
 
@@ -181,7 +153,6 @@ public class HttpFtsSearchService implements FtsSearchService {
 	@Override
 	public void commit() throws Exception {
 		TransactionState tx = txState.get();
-
 		if (tx == null || tx.isEmpty()) {
 			drainOutbox();
 			cleanup(tx);
@@ -204,6 +175,14 @@ public class HttpFtsSearchService implements FtsSearchService {
 			txState.remove();
 		}
 	}
+
+	@Override
+	public void rollback() {
+		TransactionState tx = txState.get();
+		cleanup(tx);
+		txState.remove();
+	}
+
 	private String deleteByQueryPath() {
 		if (bulkPath.endsWith("/_bulk")) {
 			return bulkPath.substring(0, bulkPath.length() - "_bulk".length()) + "_delete_by_query";
@@ -211,125 +190,83 @@ public class HttpFtsSearchService implements FtsSearchService {
 		return "/_delete_by_query";
 	}
 
-	private String updateByQueryPath() {
-		if (bulkPath.endsWith("/_bulk")) {
-			return bulkPath.substring(0, bulkPath.length() - "_bulk".length()) + "_update_by_query";
-		}
-		return "/_update_by_query";
-	}
-
-	private String sendRequest(String url, String body, ContentType contentType, String operation) throws IOException {
-		HttpPost request = new HttpPost(url);
-		request.setConfig(requestConfig);
-		request.setEntity(new StringEntity(body, contentType));
-		try (CloseableHttpResponse response = client().execute(request)) {
-			int status = response.getStatusLine().getStatusCode();
-			HttpEntity entity = response.getEntity();
-			String responseBody = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
-			if (status >= 300) {
-				throw new IOException("HTTP " + status + " " + operation + ": " + responseBody);
-			}
-			return responseBody;
-		}
-	}
-
-
-	@Override
-	public void rollback() {
-		cleanup(txState.get());
-		txState.remove();
-	}
-
-	private CloseableHttpClient client() {
-		CloseableHttpClient existing = httpClient;
-		if (existing != null) {
-			return existing;
-		}
-		synchronized (this) {
-			if (httpClient == null) {
-				httpClient = HttpClients.custom()
-						.setDefaultRequestConfig(requestConfig)
-						.disableAutomaticRetries()
-						.build();
-			}
-			return httpClient;
-		}
-	}
-
-	private TransactionState state() {
-		TransactionState state = txState.get();
-		if (state == null) {
-			state = TransactionState.create(mapper);
-			txState.set(state);
-		}
-		return state;
-	}
-
-	private JsonNode statementBatch(Collection<Statement> added, Collection<Statement> removed) {
+	private ObjectNode statementBatch(Collection<Statement> added, Collection<Statement> removed) {
 		ObjectNode op = mapper.createObjectNode();
 		op.put("op", OP_STATEMENTS);
-		ObjectNode addedDocuments = documentsBySubject(added);
+		ObjectNode addedDocuments = documentsByStatement(added);
 		if (addedDocuments.size() > 0) {
 			op.set("addedDocuments", addedDocuments);
 		}
-		ObjectNode removedDocuments = documentsBySubject(removed);
+		ObjectNode removedDocuments = documentsByStatement(removed);
 		if (removedDocuments.size() > 0) {
 			op.set("removedDocuments", removedDocuments);
 		}
 		return op;
 	}
 
-	private ObjectNode documentsBySubject(Collection<Statement> statements) {
+	private ObjectNode documentsByStatement(Collection<Statement> statements) {
 		ObjectNode documents = mapper.createObjectNode();
-		Map<String, Map<String, List<JsonNode>>> grouped = new LinkedHashMap<>();
 		for (Statement statement : statements) {
-			Resource subject = statement.getSubject();
-			IRI predicate = statement.getPredicate();
-			Value object = statement.getObject();
-			String subjectId = subject.stringValue();
-			String predicateId = predicate.stringValue();
-			Map<String, List<JsonNode>> fields = grouped.computeIfAbsent(subjectId, key -> new LinkedHashMap<>());
-			List<JsonNode> values = fields.computeIfAbsent(predicateId, key -> new ArrayList<>());
-			values.add(statementValue(object, statement.getContext()));
-		}
-
-		for (Map.Entry<String, Map<String, List<JsonNode>>> doc : grouped.entrySet()) {
-			ObjectNode fieldNode = mapper.createObjectNode();
-			for (Map.Entry<String, List<JsonNode>> field : doc.getValue().entrySet()) {
-				ArrayNode values = mapper.createArrayNode();
-				for (JsonNode value : field.getValue()) {
-					values.add(value);
-				}
-				fieldNode.set(field.getKey(), values);
+			if (!(statement.getObject() instanceof Literal)) {
+				continue;
 			}
-			documents.set(doc.getKey(), fieldNode);
+			ObjectNode document = statementDocument(statement);
+			documents.set(document.path(FIELD_ID).asText(), document);
 		}
 		return documents;
 	}
 
-	private JsonNode statementValue(Value object, Resource context) {
-		ObjectNode valueNode = mapper.createObjectNode();
-		if (object instanceof Literal) {
-			Literal literal = (Literal) object;
-			valueNode.put("kind", "literal");
-			valueNode.put("value", literal.getLabel());
-			if (literal.getLanguage().isPresent()) {
-				valueNode.put("language", literal.getLanguage().get());
-			}
-			if (literal.getDatatype() != null) {
-				valueNode.put("datatype", literal.getDatatype().stringValue());
-			}
-		} else if (object instanceof IRI) {
-			valueNode.put("kind", "iri");
-			valueNode.put("value", object.stringValue());
-		} else {
-			valueNode.put("kind", "value");
-			valueNode.put("value", object.stringValue());
+	private ObjectNode statementDocument(Statement statement) {
+		ObjectNode document = mapper.createObjectNode();
+		Literal literal = (Literal) statement.getObject();
+		String subject = statement.getSubject().stringValue();
+		String predicate = statement.getPredicate().stringValue();
+		document.put(FIELD_ID, statementId(statement));
+		document.put(FIELD_SUBJECT, subject);
+		document.put(FIELD_PREDICATE, predicate);
+		document.put(FIELD_VALUE, literal.getLabel());
+		document.put(FIELD_SORT_VALUE, normalizeSortValue(literal.getLabel()));
+		if (statement.getContext() != null) {
+			document.put(FIELD_CONTEXT, statement.getContext().stringValue());
 		}
-		if (context != null) {
-			valueNode.put("context", context.stringValue());
+		if (literal.getDatatype() != null) {
+			document.put(FIELD_DATATYPE, literal.getDatatype().stringValue());
 		}
-		return valueNode;
+		literal.getLanguage().ifPresent(language -> document.put(FIELD_LANGUAGE, language));
+		return document;
+	}
+
+	private String statementId(Statement statement) {
+		Literal literal = (Literal) statement.getObject();
+		return hash(statement.getSubject().stringValue(),
+				statement.getPredicate().stringValue(),
+				literal.getLabel(),
+				literal.getDatatype() == null ? "" : literal.getDatatype().stringValue(),
+				literal.getLanguage().orElse(""),
+				statement.getContext() == null ? "" : statement.getContext().stringValue());
+	}
+
+	private String hash(String... parts) {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			for (String part : parts) {
+				digest.update(part.getBytes(StandardCharsets.UTF_8));
+				digest.update((byte) 0);
+			}
+			byte[] bytes = digest.digest();
+			StringBuilder value = new StringBuilder(bytes.length * 2);
+			for (byte current : bytes) {
+				value.append(Character.forDigit((current >> 4) & 0xF, 16));
+				value.append(Character.forDigit(current & 0xF, 16));
+			}
+			return value.toString();
+		} catch (NoSuchAlgorithmException e) {
+			throw new IllegalStateException("SHA-256 not available", e);
+		}
+	}
+
+	private String normalizeSortValue(String value) {
+		return value == null ? "" : value.toLowerCase(java.util.Locale.ROOT);
 	}
 
 	private static String stringProp(Map<String, Object> properties, String key, String defaultValue) {
@@ -365,12 +302,37 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private void cleanup(TransactionState tx) {
-		if (tx != null) {
-			try {
-				tx.cleanup();
-			} catch (RuntimeException e) {
-				logger.warn("Unable to clean up FTS bulk payload", e);
+		if (tx == null) {
+			return;
+		}
+		try {
+			tx.cleanup();
+		} catch (RuntimeException e) {
+			logger.warn("Unable to clean up FTS bulk payload", e);
+		}
+	}
+
+	private TransactionState state() {
+		TransactionState tx = txState.get();
+		if (tx == null) {
+			throw new IllegalStateException("FTS transaction has not been started. Call begin() before updating the index.");
+		}
+		return tx;
+	}
+
+	private CloseableHttpClient client() {
+		CloseableHttpClient existing = httpClient;
+		if (existing != null) {
+			return existing;
+		}
+		synchronized (this) {
+			if (httpClient == null) {
+				httpClient = HttpClients.custom()
+						.setDefaultRequestConfig(requestConfig)
+						.disableAutomaticRetries()
+						.build();
 			}
+			return httpClient;
 		}
 	}
 
@@ -379,114 +341,114 @@ public class HttpFtsSearchService implements FtsSearchService {
 			return;
 		}
 		ensureOutboxDir();
-		try (Stream<Path> files = Files.list(outboxDir)) {
-			List<Path> pending = files
-					.filter(path -> path.getFileName().toString().endsWith(".json"))
-					.sorted(Comparator.comparing(path -> path.getFileName().toString()))
-					.collect(Collectors.toList());
-			for (Path file : pending) {
-				try {
-					sendPayloadWithRetries(file);
-					Files.deleteIfExists(file);
-				} catch (Exception e) {
+		List<Path> pending;
+		try (var files = Files.list(outboxDir)) {
+			pending = files.filter(path -> path.getFileName().toString().endsWith(".json"))
+					.sorted()
+					.toList();
+		}
+		for (Path payload : pending) {
+			boolean sent = sendPayload(payload);
+			if (sent) {
+				Files.deleteIfExists(payload);
+			}
+		}
+	}
+
+	private boolean sendPayload(Path payloadFile) throws Exception {
+		String payload = Files.readString(payloadFile, StandardCharsets.UTF_8);
+		JsonNode root = mapper.readTree(payload);
+		JsonNode operationsNode = root.path("operations");
+		if (!operationsNode.isArray()) {
+			throw new IOException("Invalid FTS outbox payload: missing operations array");
+		}
+
+		ArrayNode operations = (ArrayNode) operationsNode;
+		PreparedPayload prepared = PreparedPayload.from(operations);
+
+		if (prepared.hasClear()) {
+			if (!sendRequest(
+					endpoint + deleteByQueryPath(),
+					mapper.writeValueAsString(Map.of("query", Map.of("match_all", Map.of()))),
+					ContentType.APPLICATION_JSON,
+					"while clearing FTS index"
+			)) {
+				return false;
+			}
+		}
+
+		if (prepared.hasClearContexts()) {
+			if (!sendRequest(
+					endpoint + deleteByQueryPath(),
+					mapper.writeValueAsString(Map.of(
+							"query", Map.of(
+									"terms", Map.of(FIELD_CONTEXT, prepared.clearedContexts())
+							)
+					)),
+					ContentType.APPLICATION_JSON,
+					"while clearing FTS contexts"
+			)) {
+				return false;
+			}
+		}
+
+		String ndjson = prepared.toBulkNdjson(mapper);
+		if (ndjson.isBlank()) {
+			return true;
+		}
+		String responseBody = sendRequestBody(endpoint + bulkPath, ndjson, NDJSON, "while sending FTS updates");
+		if (responseBody == null) {
+			return false;
+		}
+		validateBulkResponse(responseBody);
+		return true;
+	}
+
+	private boolean sendRequest(String url, String body, ContentType contentType, String action) throws Exception {
+		return sendRequestBody(url, body, contentType, action) != null;
+	}
+
+	private String sendRequestBody(String url, String body, ContentType contentType, String action) throws Exception {
+		IOException lastError = null;
+		for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+			try {
+				HttpPost request = new HttpPost(url);
+				request.setConfig(requestConfig);
+				request.setEntity(new StringEntity(body, contentType));
+				try (CloseableHttpResponse response = client().execute(request)) {
+					int status = response.getStatusLine().getStatusCode();
+					HttpEntity entity = response.getEntity();
+					String responseBody = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
+					if (status < 300) {
+						return responseBody;
+					}
+					IOException error = new IOException("HTTP " + status + " " + action + ": " + responseBody);
+					if (!isRetryable(error) || attempt == MAX_ATTEMPTS) {
+						if (failOnError) {
+							throw error;
+						}
+						logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, error);
+						return null;
+					}
+					lastError = error;
+					sleepBeforeRetry(attempt, error);
+				}
+			} catch (IOException e) {
+				if (attempt == MAX_ATTEMPTS || !isRetryable(e)) {
 					if (failOnError) {
 						throw e;
 					}
 					logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, e);
-					return;
+					return null;
 				}
-			}
-		}
-	}
-
-	private void sendPayloadWithRetries(Path payload) throws Exception {
-		Exception lastError = null;
-		for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-			try {
-				sendPayload(payload);
-				return;
-			} catch (IOException e) {
 				lastError = e;
-				if (!isRetryable(e) || attempt == MAX_ATTEMPTS) {
-					throw e;
-				}
 				sleepBeforeRetry(attempt, e);
 			}
 		}
-		if (lastError != null) {
+		if (lastError != null && failOnError) {
 			throw lastError;
 		}
-	}
-
-	private void sendPayload(Path payload) throws Exception {
-
-		JsonNode root = mapper.readTree(payload.toFile());
-		JsonNode operationsNode = root.path("operations");
-
-		if (!operationsNode.isArray()) {
-			throw new IOException(
-					"Invalid FTS outbox payload: missing operations array"
-			);
-		}
-
-		ArrayNode operations = (ArrayNode) operationsNode;
-		PreparedPayload prepared = PreparedPayload.from(operations, mapper);
-
-		if (prepared.hasClear()) {
-			sendRequest(
-					endpoint + deleteByQueryPath(),
-					mapper.writeValueAsString(
-							Map.of(
-									"query",
-									Map.of(
-											"match_all",
-											Map.of()
-									)
-							)
-					),
-					ContentType.APPLICATION_JSON,
-					"while clearing FTS index"
-			);
-		}
-
-		if (prepared.hasClearContexts()) {
-			sendRequest(
-					endpoint + updateByQueryPath(),
-					mapper.writeValueAsString(
-							Map.of(
-									"query", Map.of("match_all", Map.of()),
-									"script", Map.of(
-											"lang", "painless",
-											"source", CLEAR_CONTEXTS_SCRIPT,
-											"params", Map.of("contexts", prepared.clearedContexts())
-									)
-							)
-					),
-					ContentType.APPLICATION_JSON,
-					"while clearing FTS contexts"
-			);
-		}
-
-		String ndjson = prepared.toBulkNdjson(mapper);
-
-		if (ndjson.isBlank()) {
-			return;
-		}
-
-		String url = endpoint + bulkPath;
-
-		HttpPost request = new HttpPost(url);
-		request.setConfig(requestConfig);
-
-		request.setEntity(
-				new StringEntity(
-						ndjson,
-						NDJSON
-				)
-		);
-
-		String responseBody = sendRequest(url, ndjson, NDJSON, "while sending FTS updates");
-		validateBulkResponse(responseBody);
+		return null;
 	}
 
 	private void validateBulkResponse(String responseBody) throws IOException {
@@ -648,20 +610,22 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private static final class PreparedPayload {
-		private final List<StatementOperation> statementOperations = new ArrayList<>();
+		private final Map<String, ObjectNode> upserts = new LinkedHashMap<>();
+		private final Map<String, ObjectNode> removals = new LinkedHashMap<>();
 		private final List<String> clearedContexts = new ArrayList<>();
 		private boolean clear;
 		private boolean clearContexts;
 
-		static PreparedPayload from(ArrayNode operations, ObjectMapper mapper) throws IOException {
+		static PreparedPayload from(ArrayNode operations) throws IOException {
 			PreparedPayload prepared = new PreparedPayload();
 			for (JsonNode op : operations) {
 				String type = op.path("op").asText();
 				if (OP_CLEAR.equals(type)) {
 					prepared.clear = true;
 					prepared.clearContexts = false;
-					prepared.statementOperations.clear();
 					prepared.clearedContexts.clear();
+					prepared.upserts.clear();
+					prepared.removals.clear();
 				} else if (OP_CLEAR_CONTEXTS.equals(type)) {
 					prepared.clearContexts = true;
 					JsonNode contexts = op.path("contexts");
@@ -672,8 +636,13 @@ public class HttpFtsSearchService implements FtsSearchService {
 					for (JsonNode context : contexts) {
 						prepared.clearedContexts.add(context.asText());
 					}
-				} else if (OP_STATEMENTS.equals(type) || OP_UPSERT.equals(type) || OP_REMOVE.equals(type)) {
-					prepared.addStatementOperation(StatementOperation.from(op, mapper));
+				} else if (OP_STATEMENTS.equals(type)) {
+					mergeDocuments(op.get("addedDocuments"), prepared.upserts);
+					mergeDocuments(op.get("removedDocuments"), prepared.removals);
+				} else if (OP_UPSERT.equals(type)) {
+					mergeDocuments(op.get("documents"), prepared.upserts);
+				} else if (OP_REMOVE.equals(type)) {
+					mergeDocuments(op.get("documents"), prepared.removals);
 				} else {
 					throw new IOException("Invalid FTS outbox payload: unsupported operation " + type);
 				}
@@ -695,150 +664,40 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 		String toBulkNdjson(ObjectMapper mapper) throws IOException {
 			StringBuilder ndjson = new StringBuilder();
-			for (StatementOperation operation : statementOperations) {
-				operation.appendNdjson(ndjson, mapper);
-			}
+			appendDocuments(ndjson, upserts, true, mapper);
+			appendDocuments(ndjson, removals, false, mapper);
 			return ndjson.toString();
 		}
 
-		private void addStatementOperation(StatementOperation current) {
-			if (current.isEmpty()) {
-				return;
-			}
-			if (!statementOperations.isEmpty()) {
-				StatementOperation previous = statementOperations.get(statementOperations.size() - 1);
-				if (previous.canMergeWith(current)) {
-					previous.merge(current);
-					return;
-				}
-			}
-			statementOperations.add(current);
-		}
-
-		private static final class StatementOperation {
-			private final Map<String, Map<String, ArrayNode>> addedDocuments = new LinkedHashMap<>();
-			private final Map<String, Map<String, ArrayNode>> removedDocuments = new LinkedHashMap<>();
-
-			static StatementOperation from(JsonNode op, ObjectMapper mapper) throws IOException {
-				StatementOperation statementOperation = new StatementOperation();
-				String type = op.path("op").asText();
-				if (OP_STATEMENTS.equals(type)) {
-					mergeDocuments(op.get("addedDocuments"), statementOperation.addedDocuments, mapper);
-					mergeDocuments(op.get("removedDocuments"), statementOperation.removedDocuments, mapper);
-				} else if (OP_UPSERT.equals(type)) {
-					mergeDocuments(op.get("documents"), statementOperation.addedDocuments, mapper);
-				} else if (OP_REMOVE.equals(type)) {
-					mergeDocuments(op.get("documents"), statementOperation.removedDocuments, mapper);
-				}
-				return statementOperation;
-			}
-
-			boolean isEmpty() {
-				return addedDocuments.isEmpty() && removedDocuments.isEmpty();
-			}
-
-			boolean canMergeWith(StatementOperation other) {
-				return hasAddedOnly() && other.hasAddedOnly() || hasRemovedOnly() && other.hasRemovedOnly();
-			}
-
-			void merge(StatementOperation other) {
-				mergeDocuments(other.addedDocuments, addedDocuments);
-				mergeDocuments(other.removedDocuments, removedDocuments);
-			}
-
-			void appendNdjson(StringBuilder ndjson, ObjectMapper mapper) throws IOException {
-				appendDocuments(ndjson, addedDocuments, true, mapper);
-				appendDocuments(ndjson, removedDocuments, false, mapper);
-			}
-
-			private boolean hasAddedOnly() {
-				return !addedDocuments.isEmpty() && removedDocuments.isEmpty();
-			}
-
-			private boolean hasRemovedOnly() {
-				return addedDocuments.isEmpty() && !removedDocuments.isEmpty();
-			}
-
-			private void appendDocuments(StringBuilder ndjson, Map<String, Map<String, ArrayNode>> documents, boolean upsert,
-					ObjectMapper mapper) throws IOException {
-				for (Map.Entry<String, Map<String, ArrayNode>> doc : documents.entrySet()) {
-					ObjectNode action = mapper.createObjectNode();
-					ObjectNode update = action.putObject("update");
-					update.put("_id", doc.getKey());
-
-					ObjectNode fields = mapper.createObjectNode();
-					for (Map.Entry<String, ArrayNode> field : doc.getValue().entrySet()) {
-						fields.set(field.getKey(), field.getValue());
-					}
-
-					ObjectNode payload = mapper.createObjectNode();
-					if (upsert) {
-						ObjectNode script = payload.putObject("script");
-						script.put("lang", "painless");
-						script.put("source", ADD_SCRIPT);
-						ObjectNode params = mapper.createObjectNode();
-						params.put("subject", doc.getKey());
-						params.set("fields", fields);
-						script.set("params", params);
-						payload.put("scripted_upsert", true);
-						payload.set("upsert", mapper.createObjectNode().put(SUBJECT_FIELD, doc.getKey()));
-					} else {
-						ObjectNode script = payload.putObject("script");
-						script.put("lang", "painless");
-						script.put("source", REMOVE_SCRIPT);
-						script.set("params", mapper.createObjectNode().set("fields", fields));
-					}
-
-					ndjson.append(mapper.writeValueAsString(action)).append('\n');
+		private static void appendDocuments(StringBuilder ndjson, Map<String, ObjectNode> documents, boolean create,
+				ObjectMapper mapper) throws IOException {
+			String operation = create ? "index" : "delete";
+			for (Map.Entry<String, ObjectNode> entry : documents.entrySet()) {
+				ObjectNode action = mapper.createObjectNode();
+				action.putObject(operation).put("_id", entry.getKey());
+				ndjson.append(mapper.writeValueAsString(action)).append('\n');
+				if (create) {
+					ObjectNode payload = entry.getValue().deepCopy();
+					payload.remove(FIELD_ID);
 					ndjson.append(mapper.writeValueAsString(payload)).append('\n');
 				}
 			}
+		}
 
-			private static void mergeDocuments(JsonNode documentsNode, Map<String, Map<String, ArrayNode>> target,
-					ObjectMapper mapper) throws IOException {
-				if (documentsNode == null || documentsNode.isNull()) {
-					return;
-				}
-				if (!documentsNode.isObject()) {
-					throw new IOException("Invalid FTS outbox payload: documents must be an object");
-				}
-				var documents = documentsNode.fields();
-				while (documents.hasNext()) {
-					var doc = documents.next();
-					if (!doc.getValue().isObject()) {
-						throw new IOException("Invalid FTS outbox payload: document fields must be an object");
-					}
-					Map<String, ArrayNode> mergedFields = target.computeIfAbsent(doc.getKey(), key -> new LinkedHashMap<>());
-					var fields = doc.getValue().fields();
-					while (fields.hasNext()) {
-						var field = fields.next();
-						if (!field.getValue().isArray()) {
-							throw new IOException("Invalid FTS outbox payload: field values must be an array");
-						}
-						ArrayNode mergedValues = mergedFields.computeIfAbsent(field.getKey(),
-								key -> mapper.createArrayNode());
-						for (JsonNode value : field.getValue()) {
-							mergedValues.add(value.deepCopy());
-						}
-					}
-				}
+		private static void mergeDocuments(JsonNode documentsNode, Map<String, ObjectNode> target) throws IOException {
+			if (documentsNode == null || documentsNode.isNull()) {
+				return;
 			}
-
-			private static void mergeDocuments(Map<String, Map<String, ArrayNode>> source,
-					Map<String, Map<String, ArrayNode>> target) {
-				for (Map.Entry<String, Map<String, ArrayNode>> doc : source.entrySet()) {
-					Map<String, ArrayNode> mergedFields = target.computeIfAbsent(doc.getKey(), key -> new LinkedHashMap<>());
-					for (Map.Entry<String, ArrayNode> field : doc.getValue().entrySet()) {
-						ArrayNode mergedValues = mergedFields.computeIfAbsent(field.getKey(),
-								key -> field.getValue().deepCopy());
-						if (mergedValues == field.getValue()) {
-							continue;
-						}
-						for (JsonNode value : field.getValue()) {
-							mergedValues.add(value.deepCopy());
-						}
-					}
+			if (!documentsNode.isObject()) {
+				throw new IOException("Invalid FTS outbox payload: documents must be an object");
+			}
+			var documents = documentsNode.fields();
+			while (documents.hasNext()) {
+				var document = documents.next();
+				if (!document.getValue().isObject()) {
+					throw new IOException("Invalid FTS outbox payload: document payload must be an object");
 				}
+				target.put(document.getKey(), (ObjectNode) document.getValue().deepCopy());
 			}
 		}
 	}
