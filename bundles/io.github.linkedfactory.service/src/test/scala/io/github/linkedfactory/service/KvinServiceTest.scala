@@ -7,18 +7,19 @@ import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.core.kvin.util.JsonFormatParser
 import net.enilink.commons.iterator.NiceIterator
 import net.enilink.komma.core.{KommaModule, URI, URIs}
-import net.enilink.komma.model._
+import net.enilink.komma.model.*
 import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.{Box, Full}
 import net.liftweb.http.provider.servlet.HTTPRequestServlet
-import net.liftweb.http.{CurrentReq, InMemoryResponse, LiftResponse, OutputStreamResponse, Req}
-import org.junit.Assert._
+import net.liftweb.http.{CurrentReq, InMemoryResponse, LiftResponse, OutputStreamResponse, Req, S}
+import org.junit.Assert.*
 import org.junit.{AfterClass, BeforeClass, Test}
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, File, IOException}
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 import jakarta.servlet.http.HttpServletRequest
+
 import scala.util.Random
 import scala.compiletime.uninitialized
 import scala.collection.mutable.ArrayBuffer
@@ -258,6 +259,24 @@ class KvinServiceTest {
   }
 
   @Test
+  def postRequestInvalidModel(): Unit = {
+    // reject post request with invalid model
+    val invalidPostReq = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      body_=(TestData.item1, "application/json")
+      // use queryString because parameters are not applied for POST requests
+      override def queryString: String = "model=invalid:model"
+    }
+    val response = kvinRest(toReq(invalidPostReq))().map(_.toResponse).openOr(null)
+    assertEquals(400, response.code)
+
+    val body = responseBody(response)
+    assertTrue(body.contains("\"code\":\"INVALID_MODEL\""))
+    assertTrue(body.contains("\"message\":"))
+    assertFalse(body.contains("\"status\":"))
+  }
+
+  @Test
   def queryDataWithTooLargeLimitReturnsExplicitError(): Unit = {
     val getReq = new MockHttpServletRequest(baseUrl) {
       method = "GET"
@@ -289,7 +308,6 @@ class KvinServiceTest {
 
   @Test
   def queryDataBasicTest(): Unit = {
-
     val postReq = new MockHttpServletRequest(baseUrl) {
       method = "POST"
       body_=(TestData.item1, "application/json")
@@ -302,7 +320,6 @@ class KvinServiceTest {
       headers = (("Accept", "application/json" :: Nil) :: Nil).toMap
     }
 
-    //var response = kvinRest(toReq(getReq))().toList.map((response) => response.toString)
     val response = kvinRest(toReq(getReq))().map(_.toResponse).openOr(null)
     val stringResponse: String = responseBody(response)
 
