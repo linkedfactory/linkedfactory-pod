@@ -21,6 +21,7 @@ import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
 import io.github.linkedfactory.service.util.LineProtocolParser
 import net.enilink.commons.iterator.{IExtendedIterator, NiceIterator}
 import net.enilink.komma.core.{URI, URIs}
+import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.Box.box2Iterable
 import net.liftweb.common.*
 import net.liftweb.http.rest.RestHelper
@@ -97,6 +98,10 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
   protected def createJsonResponse(json: JValue): LiftResponse = JsonResponse(json, responseHeaders, S.responseCookies, 200)
 
   serve(path prefix {
+    // check if model parameter is valid
+    case _ if S.param("model").isDefined && Globals.contextModel.vend.isEmpty =>
+      createErrorResponse(400, "INVALID_MODEL", "The 'model' parameter references a non-existing model. " +
+        "Please use a valid model URI or omit the parameter to use the default model.")
     // support OPTIONS requests
     case list Options req if list.endsWith("values" :: Nil) || list.endsWith("properties" :: Nil) || //
       list.endsWith("**" :: Nil) || list.endsWith("values" :: "size" :: Nil) =>
