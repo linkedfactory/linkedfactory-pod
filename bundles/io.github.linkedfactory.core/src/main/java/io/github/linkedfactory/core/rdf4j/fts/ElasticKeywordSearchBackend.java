@@ -74,27 +74,37 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 		ObjectNode payload = mapper.createObjectNode();
 		payload.put("size", request.getLimit() > 0 ? request.getLimit() : defaultLimit);
 		payload.put("_source", false);
+		payload.putArray("fields").add("subject");
 		ObjectNode query = payload.putObject("query");
 		ObjectNode boolQuery = query.putObject("bool");
 		ArrayNode must = boolQuery.putArray("must");
 		ObjectNode queryString = must.addObject().putObject("query_string");
 		queryString.put("query", request.getKeywords());
+		queryString.put("default_field", "value");
+		ArrayNode filter = boolQuery.putArray("filter");
 		if (request.getField() != null && !request.getField().isBlank()) {
-			queryString.put("default_field", request.getField());
+			filter.addObject()
+					.putObject("term")
+					.put("predicate", request.getField());
 		}
 		if (request.getBoost() != null) {
 			queryString.put("boost", request.getBoost());
 		}
 		if (request.getIriFilter() != null && !request.getIriFilter().isBlank()) {
-			boolQuery.putArray("filter")
-					.addObject()
+			filter.addObject()
 					.putObject("term")
-					.put("_id", request.getIriFilter());
+					.put("subject", request.getIriFilter());
 		}
 
 		if (request.isIncludeSnippet()) {
-			payload.putObject("highlight").putObject("fields").putObject("*");
+			payload.putObject("highlight").putObject("fields").putObject("value");
 		}
+		payload.putObject("collapse").put("field", "subject");
+		ObjectNode sort = payload.putArray("sort").addObject();
+		sort.putObject("subject").put("order", "asc");
+		payload.withArray("sort").addObject().putObject("_score").put("order", "desc");
+		payload.withArray("sort").addObject().putObject("sortValue").put("order", "asc");
+		payload.put("track_scores", true);
 
 		String url = endpoint + searchPath;
 		Exception lastError = null;
@@ -191,19 +201,16 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 		if (hitsArray.isArray()) {
 			List<FtsSearchHit> hits = new ArrayList<>(hitsArray.size());
 			for (JsonNode hit : hitsArray) {
-				String iri = textOrNull(hit.get("_id"));
-				if (iri == null) {
-					iri = textOrNull(hit.path("_source").get("iri"));
-				}
-				if (iri == null) {
-					iri = textOrNull(hit.path("_source").get("subject"));
-				}
+				String iri = textOrNull(hit.path("fields").path("subject").isArray()
+						? hit.path("fields").path("subject").get(0)
+						: hit.path("_source").get("subject"));
+				String documentId = textOrNull(hit.get("_id"));
 				if (iri == null) {
 					continue;
 				}
 				Double score = hit.has("_score") && !hit.get("_score").isNull() ? hit.get("_score").asDouble() : null;
 				String snippet = firstSnippet(hit.path("highlight"));
-				hits.add(new FtsSearchHit(iri, score, snippet));
+				hits.add(new FtsSearchHit(iri, score, snippet, documentId));
 			}
 			return hits;
 		}
