@@ -39,6 +39,7 @@ public class FtsSailConcurrentWritersTest {
 
 	@Before
 	public void setUp() throws IOException {
+		Files.createDirectories(Path.of("target"));
 		requests = new AtomicInteger();
 		server = HttpServer.create(new InetSocketAddress(0), 0);
 		server.createContext("/fts/bulk", this::handleRequest);
@@ -65,7 +66,7 @@ public class FtsSailConcurrentWritersTest {
 				final int threadIndex = t;
 				Callable<Void> task = () -> {
 					start.await(30, TimeUnit.SECONDS);
-					Path outboxDir = Files.createTempDirectory("fts-outbox-soak-" + threadIndex);
+					Path outboxDir = Files.createTempDirectory(Path.of("target"), "fts-outbox-soak-" + threadIndex);
 					HttpFtsSearchService searchService = new HttpFtsSearchService(
 							"http://127.0.0.1:" + server.getAddress().getPort(),
 							"/fts/bulk",
@@ -79,16 +80,23 @@ public class FtsSailConcurrentWritersTest {
 								connection.begin();
 								connection.add(vf.createIRI("urn:s" + threadIndex + ":" + i),
 										vf.createIRI("urn:p"),
-										vf.createLiteral("value-" + threadIndex + "-" + i));
+										vf.createLiteral("value-" + threadIndex + "-" + i),
+										vf.createIRI("urn:context"));
 								connection.commit();
 							}
 						}
 						try (var files = Files.list(outboxDir)) {
-							assertTrue(files.findAny().isEmpty());
+							assertTrue(files.filter(path -> path.toString().endsWith(".jsonl")).findAny().isEmpty());
 						}
 					} finally {
 						repository.shutDown();
 						searchService.shutdown();
+						try (var files = Files.list(outboxDir)) {
+							for (Path path : files.toList()) {
+								Files.delete(path);
+							}
+						}
+						Files.delete(outboxDir);
 					}
 					return null;
 				};

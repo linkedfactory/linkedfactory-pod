@@ -1,5 +1,7 @@
 package io.github.linkedfactory.core.rdf4j.fts;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -7,9 +9,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.conn.ConnectTimeoutException;
+import org.apache.http.conn.HttpHostConnectException;
 import org.apache.http.entity.ContentType;
-import org.apache.http.entity.StringEntity;
+import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
@@ -19,26 +24,50 @@ import org.eclipse.rdf4j.model.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.SequenceInputStream;
+import java.net.SocketTimeoutException;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class HttpFtsSearchService implements FtsSearchService {
 	private static final Logger logger = LoggerFactory.getLogger(HttpFtsSearchService.class);
 
 	private static final int MAX_ATTEMPTS = 3;
 	private static final long RETRY_BACKOFF_MILLIS = 100L;
+	private static final long MAX_RETRY_BACKOFF_MILLIS = 5_000L;
+	private static final int MAX_BULK_BYTES = 5 * 1024 * 1024;
+	public static final int DEFAULT_REQUEST_TIMEOUT_MILLIS = 300_000;
+	private static final ReentrantLock[] OUTBOX_LOCKS = new ReentrantLock[64];
+	static {
+		for (int i = 0; i < OUTBOX_LOCKS.length; i++) {
+			OUTBOX_LOCKS[i] = new ReentrantLock();
+		}
+	}
 	private static final ContentType NDJSON = ContentType.create("application/x-ndjson", StandardCharsets.UTF_8);
 	private static final String OP_STATEMENTS = "statements";
 	private static final String OP_UPSERT = "upsert";
@@ -58,6 +87,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 	static final String PROP_BULK_PATH = "fts.bulkPath";
 	static final String PROP_FAIL_ON_ERROR = "fts.failOnError";
 	static final String PROP_OUTBOX_DIR = "fts.outboxDir";
+	static final String PROP_REQUEST_TIMEOUT = "fts.requestTimeoutMillis";
 	private static final String DEFAULT_OUTBOX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
 			"linkedfactory-fts-outbox").toString();
 
@@ -66,11 +96,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 	private volatile String bulkPath = "/_bulk";
 	private volatile boolean failOnError = true;
 	private volatile Path outboxDir = Path.of(DEFAULT_OUTBOX_DIR);
-	private final RequestConfig requestConfig = RequestConfig.custom()
-			.setConnectTimeout(5_000)
-			.setConnectionRequestTimeout(5_000)
-			.setSocketTimeout(30_000)
-			.build();
+	private volatile RequestConfig requestConfig = requestConfig(DEFAULT_REQUEST_TIMEOUT_MILLIS);
 
 	private volatile CloseableHttpClient httpClient;
 	private final ThreadLocal<TransactionState> txState = new ThreadLocal<>();
@@ -87,10 +113,16 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	public HttpFtsSearchService(String endpoint, String bulkPath, boolean failOnError, String outboxDir) {
+		this(endpoint, bulkPath, failOnError, outboxDir, DEFAULT_REQUEST_TIMEOUT_MILLIS);
+	}
+
+	public HttpFtsSearchService(String endpoint, String bulkPath, boolean failOnError, String outboxDir,
+			int requestTimeoutMillis) {
 		this.endpoint = normalizeEndpoint(endpoint);
 		this.bulkPath = normalizePath(bulkPath);
 		this.failOnError = failOnError;
 		this.outboxDir = normalizeOutboxDir(outboxDir);
+		this.requestConfig = requestConfig(requestTimeoutMillis);
 	}
 
 	public final void configure(Map<String, Object> properties) {
@@ -98,6 +130,16 @@ public class HttpFtsSearchService implements FtsSearchService {
 		this.bulkPath = normalizePath(stringProp(properties, PROP_BULK_PATH, "/_bulk"));
 		this.failOnError = booleanProp(properties, PROP_FAIL_ON_ERROR, true);
 		this.outboxDir = normalizeOutboxDir(stringProp(properties, PROP_OUTBOX_DIR, DEFAULT_OUTBOX_DIR));
+		this.requestConfig = requestConfig(Integer.parseInt(stringProp(properties, PROP_REQUEST_TIMEOUT,
+				Integer.toString(DEFAULT_REQUEST_TIMEOUT_MILLIS))));
+	}
+
+	private static RequestConfig requestConfig(int timeoutMillis) {
+		if (timeoutMillis <= 0) {
+			throw new IllegalArgumentException("fts.requestTimeoutMillis must be positive");
+		}
+		return RequestConfig.custom().setConnectTimeout(5_000).setConnectionRequestTimeout(5_000)
+				.setSocketTimeout(timeoutMillis).build();
 	}
 
 	public void shutdown() throws IOException {
@@ -116,7 +158,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 		if (tx != null) {
 			tx.cleanup();
 		}
-		txState.set(TransactionState.create(mapper));
+		txState.set(TransactionState.create(outboxDir, mapper));
 	}
 
 	@Override
@@ -153,13 +195,6 @@ public class HttpFtsSearchService implements FtsSearchService {
 	@Override
 	public void commit() throws Exception {
 		TransactionState tx = txState.get();
-		if (tx == null || tx.isEmpty()) {
-			drainOutbox();
-			cleanup(tx);
-			txState.remove();
-			return;
-		}
-
 		if (endpoint.isEmpty()) {
 			logger.debug("Skipping FTS update: no {} configured.", PROP_ENDPOINT);
 			cleanup(tx);
@@ -168,8 +203,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 
 		try {
-			tx.persist(outboxDir);
-			drainOutbox();
+			drainOutbox(tx);
 		} finally {
 			cleanup(tx);
 			txState.remove();
@@ -184,21 +218,25 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private String deleteByQueryPath() {
+		return indexPath("_delete_by_query");
+	}
+
+	private String indexPath(String operation) {
 		if (bulkPath.endsWith("/_bulk")) {
-			return bulkPath.substring(0, bulkPath.length() - "_bulk".length()) + "_delete_by_query";
+			return bulkPath.substring(0, bulkPath.length() - "_bulk".length()) + operation;
 		}
-		return "/_delete_by_query";
+		return "/" + operation;
 	}
 
 	private ObjectNode statementBatch(Collection<Statement> added, Collection<Statement> removed) {
 		ObjectNode op = mapper.createObjectNode();
 		op.put("op", OP_STATEMENTS);
 		ObjectNode addedDocuments = documentsByStatement(added);
-		if (addedDocuments.size() > 0) {
+		if (!addedDocuments.isEmpty()) {
 			op.set("addedDocuments", addedDocuments);
 		}
 		ObjectNode removedDocuments = documentsByStatement(removed);
-		if (removedDocuments.size() > 0) {
+		if (!removedDocuments.isEmpty()) {
 			op.set("removedDocuments", removedDocuments);
 		}
 		return op;
@@ -336,119 +374,406 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 	}
 
-	private void drainOutbox() throws Exception {
-		if (endpoint.isEmpty()) {
-			return;
-		}
+	private void drainOutbox(TransactionState tx) throws Exception {
 		ensureOutboxDir();
+		Path directory = outboxDir.toRealPath();
+		ReentrantLock lock = OUTBOX_LOCKS[Math.floorMod(directory.hashCode(), OUTBOX_LOCKS.length)];
+		lock.lockInterruptibly();
+		try (FileChannel channel = FileChannel.open(directory.resolve(".drain.lock"),
+				StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+				var fileLock = channel.lock()) {
+			if (tx != null && !tx.isEmpty()) {
+				tx.persist(directory);
+			}
+			drainLocked(directory);
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	private void drainLocked(Path directory) throws Exception {
 		List<Path> pending;
-		try (var files = Files.list(outboxDir)) {
-			pending = files.filter(path -> path.getFileName().toString().endsWith(".json"))
+		try (var files = Files.list(directory)) {
+			pending = files.filter(path -> path.getFileName().toString().endsWith(".jsonl"))
 					.sorted()
 					.toList();
 		}
 		for (Path payload : pending) {
-			boolean sent = sendPayload(payload);
-			if (sent) {
+			Path uncertain = payload.resolveSibling(payload.getFileName() + ".uncertain");
+			try {
+				if (Files.exists(uncertain)) {
+					reconcile(uncertain);
+				}
+				sendPayload(payload, uncertain);
 				Files.deleteIfExists(payload);
+			} catch (Exception error) {
+				logger.error("Retaining FTS outbox {} and stopping replay ({}={})",
+						payload, PROP_FAIL_ON_ERROR, failOnError, error);
+				if (failOnError) {
+					throw error;
+				}
+				return;
 			}
 		}
 	}
 
-	private boolean sendPayload(Path payloadFile) throws Exception {
-		String payload = Files.readString(payloadFile, StandardCharsets.UTF_8);
-		JsonNode root = mapper.readTree(payload);
-		JsonNode operationsNode = root.path("operations");
-		if (!operationsNode.isArray()) {
-			throw new IOException("Invalid FTS outbox payload: missing operations array");
-		}
-
-		ArrayNode operations = (ArrayNode) operationsNode;
-		PreparedPayload prepared = PreparedPayload.from(operations);
+	private void sendPayload(Path payloadFile, Path uncertain) throws Exception {
+		PreparedPayload prepared = PreparedPayload.from(payloadFile, mapper);
 
 		if (prepared.hasClear()) {
-			if (!sendRequest(
-					endpoint + deleteByQueryPath(),
-					mapper.writeValueAsString(Map.of("query", Map.of("match_all", Map.of()))),
-					ContentType.APPLICATION_JSON,
-					"while clearing FTS index"
-			)) {
-				return false;
-			}
+			deleteAndConfirm(mapper.writeValueAsString(Map.of("query", Map.of("match_all", Map.of()))), uncertain);
 		}
 
 		if (prepared.hasClearContexts()) {
-			if (!sendRequest(
-					endpoint + deleteByQueryPath(),
-					mapper.writeValueAsString(Map.of(
-							"query", Map.of(
-									"terms", Map.of(FIELD_CONTEXT, prepared.clearedContexts())
-							)
-					)),
-					ContentType.APPLICATION_JSON,
-					"while clearing FTS contexts"
-			)) {
-				return false;
-			}
+			deleteAndConfirm(mapper.writeValueAsString(Map.of(
+					"query", Map.of("terms", Map.of(FIELD_CONTEXT, prepared.clearedContexts())))), uncertain);
 		}
 
-		String ndjson = prepared.toBulkNdjson(mapper);
-		if (ndjson.isBlank()) {
-			return true;
-		}
-		String responseBody = sendRequestBody(endpoint + bulkPath, ndjson, NDJSON, "while sending FTS updates");
-		if (responseBody == null) {
-			return false;
-		}
-		validateBulkResponse(responseBody);
-		return true;
+		prepared.sendBulk(mapper, MAX_BULK_BYTES, chunk -> {
+			for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+				ObjectNode fence = newFence("bulk");
+				writeFence(uncertain, fence);
+				String responseBody;
+				try {
+					responseBody = sendRequestStream(endpoint + bulkPath, chunk, chunk.length(), NDJSON,
+							"while sending FTS updates", fence.path("requestId").asText());
+				} catch (UncertainRequestException error) {
+					reconcile(uncertain);
+					if (attempt == MAX_ATTEMPTS) {
+						throw new IOException("FTS bulk finished with an unknown result; retained for ordered replay",
+								error);
+					}
+					continue;
+				} catch (Exception error) {
+					Files.deleteIfExists(uncertain);
+					throw error;
+				}
+				Files.deleteIfExists(uncertain);
+				validateBulkResponse(responseBody);
+				return;
+			}
+		});
 	}
 
-	private boolean sendRequest(String url, String body, ContentType contentType, String action) throws Exception {
-		return sendRequestBody(url, body, contentType, action) != null;
+	private void deleteAndConfirm(String query, Path uncertain) throws Exception {
+		for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+			// Bulk acknowledgements do not make recent writes visible to delete-by-query's snapshot.
+			validateShards(readResponse(sendRequestBody(endpoint + indexPath("_refresh"), "",
+					ContentType.APPLICATION_JSON, "while refreshing FTS index")), false);
+			ObjectNode fence = newFence("delete");
+			writeFence(uncertain, fence);
+			try {
+				byte[] bytes = query.getBytes(StandardCharsets.UTF_8);
+				String response = sendRequestStream(
+						endpoint + deleteByQueryPath() + "?conflicts=proceed&refresh=true&wait_for_completion=false",
+						() -> new ByteArrayInputStream(bytes), bytes.length, ContentType.APPLICATION_JSON,
+						"while submitting FTS deletion", fence.path("requestId").asText());
+				JsonNode submitted;
+				try {
+					submitted = readResponse(response);
+				} catch (IOException error) {
+					throw new UncertainRequestException("Invalid Elasticsearch deletion task acknowledgement", error);
+				}
+				if (!submitted.path("task").isTextual() || submitted.path("task").asText().isBlank()) {
+					throw new UncertainRequestException("Elasticsearch did not return a deletion task ID", null);
+				}
+				fence.put("taskId", submitted.path("task").asText());
+				writeFence(uncertain, fence);
+			} catch (UncertainRequestException error) {
+				// Discovery can prove acceptance, but an empty task listing cannot prove non-acceptance.
+				discoverTask(uncertain, fence);
+			} catch (Exception error) {
+				if (!fence.has("taskId")) {
+					Files.deleteIfExists(uncertain);
+				}
+				throw error;
+			}
+			JsonNode deleted = awaitTask(fence);
+			Files.deleteIfExists(uncertain);
+			if (!deleted.path("timed_out").isBoolean() || deleted.path("timed_out").asBoolean()
+					|| !deleted.path("failures").isArray() || !deleted.path("failures").isEmpty()) {
+				throw new IOException("Incomplete FTS delete-by-query response: " + deleted);
+			}
+			requireCount(deleted, "total");
+			requireCount(deleted, "deleted");
+			requireCount(deleted, "version_conflicts");
+			JsonNode count = readResponse(sendRequestBody(endpoint + indexPath("_count"), query,
+					ContentType.APPLICATION_JSON, "while confirming FTS deletion"));
+			validateShards(count, true);
+			long remaining = requireCount(count, "count");
+			if (remaining == 0) {
+				return;
+			}
+			if (attempt == MAX_ATTEMPTS) {
+				throw new IOException("FTS delete-by-query left " + remaining + " matching documents after "
+						+ MAX_ATTEMPTS + " attempts");
+			}
+			sleepBeforeRetry(attempt, new IOException("FTS deletion left " + remaining + " matching documents"));
+		}
+	}
+
+	private ObjectNode newFence(String kind) {
+		ObjectNode fence = mapper.createObjectNode();
+		fence.put("version", 1);
+		fence.put("kind", kind);
+		fence.put("requestId", "linkedfactory-fts-" + UUID.randomUUID());
+		return fence;
+	}
+
+	private void writeFence(Path path, ObjectNode fence) throws IOException {
+		Path staging = path.resolveSibling(path.getFileName() + ".writing");
+		byte[] bytes = mapper.writeValueAsBytes(fence);
+		try (FileChannel channel = FileChannel.open(staging, StandardOpenOption.CREATE,
+				StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+			java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
+			while (buffer.hasRemaining()) {
+				channel.write(buffer);
+			}
+			channel.force(true);
+		}
+		Files.move(staging, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+		try (FileChannel directory = FileChannel.open(path.getParent(), StandardOpenOption.READ)) {
+			directory.force(true);
+		}
+	}
+
+	private IOException blocked(Path path) {
+		return new IOException("FTS outbox blocked by an uncertain request: " + path
+				+ ". No completion proof is available. Confirm the original Elasticsearch request/tasks"
+				+ " have finished before removing only this marker and replaying.");
+	}
+
+	private void reconcile(Path path) throws Exception {
+		JsonNode parsed;
+		try {
+			parsed = mapper.readTree(Files.readString(path));
+		} catch (IOException error) {
+			throw blocked(path);
+		}
+		if (!(parsed instanceof ObjectNode fence) || fence.path("version").asInt() != 1
+				|| !Set.of("delete", "bulk").contains(fence.path("kind").asText())
+				|| !fence.path("requestId").isTextual() || fence.path("requestId").asText().isBlank()) {
+			throw blocked(path);
+		}
+		if (!fence.hasNonNull("taskId")) {
+			discoverTask(path, fence);
+		}
+		awaitTask(fence);
+		// The old request is finished. Replaying this payload is now safe under the drain lock.
+		Files.delete(path);
+	}
+
+	private void discoverTask(Path path, ObjectNode fence) throws Exception {
+		JsonNode listing = getResponse("/_tasks?detailed=true&group_by=none"
+				+ "&actions=*delete/byquery,*bulk");
+		if (!listing.path("tasks").isArray() || hasTaskFailures(listing, "node_failures")
+				|| hasTaskFailures(listing, "task_failures")) {
+			throw blocked(path);
+		}
+		List<String> matching = new ArrayList<>();
+		for (JsonNode task : listing.path("tasks")) {
+			if (fence.path("requestId").asText().equals(task.path("headers").path("X-Opaque-Id").asText())
+					&& !task.hasNonNull("parent_task_id")
+					&& task.path("node").isTextual() && task.path("id").isIntegralNumber()) {
+				matching.add(task.path("node").asText() + ":" + task.path("id").asText());
+			}
+		}
+		if (matching.size() != 1) {
+			throw blocked(path);
+		}
+		fence.put("taskId", matching.getFirst());
+		writeFence(path, fence);
+	}
+
+	private boolean hasTaskFailures(JsonNode response, String field) {
+		return response.has(field) && (!response.path(field).isArray() || !response.path(field).isEmpty());
+	}
+
+	private JsonNode awaitTask(ObjectNode fence) throws Exception {
+		String taskId = fence.path("taskId").asText();
+		if (!taskId.matches("[A-Za-z0-9_-]+:[0-9]+")) {
+			throw new IOException("Invalid persisted Elasticsearch task ID");
+		}
+		long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(requestConfig.getSocketTimeout());
+		while (true) {
+			if (System.nanoTime() >= deadline) {
+				throw new IOException("FTS task " + taskId + " is still running; retained for automatic recovery");
+			}
+			JsonNode task;
+			try {
+				int remaining = (int) Math.max(1,
+						TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
+				int wait = Math.max(1, Math.min(1_000, remaining / 2));
+				task = getResponse("/_tasks/" + taskId + "?wait_for_completion=true&timeout=" + wait + "ms",
+						deadline);
+			} catch (HttpRequestException error) {
+				// Only an observed ephemeral bulk task can be proven finished by its disappearance.
+				if (error.status == 404 && "bulk".equals(fence.path("kind").asText())
+						&& error.responseBody != null
+						&& error.responseBody.path("error").path("reason").asText()
+								.startsWith("task [" + taskId + "] isn't running")) {
+					return mapper.createObjectNode();
+				}
+				throw error;
+			}
+			if (!task.path("completed").isBoolean()) {
+				throw new IOException("Invalid Elasticsearch task response");
+			}
+			if (task.path("completed").asBoolean()) {
+				// Even a task error proves termination; replay and delete confirmation handle partial work.
+				return task.path("response");
+			}
+			if (System.nanoTime() >= deadline) {
+				throw new IOException("FTS task " + taskId + " is still running; retained for automatic recovery");
+			}
+			try {
+				TimeUnit.NANOSECONDS.sleep(Math.min(TimeUnit.MILLISECONDS.toNanos(100),
+						Math.max(0, deadline - System.nanoTime())));
+			} catch (InterruptedException error) {
+				Thread.currentThread().interrupt();
+				throw new IOException("Interrupted while awaiting FTS task " + taskId, error);
+			}
+		}
+	}
+
+	private JsonNode getResponse(String path) throws IOException {
+		return getResponse(path, System.nanoTime()
+				+ TimeUnit.MILLISECONDS.toNanos(requestConfig.getSocketTimeout()));
+	}
+
+	private JsonNode getResponse(String path, long deadline) throws IOException {
+		for (int attempt = 1; ; attempt++) {
+			long remaining = deadline - System.nanoTime();
+			if (remaining <= 0) {
+				throw new IOException("FTS task polling budget exhausted; retained for automatic recovery");
+			}
+			int timeout = (int) Math.max(1, TimeUnit.NANOSECONDS.toMillis(remaining));
+			try {
+				return getResponseOnce(path, timeout);
+			} catch (IOException error) {
+				boolean retryable = isRetryable(error)
+						|| error instanceof HttpRequestException http
+								&& (http.status == 408 || http.status == 502 || http.status == 504)
+						|| error instanceof SocketTimeoutException
+						|| error instanceof ConnectTimeoutException || error instanceof HttpHostConnectException;
+				if (!retryable) {
+					throw error;
+				}
+				if (!sleepBeforeRetry(attempt, error, deadline)) {
+					throw new IOException("FTS task polling budget exhausted; retained for automatic recovery: "
+							+ error.getMessage(), error);
+				}
+			}
+		}
+	}
+
+	private JsonNode getResponseOnce(String path, int timeout) throws IOException {
+		HttpGet request = new HttpGet(endpoint + path);
+		request.setConfig(RequestConfig.copy(requestConfig).setSocketTimeout(timeout)
+				.setConnectTimeout(Math.min(5_000, timeout)).setConnectionRequestTimeout(Math.min(5_000, timeout)).build());
+		try (CloseableHttpResponse response = client().execute(request)) {
+			int status = response.getStatusLine().getStatusCode();
+			String body = response.getEntity() == null ? ""
+					: EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+			if (status < 200 || status >= 300) {
+				HttpRequestException error = new HttpRequestException(status,
+						"HTTP " + status + " while checking FTS task: " + body);
+				error.retryAfterMillis = retryAfterMillis(response);
+				try {
+					error.responseBody = mapper.readTree(body);
+				} catch (IOException ignored) {
+					// An unstructured error is not completion evidence.
+				}
+				throw error;
+			}
+			return readResponse(body);
+		}
+	}
+
+	private JsonNode readResponse(String responseBody) throws IOException {
+		JsonNode response = mapper.readTree(responseBody);
+		if (response == null || !response.isObject()) {
+			throw new IOException("Invalid Elasticsearch response");
+		}
+		return response;
+	}
+
+	private long requireCount(JsonNode response, String field) throws IOException {
+		JsonNode value = response.path(field);
+		if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+			throw new IOException("Invalid Elasticsearch response field " + field + ": " + response);
+		}
+		return value.longValue();
+	}
+
+	private void validateShards(JsonNode response, boolean requireAll) throws IOException {
+		JsonNode shards = response.path("_shards");
+		long total = requireCount(shards, "total");
+		long successful = requireCount(shards, "successful");
+		if (requireCount(shards, "failed") != 0 || successful > total
+				|| (total > 0 && successful == 0) || (requireAll && successful < total)) {
+			throw new IOException("Incomplete Elasticsearch shard response: " + response);
+		}
 	}
 
 	private String sendRequestBody(String url, String body, ContentType contentType, String action) throws Exception {
-		IOException lastError = null;
+		byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+		return sendRequestStream(url, () -> new java.io.ByteArrayInputStream(bytes), bytes.length, contentType, action);
+	}
+
+	private String sendRequestStream(String url, InputStreamSource body, long length, ContentType contentType, String action)
+			throws Exception {
+		return sendRequestStream(url, body, length, contentType, action, null);
+	}
+
+	private String sendRequestStream(String url, InputStreamSource body, long length, ContentType contentType,
+			String action, String requestId) throws Exception {
 		for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-			try {
+			try (InputStream requestBody = body.openStream()) {
 				HttpPost request = new HttpPost(url);
 				request.setConfig(requestConfig);
-				request.setEntity(new StringEntity(body, contentType));
-				try (CloseableHttpResponse response = client().execute(request)) {
+				if (requestId != null) {
+					request.setHeader("X-Opaque-Id", requestId);
+				}
+				request.setEntity(new InputStreamEntity(requestBody, length, contentType));
+				try (CloseableHttpResponse response = executeRequest(request, action)) {
 					int status = response.getStatusLine().getStatusCode();
 					HttpEntity entity = response.getEntity();
-					String responseBody = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
-					if (status < 300) {
+					String responseBody;
+					try {
+						responseBody = entity == null ? "" : EntityUtils.toString(entity, StandardCharsets.UTF_8);
+					} catch (IOException error) {
+						throw new UncertainRequestException("Lost Elasticsearch response " + action, error);
+					}
+					if (status >= 200 && status < 300) {
 						return responseBody;
 					}
-					IOException error = new IOException("HTTP " + status + " " + action + ": " + responseBody);
-					if (!isRetryable(error) || attempt == MAX_ATTEMPTS) {
-						if (failOnError) {
-							throw error;
-						}
-						logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, error);
-						return null;
+					if (status == 408 || status == 502 || status == 504) {
+						throw new UncertainRequestException("HTTP " + status + " " + action
+								+ "; Elasticsearch may still be processing the request: " + responseBody, null);
 					}
-					lastError = error;
-					sleepBeforeRetry(attempt, error);
+					throw new HttpRequestException(status, "HTTP " + status + " " + action + ": " + responseBody);
 				}
 			} catch (IOException e) {
 				if (attempt == MAX_ATTEMPTS || !isRetryable(e)) {
-					if (failOnError) {
-						throw e;
-					}
-					logger.error("Ignoring FTS update failure because {}=false", PROP_FAIL_ON_ERROR, e);
-					return null;
+					throw e;
 				}
-				lastError = e;
 				sleepBeforeRetry(attempt, e);
 			}
 		}
-		if (lastError != null && failOnError) {
-			throw lastError;
+		throw new IOException("Unable to send FTS request");
+	}
+
+	private CloseableHttpResponse executeRequest(HttpPost request, String action) throws IOException {
+		try {
+			return client().execute(request);
+		} catch (ConnectTimeoutException | HttpHostConnectException error) {
+			throw error;
+		} catch (IOException error) {
+			// A transport failure is not proof the server stopped. Never replay it automatically.
+			throw new UncertainRequestException("Uncertain Elasticsearch request " + action
+					+ "; the server may still be processing it", error);
 		}
-		return null;
 	}
 
 	private void validateBulkResponse(String responseBody) throws IOException {
@@ -456,10 +781,10 @@ public class HttpFtsSearchService implements FtsSearchService {
 			return;
 		}
 		JsonNode root = mapper.readTree(responseBody);
+		JsonNode items = root.path("items");
 		if (!root.path("errors").asBoolean(false)) {
 			return;
 		}
-		JsonNode items = root.path("items");
 		if (!items.isArray()) {
 			throw new IOException("HTTP 500 while sending FTS updates: Elasticsearch bulk response reported errors.");
 		}
@@ -468,15 +793,19 @@ public class HttpFtsSearchService implements FtsSearchService {
 			if (!item.isObject()) {
 				continue;
 			}
-			var operations = item.fields();
-			while (operations.hasNext()) {
-				var operation = operations.next();
+			var operations = item.properties();
+			for (Map.Entry<String, JsonNode> operation : operations) {
 				JsonNode detail = operation.getValue();
 				int status = detail.path("status").asInt();
 				if (status < 300) {
 					continue;
 				}
 				JsonNode error = detail.path("error");
+				if ("delete".equals(operation.getKey()) && status == 404
+						&& "not_found".equals(detail.path("result").asText())
+						&& (error.isMissingNode() || error.isNull())) {
+					continue;
+				}
 				String id = detail.path("_id").asText("");
 				String reason = error.isMissingNode() || error.isNull() ? detail.toString() : error.toString();
 				failures.add("HTTP " + status + " bulk " + operation.getKey()
@@ -490,22 +819,55 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private boolean isRetryable(IOException error) {
-		String message = error.getMessage();
-		if (message == null) {
-			return false;
-		}
-		return message.contains("HTTP 429") || message.contains("HTTP 500") || message.contains("HTTP 502")
-				|| message.contains("HTTP 503") || message.contains("HTTP 504");
+		return error instanceof HttpRequestException http
+				&& (http.status == 429 || http.status == 500 || http.status == 503);
 	}
 
 	private void sleepBeforeRetry(int attempt, IOException error) throws IOException {
+		sleepBeforeRetry(attempt, error, Long.MAX_VALUE);
+	}
+
+	private boolean sleepBeforeRetry(int attempt, IOException error, long deadline) throws IOException {
+		long ceiling = Math.min(MAX_RETRY_BACKOFF_MILLIS,
+				RETRY_BACKOFF_MILLIS << Math.min(attempt, 6));
+		long floor = Math.max(RETRY_BACKOFF_MILLIS, ceiling / 2);
+		long delay = floor + ThreadLocalRandom.current().nextLong(ceiling - floor + 1);
+		if (error instanceof HttpRequestException http) {
+			delay = Math.max(delay, http.retryAfterMillis);
+		}
+		long remaining = deadline == Long.MAX_VALUE ? Long.MAX_VALUE : deadline - System.nanoTime();
+		if (remaining <= 0) {
+			return false;
+		}
 		try {
-			Thread.sleep(RETRY_BACKOFF_MILLIS * attempt);
+			TimeUnit.NANOSECONDS.sleep(Math.min(TimeUnit.MILLISECONDS.toNanos(delay), remaining));
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
-			throw new IOException("Interrupted while retrying FTS update", e);
+			throw new IOException("Interrupted while retrying FTS request", e);
 		}
-		logger.warn("Retrying FTS update attempt {} after transient failure: {}", attempt + 1, error.getMessage());
+		if (deadline != Long.MAX_VALUE && System.nanoTime() >= deadline) {
+			return false;
+		}
+		logger.warn("Retrying FTS request attempt {} after transient failure: {}", attempt + 1, error.getMessage());
+		return true;
+	}
+
+	private long retryAfterMillis(CloseableHttpResponse response) {
+		var header = response.getFirstHeader("Retry-After");
+		if (header == null) {
+			return 0;
+		}
+		String value = header.getValue().trim();
+		try {
+			return Math.max(0, Math.multiplyExact(Long.parseLong(value), 1_000L));
+		} catch (NumberFormatException | ArithmeticException ignored) {
+			try {
+				return Math.max(0, ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME)
+						.toInstant().toEpochMilli() - System.currentTimeMillis());
+			} catch (DateTimeParseException error) {
+				return 0;
+			}
+		}
 	}
 
 	private void ensureOutboxDir() throws IOException {
@@ -517,25 +879,46 @@ public class HttpFtsSearchService implements FtsSearchService {
 		return Path.of(dir);
 	}
 
+	private interface InputStreamSource {
+		InputStream openStream() throws IOException;
+	}
+
+	private static final class UncertainRequestException extends IOException {
+		private UncertainRequestException(String message, IOException cause) {
+			super(message, cause);
+		}
+	}
+
+	private static final class HttpRequestException extends IOException {
+		private final int status;
+		private JsonNode responseBody;
+		private long retryAfterMillis;
+
+		private HttpRequestException(int status, String message) {
+			super(message);
+			this.status = status;
+		}
+	}
+
 	private static final class TransactionState {
 		private final Path file;
-		private final java.io.BufferedWriter writer;
+		private final BufferedWriter writer;
 		private final ObjectMapper mapper;
 		private boolean empty = true;
 		private boolean finished = false;
 		private boolean persisted = false;
 
-		private TransactionState(Path file, java.io.BufferedWriter writer, ObjectMapper mapper) {
+		private TransactionState(Path file, BufferedWriter writer, ObjectMapper mapper) {
 			this.file = file;
 			this.writer = writer;
 			this.mapper = mapper;
 		}
 
-		static TransactionState create(ObjectMapper mapper) {
+		static TransactionState create(Path outboxDir, ObjectMapper mapper) {
 			try {
-				Path file = Files.createTempFile("fts-http-bulk-", ".json");
-				java.io.BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
-				writer.write("{\"operations\":[");
+				Files.createDirectories(outboxDir);
+				Path file = Files.createTempFile(outboxDir, ".fts-http-bulk-", ".pending");
+				BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
 				return new TransactionState(file, writer, mapper);
 			} catch (IOException e) {
 				throw new RuntimeException("Unable to create FTS bulk payload", e);
@@ -553,8 +936,21 @@ public class HttpFtsSearchService implements FtsSearchService {
 			}
 			try {
 				Files.createDirectories(outboxDir);
-				Path target = outboxDir.resolve(System.currentTimeMillis() + "-" + System.nanoTime() + ".json");
-				Files.move(file, target, StandardCopyOption.REPLACE_EXISTING);
+				long timestamp = System.currentTimeMillis();
+				try (var files = Files.list(outboxDir)) {
+					for (Path pending : (Iterable<Path>) files::iterator) {
+						String name = pending.getFileName().toString();
+						if (name.endsWith(".jsonl") && name.indexOf('-') > 0) {
+							try {
+								timestamp = Math.max(timestamp, Long.parseLong(name.substring(0, name.indexOf('-'))) + 1);
+							} catch (NumberFormatException ignored) {
+								// Older/custom payload names still participate in normal sorted replay.
+							}
+						}
+					}
+				}
+				Path target = outboxDir.resolve(timestamp + "-" + UUID.randomUUID() + ".jsonl");
+				Files.move(file, target, StandardCopyOption.ATOMIC_MOVE);
 				persisted = true;
 				return target;
 			} catch (IOException e) {
@@ -564,10 +960,8 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 		void append(JsonNode op) {
 			try {
-				if (!empty) {
-					writer.write(',');
-				}
 				writer.write(mapper.writeValueAsString(op));
+				writer.write('\n');
 				writer.flush();
 				empty = false;
 			} catch (IOException e) {
@@ -578,7 +972,6 @@ public class HttpFtsSearchService implements FtsSearchService {
 		Path finishPayload() {
 			if (!finished) {
 				try {
-					writer.write("]}");
 					writer.flush();
 					writer.close();
 					finished = true;
@@ -610,44 +1003,82 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private static final class PreparedPayload {
-		private final Map<String, ObjectNode> upserts = new LinkedHashMap<>();
-		private final Map<String, ObjectNode> removals = new LinkedHashMap<>();
+		private final Path file;
 		private final List<String> clearedContexts = new ArrayList<>();
 		private boolean clear;
 		private boolean clearContexts;
+		private long lastClear = -1;
 
-		static PreparedPayload from(ArrayNode operations) throws IOException {
-			PreparedPayload prepared = new PreparedPayload();
-			for (JsonNode op : operations) {
-				String type = op.path("op").asText();
-				if (OP_CLEAR.equals(type)) {
-					prepared.clear = true;
-					prepared.clearContexts = false;
-					prepared.clearedContexts.clear();
-					prepared.upserts.clear();
-					prepared.removals.clear();
-				} else if (OP_CLEAR_CONTEXTS.equals(type)) {
-					prepared.clearContexts = true;
-					JsonNode contexts = op.path("contexts");
-					if (!contexts.isArray()) {
-						throw new IOException("Invalid FTS outbox payload: clearContexts contexts must be an array");
+		private PreparedPayload(Path file) {
+			this.file = file;
+		}
+
+		static PreparedPayload from(Path payloadFile, ObjectMapper mapper) throws IOException {
+			PreparedPayload prepared = new PreparedPayload(payloadFile);
+			try (JsonParser parser = mapper.getFactory().createParser(payloadFile.toFile())) {
+				long record = 0;
+				while (parser.nextToken() != null) {
+					ObjectNode op = readHeader(parser, mapper);
+					String type = op.path("op").asText();
+					if (OP_CLEAR.equals(type)) {
+						prepared.clear = true;
+						prepared.clearContexts = false;
+						prepared.clearedContexts.clear();
+						prepared.lastClear = record;
+					} else if (OP_CLEAR_CONTEXTS.equals(type)) {
+						prepared.clearContexts = true;
+						JsonNode contexts = op.path("contexts");
+						if (!contexts.isArray()) {
+							throw new IOException("Invalid FTS outbox payload: clearContexts contexts must be an array");
+						}
+						prepared.clearedContexts.clear();
+						for (JsonNode context : contexts) {
+							prepared.clearedContexts.add(context.asText());
+						}
+					} else if (!Set.of(OP_STATEMENTS, OP_UPSERT, OP_REMOVE).contains(type)) {
+						throw new IOException("Invalid FTS outbox payload: unsupported operation " + type);
 					}
-					prepared.clearedContexts.clear();
-					for (JsonNode context : contexts) {
-						prepared.clearedContexts.add(context.asText());
-					}
-				} else if (OP_STATEMENTS.equals(type)) {
-					mergeDocuments(op.get("addedDocuments"), prepared.upserts);
-					mergeDocuments(op.get("removedDocuments"), prepared.removals);
-				} else if (OP_UPSERT.equals(type)) {
-					mergeDocuments(op.get("documents"), prepared.upserts);
-				} else if (OP_REMOVE.equals(type)) {
-					mergeDocuments(op.get("documents"), prepared.removals);
-				} else {
-					throw new IOException("Invalid FTS outbox payload: unsupported operation " + type);
+					record++;
 				}
 			}
 			return prepared;
+		}
+
+		private static ObjectNode readHeader(JsonParser parser, ObjectMapper mapper) throws IOException {
+			if (parser.currentToken() != JsonToken.START_OBJECT) {
+				throw new IOException("Invalid FTS outbox operation");
+			}
+			ObjectNode header = mapper.createObjectNode();
+			while (parser.nextToken() != JsonToken.END_OBJECT) {
+				if (parser.currentToken() != JsonToken.FIELD_NAME) {
+					throw new IOException("Invalid FTS outbox operation field");
+				}
+				String field = parser.currentName();
+				parser.nextToken();
+				if ("op".equals(field) || "contexts".equals(field)) {
+					header.set(field, mapper.readTree(parser));
+				} else if (Set.of("documents", "addedDocuments", "removedDocuments").contains(field)) {
+					validateDocuments(parser);
+				} else {
+					parser.skipChildren();
+				}
+			}
+			return header;
+		}
+
+		private static void validateDocuments(JsonParser parser) throws IOException {
+			if (parser.currentToken() == JsonToken.VALUE_NULL) {
+				return;
+			}
+			if (parser.currentToken() != JsonToken.START_OBJECT) {
+				throw new IOException("Invalid FTS outbox payload: documents must be an object");
+			}
+			while (parser.nextToken() != JsonToken.END_OBJECT) {
+				if (parser.currentToken() != JsonToken.FIELD_NAME || parser.nextToken() != JsonToken.START_OBJECT) {
+					throw new IOException("Invalid FTS outbox payload: document payload must be an object");
+				}
+				parser.skipChildren();
+			}
 		}
 
 		boolean hasClear() {
@@ -662,43 +1093,139 @@ public class HttpFtsSearchService implements FtsSearchService {
 			return clearedContexts;
 		}
 
-		String toBulkNdjson(ObjectMapper mapper) throws IOException {
-			StringBuilder ndjson = new StringBuilder();
-			appendDocuments(ndjson, upserts, true, mapper);
-			appendDocuments(ndjson, removals, false, mapper);
-			return ndjson.toString();
-		}
-
-		private static void appendDocuments(StringBuilder ndjson, Map<String, ObjectNode> documents, boolean create,
-				ObjectMapper mapper) throws IOException {
-			String operation = create ? "index" : "delete";
-			for (Map.Entry<String, ObjectNode> entry : documents.entrySet()) {
-				ObjectNode action = mapper.createObjectNode();
-				action.putObject(operation).put("_id", entry.getKey());
-				ndjson.append(mapper.writeValueAsString(action)).append('\n');
-				if (create) {
-					ObjectNode payload = entry.getValue().deepCopy();
-					payload.remove(FIELD_ID);
-					ndjson.append(mapper.writeValueAsString(payload)).append('\n');
+		void sendBulk(ObjectMapper mapper, int maxBytes, BulkSender sender) throws Exception {
+			BulkChunkBuilder builder = new BulkChunkBuilder(maxBytes, sender);
+			// Preserve the existing additions-before-removals semantics without retaining the whole upload.
+			for (boolean create : new boolean[] { true, false }) {
+				try (JsonParser headers = mapper.getFactory().createParser(file.toFile());
+						JsonParser parser = mapper.getFactory().createParser(file.toFile())) {
+					long record = 0;
+					while (headers.nextToken() != null) {
+						String type = readHeader(headers, mapper).path("op").asText();
+						if (parser.nextToken() != JsonToken.START_OBJECT) {
+							throw new IOException("Invalid FTS outbox operation");
+						}
+						while (parser.nextToken() != JsonToken.END_OBJECT) {
+							if (parser.currentToken() != JsonToken.FIELD_NAME) {
+								throw new IOException("Invalid FTS outbox operation field");
+							}
+							String field = parser.currentName();
+							parser.nextToken();
+							boolean selected = OP_STATEMENTS.equals(type)
+									&& (create ? "addedDocuments" : "removedDocuments").equals(field)
+									|| (create ? OP_UPSERT : OP_REMOVE).equals(type) && "documents".equals(field);
+							if (selected && record > lastClear) {
+								appendDocuments(parser, builder, create, mapper);
+							} else {
+								parser.skipChildren();
+							}
+						}
+						record++;
+					}
 				}
 			}
+			builder.finish();
 		}
 
-		private static void mergeDocuments(JsonNode documentsNode, Map<String, ObjectNode> target) throws IOException {
-			if (documentsNode == null || documentsNode.isNull()) {
+		private static void appendDocuments(JsonParser parser, BulkChunkBuilder builder, boolean create,
+				ObjectMapper mapper) throws Exception {
+			if (parser.currentToken() == JsonToken.VALUE_NULL) {
 				return;
 			}
-			if (!documentsNode.isObject()) {
+			if (parser.currentToken() != JsonToken.START_OBJECT) {
 				throw new IOException("Invalid FTS outbox payload: documents must be an object");
 			}
-			var documents = documentsNode.fields();
-			while (documents.hasNext()) {
-				var document = documents.next();
-				if (!document.getValue().isObject()) {
+			String operation = create ? "index" : "delete";
+			while (parser.nextToken() != JsonToken.END_OBJECT) {
+				String id = parser.currentName();
+				parser.nextToken();
+				if (parser.currentToken() != JsonToken.START_OBJECT) {
 					throw new IOException("Invalid FTS outbox payload: document payload must be an object");
 				}
-				target.put(document.getKey(), (ObjectNode) document.getValue().deepCopy());
+				List<byte[]> lines = new ArrayList<>(create ? 2 : 1);
+				lines.add(actionLine(mapper, operation, id));
+				if (create) {
+					ObjectNode document = mapper.readTree(parser);
+					document.remove(FIELD_ID);
+					lines.add(documentLine(mapper, document));
+				} else {
+					parser.skipChildren();
+				}
+				builder.appendDocument(operation + ":" + id, lines);
 			}
+		}
+
+		private static byte[] actionLine(ObjectMapper mapper, String operation, String id) throws IOException {
+			ObjectNode action = mapper.createObjectNode();
+			action.putObject(operation).put("_id", id);
+			return serializeLine(mapper, action);
+		}
+
+		private static byte[] documentLine(ObjectMapper mapper, ObjectNode payload) throws IOException {
+			return serializeLine(mapper, payload);
+		}
+
+		private static byte[] serializeLine(ObjectMapper mapper, JsonNode node) throws IOException {
+			byte[] json = mapper.writeValueAsBytes(node);
+			byte[] line = new byte[json.length + 1];
+			System.arraycopy(json, 0, line, 0, json.length);
+			line[json.length] = '\n';
+			return line;
+		}
+	}
+
+	private interface BulkSender {
+		void send(BulkRequest request) throws Exception;
+	}
+
+	private static final class BulkChunkBuilder {
+		private final int maxBytes;
+		private final BulkSender sender;
+		private final Map<String, List<byte[]>> documents = new LinkedHashMap<>();
+		private long size;
+
+		private BulkChunkBuilder(int maxBytes, BulkSender sender) {
+			this.maxBytes = maxBytes;
+			this.sender = sender;
+		}
+
+		void appendDocument(String key, List<byte[]> documentLines) throws Exception {
+			long documentSize = 0L;
+			for (byte[] line : documentLines) {
+				documentSize += line.length;
+			}
+			List<byte[]> previous = documents.remove(key);
+			if (previous != null) {
+				for (byte[] line : previous) {
+					size -= line.length;
+				}
+			}
+			if (size > 0 && size + documentSize > maxBytes) {
+				finish();
+			}
+			documents.put(key, documentLines);
+			size += documentSize;
+		}
+
+		void finish() throws Exception {
+			if (!documents.isEmpty()) {
+				List<byte[]> lines = new ArrayList<>();
+				documents.values().forEach(lines::addAll);
+				sender.send(new BulkRequest(lines, size));
+				documents.clear();
+				size = 0L;
+			}
+		}
+	}
+
+	private record BulkRequest(List<byte[]> lines, long length) implements InputStreamSource {
+		@Override
+		public InputStream openStream() {
+			List<InputStream> streams = new ArrayList<>(lines.size());
+			for (byte[] line : lines) {
+				streams.add(new ByteArrayInputStream(line));
+			}
+			return new SequenceInputStream(Collections.enumeration(streams));
 		}
 	}
 }
