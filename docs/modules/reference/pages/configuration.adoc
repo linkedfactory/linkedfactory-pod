@@ -148,9 +148,19 @@ Example with the default model and a LevelDB store:
 
 To use Iceberg instead of the default value store, configure `<store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ]`.
 KvinIceberg maintains a value table in `iceberg/` and separate URI-ID tables in `iceberg-ids/items/`, `iceberg-ids/properties/`, and `iceberg-ids/contexts/`, with bounded in-memory lookup caches.
-Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots.
+Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots using Iceberg's standard generic Parquet readers.
 Use a new store directory rather than pointing it at an existing KvinParquet archive.
 Retention-period cleanup is not supported by KvinIceberg.
+
+The value table declares the sort order `itemId ASC, contextId ASC, propertyId ASC, time DESC, seqNr DESC` in Iceberg metadata.
+Each batch is physically sorted in that order, and new data files record its sort-order ID.
+Opening an existing store updates the table's default sort order if needed, without rewriting or relabeling old files.
+Sorted data and column statistics support scan pruning; sort-order metadata alone does not guarantee faster searches or globally ordered query results.
+
+Manifest caching is enabled for both new and reopened value and URI-ID tables.
+It uses Iceberg's defaults: up to 100 MiB per table FileIO, with individual manifests limited to 8 MiB and entries expiring after 60 seconds without access.
+Caches are released when the store closes.
+Tables still refresh for every query, so caching immutable manifests does not delay visibility of committed writes from other instances; Parquet data is not cached.
 
 eniLINK watches bundle configuration files.
 When one changes, the affected bundles are stopped and restarted, which interrupts their service.

@@ -11,9 +11,9 @@
 	<artifactId>io.github.linkedfactory.core</artifactId>
 
 	<properties>
-		<parquet.version>1.17.1</parquet.version>
+		<parquet.version>1.18.1</parquet.version>
 		<hadoop.version>3.5.0</hadoop.version>
-		<iceberg.version>1.8.1</iceberg.version>
+		<iceberg.version>1.12.0</iceberg.version>
 		<lwjgl.version>3.3.3</lwjgl.version>
 	</properties>
 
@@ -77,12 +77,6 @@
 		<dependency>
 			<groupId>org.apache.parquet</groupId>
 			<artifactId>parquet-hadoop</artifactId>
-			<version>${parquet.version}</version>
-			<scope>provided</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.apache.parquet</groupId>
-			<artifactId>parquet-avro</artifactId>
 			<version>${parquet.version}</version>
 			<scope>provided</scope>
 		</dependency>

@@ -44,11 +44,6 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 public class KvinParquetBenchmark {
-	static File processUseCaseLevelDbStoreDir, processUseCaseParquetStoreDir, processUseCaseIcebergStoreDir, machineUseCaseLevelDbStoreDir, machineUseCaseParquetStoreDir, machineUseCaseIcebergStoreDir;
-	static KvinLevelDb processUseCaseLevelDbStore, machineUseCaseLevelDbStore;
-	static KvinParquet processUseCaseParquetStore, machineUseCaseParquetStore;
-	static KvinIceberg processUseCaseIcebergStore, machineUseCaseIcebergStore;
-
 	String processUseCaseQueryString = "prefix aq: <http://dm.adaproq.de/vocab/>\n" +
 			"\n" +
 			"select * {\n" +
@@ -78,34 +73,9 @@ public class KvinParquetBenchmark {
 			"   }\n" +
 			"} order by ?part ?s";
 
-	public KvinParquetBenchmark() {
-		try {
-			processUseCaseLevelDbStoreDir = Files.createTempDirectory("temp_levelDb_process").toFile();
-			machineUseCaseLevelDbStoreDir = Files.createTempDirectory("temp_levelDb_machine").toFile();
-
-			processUseCaseParquetStoreDir = Files.createTempDirectory("temp_parquet_process").toFile();
-			machineUseCaseParquetStoreDir = Files.createTempDirectory("temp_parquet_machine").toFile();
-
-			processUseCaseIcebergStoreDir = Files.createTempDirectory("temp_iceberg_process").toFile();
-			machineUseCaseIcebergStoreDir = Files.createTempDirectory("temp_iceberg_machine").toFile();
-
-			processUseCaseLevelDbStore = new KvinLevelDb(processUseCaseLevelDbStoreDir);
-			machineUseCaseLevelDbStore = new KvinLevelDb(machineUseCaseLevelDbStoreDir);
-
-			processUseCaseParquetStore = new KvinParquet(processUseCaseParquetStoreDir.getAbsolutePath() + "/");
-			machineUseCaseParquetStore = new KvinParquet(machineUseCaseParquetStoreDir.getAbsolutePath() + "/");
-
-			processUseCaseIcebergStore = new KvinIceberg(processUseCaseIcebergStoreDir.getAbsolutePath());
-			machineUseCaseIcebergStore = new KvinIceberg(machineUseCaseIcebergStoreDir.getAbsolutePath());
-
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
-	}
-
 	public static void main(String[] args) throws RunnerException {
 		Options opt = new OptionsBuilder()
-				.include(KvinParquetBenchmark.class.getSimpleName()) // adapt to control which benchmark tests to run
+				.include(KvinParquetBenchmark.class.getSimpleName() + "\\..*SingleItemReadPerformance") // adapt to control which benchmark tests to run
 				.forks(1)
 				.build();
 
@@ -114,41 +84,41 @@ public class KvinParquetBenchmark {
 
 	@Benchmark
 	public void levelDbReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-		int count = readFromStore(processUseCaseLevelDbStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
+		int count = readFromStore(benchmarkBase.processUseCaseLevelDbStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
 		System.out.println("count: " + count);
 	}
 
 	@Benchmark
 	public void levelDbReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-		readFromStore(machineUseCaseLevelDbStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
+		readFromStore(benchmarkBase.machineUseCaseLevelDbStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
 	}
 
 	@Benchmark
 	public void parquetReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-		int count = readFromStore(processUseCaseParquetStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
+		int count = readFromStore(benchmarkBase.processUseCaseParquetStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
 		System.out.println("count: " + count);
 	}
 
 	@Benchmark
 	public void parquetReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-		readFromStore(machineUseCaseParquetStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
+		readFromStore(benchmarkBase.machineUseCaseParquetStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
 	}
 
 	@Benchmark
 	public void icebergReadPerformanceForProcessUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-		int count = readFromStore(processUseCaseIcebergStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
+		int count = readFromStore(benchmarkBase.processUseCaseIcebergStore, processUseCaseQueryString, "http://dm.adaproq.de/vocab/");
 		System.out.println("count: " + count);
 	}
 
 	@Benchmark
 	public void icebergReadPerformanceForMachineUseCase(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
-		readFromStore(machineUseCaseIcebergStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
+		readFromStore(benchmarkBase.machineUseCaseIcebergStore, machineUseCaseQueryString, "http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.");
 	}
 
 	@Benchmark
 	public void parquetSingleItemReadPerformance(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
 		URI item = URIs.createURI("http://dm.adaproq.de/vocab/wp1995");
-		IExtendedIterator<KvinTuple> tuples = processUseCaseParquetStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0);
+		IExtendedIterator<KvinTuple> tuples = benchmarkBase.processUseCaseParquetStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0);
 		while (tuples.hasNext()) {
 			KvinTuple tuple = tuples.next();
 			blackhole.consume(tuple);
@@ -158,7 +128,7 @@ public class KvinParquetBenchmark {
 	@Benchmark
 	public void levelDbSingleItemReadPerformance(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
 		URI item = URIs.createURI("http://dm.adaproq.de/vocab/wp1995");
-		IExtendedIterator<KvinTuple> tuples = processUseCaseLevelDbStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0);
+		IExtendedIterator<KvinTuple> tuples = benchmarkBase.processUseCaseLevelDbStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0);
 		while (tuples.hasNext()) {
 			KvinTuple tuple = tuples.next();
 			blackhole.consume(tuple);
@@ -168,7 +138,7 @@ public class KvinParquetBenchmark {
 	@Benchmark
 	public void icebergSingleItemReadPerformance(KvinParquetBenchmarkBase benchmarkBase, Blackhole blackhole) {
 		URI item = URIs.createURI("http://dm.adaproq.de/vocab/wp1995");
-		try (IExtendedIterator<KvinTuple> tuples = processUseCaseIcebergStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0)) {
+		try (IExtendedIterator<KvinTuple> tuples = benchmarkBase.processUseCaseIcebergStore.fetch(item, null, Kvin.DEFAULT_CONTEXT, 0)) {
 			while (tuples.hasNext()) {
 				blackhole.consume(tuples.next());
 			}
@@ -206,16 +176,41 @@ public class KvinParquetBenchmark {
 
 	@State(Scope.Benchmark)
 	public static class KvinParquetBenchmarkBase {
-		public static NiceIterator<KvinTuple> LevelDBProcessUseCaseDataIterator, parquetProcessUseCaseDataIterator, LevelDBMachineUseCaseDataIterator, parquetMachineUseCaseDataIterator;
+		File processUseCaseLevelDbStoreDir, processUseCaseParquetStoreDir, processUseCaseIcebergStoreDir, machineUseCaseLevelDbStoreDir, machineUseCaseParquetStoreDir, machineUseCaseIcebergStoreDir;
+		KvinLevelDb processUseCaseLevelDbStore, machineUseCaseLevelDbStore;
+		KvinParquet processUseCaseParquetStore, machineUseCaseParquetStore;
+		KvinIceberg processUseCaseIcebergStore, machineUseCaseIcebergStore;
+		public NiceIterator<KvinTuple> LevelDBProcessUseCaseDataIterator, parquetProcessUseCaseDataIterator, LevelDBMachineUseCaseDataIterator, parquetMachineUseCaseDataIterator;
 
 		@Setup(Level.Trial)
-		public void setup() {
+		public void setup() throws IOException {
+			initializeStores();
 			ingestProcessUseCaseDataForLevelDbStore();
 			ingestProcessUseCaseDataForParquetStore();
 			ingestProcessUseCaseDataForIcebergStore();
 			ingestMachineUseCaseDataForLevelDbStore();
 			ingestMachineUseCaseDataForParquetStore();
 			ingestMachineUseCaseDataForIcebergStore();
+		}
+
+		private void initializeStores() throws IOException {
+			processUseCaseLevelDbStoreDir = Files.createTempDirectory("temp_levelDb_process").toFile();
+			machineUseCaseLevelDbStoreDir = Files.createTempDirectory("temp_levelDb_machine").toFile();
+
+			processUseCaseParquetStoreDir = Files.createTempDirectory("temp_parquet_process").toFile();
+			machineUseCaseParquetStoreDir = Files.createTempDirectory("temp_parquet_machine").toFile();
+
+			processUseCaseIcebergStoreDir = Files.createTempDirectory("temp_iceberg_process").toFile();
+			machineUseCaseIcebergStoreDir = Files.createTempDirectory("temp_iceberg_machine").toFile();
+
+			processUseCaseLevelDbStore = new KvinLevelDb(processUseCaseLevelDbStoreDir);
+			machineUseCaseLevelDbStore = new KvinLevelDb(machineUseCaseLevelDbStoreDir);
+
+			processUseCaseParquetStore = new KvinParquet(processUseCaseParquetStoreDir.getAbsolutePath() + "/");
+			machineUseCaseParquetStore = new KvinParquet(machineUseCaseParquetStoreDir.getAbsolutePath() + "/");
+
+			processUseCaseIcebergStore = new KvinIceberg(processUseCaseIcebergStoreDir.getAbsolutePath());
+			machineUseCaseIcebergStore = new KvinIceberg(machineUseCaseIcebergStoreDir.getAbsolutePath());
 		}
 
 		private void ingestProcessUseCaseDataForLevelDbStore() {

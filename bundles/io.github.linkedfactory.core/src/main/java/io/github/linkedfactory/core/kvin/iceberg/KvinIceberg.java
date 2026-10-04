@@ -14,11 +14,15 @@ import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.ManifestFiles;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.SortOrder;
+import org.apache.iceberg.SortOrderBuilder;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.data.GenericRecord;
@@ -83,8 +87,9 @@ public class KvinIceberg implements Kvin {
 			Types.NestedField.optional(11, "valueString", Types.StringType.get()),
 			Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()),
 			Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
+	private static final SortOrder SORT_ORDER = configureSortOrder(SortOrder.builderFor(SCHEMA)).build();
 	private static final Comparator<org.apache.iceberg.data.Record> ORDER = Comparator.comparingLong((org.apache.iceberg.data.Record r) -> (Long) r.get(0)).thenComparingLong(r -> (Long) r.get(1)).thenComparingLong(r -> (Long) r.get(2)).thenComparing((a, b) -> Long.compare((Long) b.get(3), (Long) a.get(3))).thenComparing((a, b) -> Integer.compare((Integer) b.get(4), (Integer) a.get(4)));
-	private static final Comparator<KvinRow> ROW_ORDER = Comparator.comparingLong(KvinRow::itemId).thenComparingLong(KvinRow::contextId).thenComparingLong(KvinRow::propertyId).thenComparing((a, b) -> Long.compare(b.time(), a.time())).thenComparingInt(KvinRow::seqNr);
+	private static final Comparator<KvinRow> ROW_ORDER = Comparator.comparingLong(KvinRow::itemId).thenComparingLong(KvinRow::contextId).thenComparingLong(KvinRow::propertyId).thenComparing((a, b) -> Long.compare(b.time(), a.time())).thenComparing((a, b) -> Integer.compare(b.seqNr(), a.seqNr()));
 	private final Path root;
 	private final Table table;
 	private final IdTable[] ids = new IdTable[3];
@@ -112,8 +117,9 @@ public class KvinIceberg implements Kvin {
 				if (Files.exists(root.resolve("metadata"))) {
 					throw new IllegalArgumentException("Existing KvinParquet archive cannot be opened as KvinIceberg: " + root);
 				}
-				table = tables.create(SCHEMA, SPEC, tableProperties(), location);
+				table = tables.create(SCHEMA, SPEC, SORT_ORDER, tableProperties(), location);
 			}
+			enableManifestCaching(table);
 			String[] names = {"items", "contexts", "properties"};
 			for (int i = 0; i < ids.length; i++) {
 				Path path = root.resolve("iceberg-ids").resolve(names[i]);
@@ -128,10 +134,18 @@ public class KvinIceberg implements Kvin {
 					}
 					ids[i] = new IdTable(tables.create(ID_SCHEMA, SPEC, tableProperties(), path.toString()));
 				}
+				enableManifestCaching(ids[i].table);
+			}
+			if (!table.sortOrder().sameOrder(SORT_ORDER)) {
+				configureSortOrder(table.replaceSortOrder()).commit();
 			}
 		} catch (IOException e) {
 			throw new UncheckedIOException("Unable to initialize Iceberg store at " + root, e);
 		}
+	}
+
+	private static <T extends SortOrderBuilder<T>> T configureSortOrder(T builder) {
+		return builder.asc("itemId").asc("contextId").asc("propertyId").desc("time").desc("seqNr");
 	}
 
 	private static Map<String, String> tableProperties() {
@@ -139,6 +153,13 @@ public class KvinIceberg implements Kvin {
 				TableProperties.DEFAULT_FILE_FORMAT, FileFormat.PARQUET.name(),
 				TableProperties.FORMAT_VERSION, "2",
 				TableProperties.PARQUET_COMPRESSION, "zstd");
+	}
+
+	private static void enableManifestCaching(Table table) {
+		// HadoopTables does not initialize FileIO with catalog properties.
+		Map<String, String> properties = new HashMap<>(table.io().properties());
+		properties.put(CatalogProperties.IO_MANIFEST_CACHE_ENABLED, "true");
+		table.io().initialize(properties);
 	}
 
 	private long id(int kind, URI uri) {
@@ -217,7 +238,7 @@ public class KvinIceberg implements Kvin {
 			if (mappings.isEmpty()) return;
 			String path = root.resolve("iceberg-ids/data/" + UUID.randomUUID() + ".parquet").toString();
 			Files.createDirectories(Path.of(path).getParent());
-			var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table).writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0).createWriterFunc(GenericParquetWriter::buildWriter).<org.apache.iceberg.data.Record>build();
+			var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table).writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0).createWriterFunc(message -> GenericParquetWriter.create(ID_SCHEMA, message)).<org.apache.iceberg.data.Record>build();
 			DataWriter<org.apache.iceberg.data.Record> writer = new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null);
 			try (writer) {
 				for (var entry : mappings.entrySet()) {
@@ -334,8 +355,8 @@ public class KvinIceberg implements Kvin {
 		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet").toString();
 		paths.add(path);
 		Files.createDirectories(Path.of(path).getParent());
-		var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table).writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0).createWriterFunc(GenericParquetWriter::buildWriter).<org.apache.iceberg.data.Record>build();
-		DataWriter<org.apache.iceberg.data.Record> writer = new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null);
+		var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table).writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0).createWriterFunc(message -> GenericParquetWriter.create(SCHEMA, message)).<org.apache.iceberg.data.Record>build();
+		DataWriter<org.apache.iceberg.data.Record> writer = new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null, table.sortOrder());
 		try (writer) {
 			batch.forEach(writer::write);
 		}
@@ -400,7 +421,7 @@ public class KvinIceberg implements Kvin {
 				if (!task.deletes().isEmpty()) {
 					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
 				}
-				CloseableIterable<KvinRow> rows = Parquet.<KvinRow>read(table.io().newInputFile(task.file().location())).project(SCHEMA).filter(filter).createReaderFunc(schema -> KvinRowReader.buildReader(SCHEMA, schema)).build();
+				CloseableIterable<org.apache.iceberg.data.Record> rows = Parquet.read(table.io().newInputFile(task.file().location())).project(SCHEMA).filter(filter).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build();
 				RowCursor cursor = new RowCursor(rows);
 				try {
 					if (cursor.advance()) cursors.add(cursor);
@@ -479,19 +500,29 @@ public class KvinIceberg implements Kvin {
 		};
 	}
 
+	private record KvinRow(long itemId, long contextId, long propertyId, long time, int seqNr, Object value) {
+	}
+
 	private static class RowCursor implements AutoCloseable {
-		final CloseableIterable<KvinRow> rows;
-		final CloseableIterator<KvinRow> iterator;
+		final CloseableIterable<org.apache.iceberg.data.Record> rows;
+		final CloseableIterator<org.apache.iceberg.data.Record> iterator;
 		KvinRow row;
 
-		RowCursor(CloseableIterable<KvinRow> rows) {
+		RowCursor(CloseableIterable<org.apache.iceberg.data.Record> rows) {
 			this.rows = rows;
 			this.iterator = rows.iterator();
 		}
 
 		boolean advance() {
 			if (!iterator.hasNext()) return false;
-			row = iterator.next();
+			var record = iterator.next();
+			Object value = null;
+			for (int i = 6; i < SCHEMA.columns().size(); i++) {
+				value = record.get(i);
+				if (value != null) break;
+			}
+			row = new KvinRow((Long) record.get(0), (Long) record.get(1), (Long) record.get(2),
+					(Long) record.get(3), (Integer) record.get(4), value);
 			return true;
 		}
 
@@ -546,5 +577,7 @@ public class KvinIceberg implements Kvin {
 
 	@Override
 	public void close() {
+		ManifestFiles.dropCache(table.io());
+		for (IdTable idTable : ids) ManifestFiles.dropCache(idTable.table.io());
 	}
 }
