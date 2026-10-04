@@ -76,6 +76,9 @@ import static io.github.linkedfactory.core.kvin.parquet.Records.encodeRecord;
 import static org.apache.parquet.filter2.predicate.FilterApi.*;
 
 public class KvinParquet implements Kvin {
+	static {
+		System.setProperty("org.apache.avro.SERIALIZABLE_CLASSES", SimpleMapping.class.getName());
+	}
 	static final Logger log = LoggerFactory.getLogger(KvinParquet.class);
 	static final long[] EMPTY_IDS = {0};
 	static Comparator<KvinRecord> KVIN_RECORD_COMPARATOR = (a, b) -> {

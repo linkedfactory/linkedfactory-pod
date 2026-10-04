@@ -8,6 +8,10 @@ import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.CatalogProperties;
+import org.apache.iceberg.ManifestFiles;
+import org.apache.iceberg.SortOrder;
+import org.apache.iceberg.Table;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.parquet.HadoopReadOptions;
 import org.apache.parquet.hadoop.ParquetFileReader;
@@ -50,6 +54,172 @@ public class KvinIcebergTest {
 		store = new KvinIceberg(directory.toString());
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 			assertFalse(values.hasNext());
+		}
+	}
+
+	private Table valueTable() {
+		return new HadoopTables(new Configuration()).load(directory.toPath().resolve("iceberg").toString());
+	}
+
+	private List<Table> storeTables() throws ReflectiveOperationException {
+		var tableField = KvinIceberg.class.getDeclaredField("table");
+		tableField.setAccessible(true);
+		List<Table> tables = new ArrayList<>();
+		tables.add((Table) tableField.get(store));
+		var idsField = KvinIceberg.class.getDeclaredField("ids");
+		idsField.setAccessible(true);
+		for (Object ids : (Object[]) idsField.get(store)) {
+			var idTableField = ids.getClass().getDeclaredField("table");
+			idTableField.setAccessible(true);
+			tables.add((Table) idTableField.get(ids));
+		}
+		return tables;
+	}
+
+	@Test
+	public void cachesManifestsForAllTablesOnCreationAndReopening() throws Exception {
+		store.put(new KvinTuple(item, property, null, 1, 0, "value"));
+		for (int round = 0; round < 2; round++) {
+			List<Table> tables = storeTables();
+			for (Table table : tables) {
+				assertEquals("true", table.io().properties().get(CatalogProperties.IO_MANIFEST_CACHE_ENABLED));
+				ManifestFiles.dropCache(table.io());
+				try (var files = table.newScan().planFiles()) {
+					assertTrue(files.iterator().hasNext());
+				}
+				var first = ManifestFiles.contentCacheStats(table.io());
+				assertTrue(first.missCount() > 0);
+				try (var files = table.newScan().planFiles()) {
+					assertTrue(files.iterator().hasNext());
+				}
+				var second = ManifestFiles.contentCacheStats(table.io());
+				assertTrue(second.hitCount() > first.hitCount());
+				assertEquals(first.missCount(), second.missCount());
+			}
+			store.close();
+			for (Table table : tables) {
+				var stats = ManifestFiles.contentCacheStats(table.io());
+				assertEquals(0, stats.hitCount());
+				assertEquals(0, stats.missCount());
+				ManifestFiles.dropCache(table.io());
+			}
+			store = new KvinIceberg(directory.toString());
+		}
+	}
+
+	@Test
+	public void cachedManifestsDoNotHideWritesFromOtherInstances() {
+		store.put(new KvinTuple(item, property, null, 1, 0, "old"));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
+			assertEquals(List.of("old"), values.toList().stream().map(tuple -> tuple.value).toList());
+		}
+		try (KvinIceberg second = new KvinIceberg(directory.toString())) {
+			second.put(
+					new KvinTuple(item, property, null, 2, 0, "new"),
+					new KvinTuple(other, property, null, 3, 0, "other"));
+			try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
+				assertEquals(List.of("new", "old"), values.toList().stream().map(tuple -> tuple.value).toList());
+			}
+			try (IExtendedIterator<KvinTuple> values = store.fetch(other, property, null, 0)) {
+				assertEquals(List.of("other"), values.toList().stream().map(tuple -> tuple.value).toList());
+			}
+		}
+	}
+
+	private void assertValueSortOrder(Table table) {
+		SortOrder expected = SortOrder.builderFor(table.schema())
+				.asc("itemId").asc("contextId").asc("propertyId").desc("time").desc("seqNr").build();
+		assertTrue(table.sortOrder().sameOrder(expected));
+		assertTrue(table.sortOrder().orderId() > 0);
+	}
+
+	@Test
+	public void recordsSortOrderInTableAndFileMetadata() throws Exception {
+		assertValueSortOrder(valueTable());
+		store.put(new KvinTuple(item, property, null, 1, 0, "value"));
+		store.close();
+		store = new KvinIceberg(directory.toString());
+		Table table = valueTable();
+		assertValueSortOrder(table);
+		try (var files = table.newScan().planFiles()) {
+			int count = 0;
+			for (var task : files) {
+				assertEquals(Integer.valueOf(table.sortOrder().orderId()), task.file().sortOrderId());
+				count++;
+			}
+			assertEquals(1, count);
+		}
+		for (String name : List.of("items", "contexts", "properties")) {
+			Table ids = new HadoopTables(new Configuration()).load(directory.toPath().resolve("iceberg-ids").resolve(name).toString());
+			assertTrue(ids.sortOrder().isUnsorted());
+			try (var files = ids.newScan().planFiles()) {
+				for (var task : files) {
+					assertEquals(Integer.valueOf(0), task.file().sortOrderId());
+				}
+			}
+		}
+	}
+
+	@Test
+	public void upgradesExistingSortOrderWithoutRewritingFiles() throws Exception {
+		store.put(new KvinTuple(item, property, null, 1, 0, "old"));
+		store.close();
+		Table table = valueTable();
+		long snapshotId = table.currentSnapshot().snapshotId();
+		List<String> oldPaths = new ArrayList<>();
+		List<Integer> oldOrders = new ArrayList<>();
+		try (var files = table.newScan().planFiles()) {
+			for (var task : files) {
+				oldPaths.add(task.file().location());
+				oldOrders.add(task.file().sortOrderId());
+			}
+		}
+		table.replaceSortOrder().commit();
+		assertTrue(table.sortOrder().isUnsorted());
+		store = new KvinIceberg(directory.toString());
+		table.refresh();
+		assertValueSortOrder(table);
+		assertEquals(snapshotId, table.currentSnapshot().snapshotId());
+		try (var files = table.newScan().planFiles()) {
+			int count = 0;
+			for (var task : files) {
+				assertEquals(oldPaths.get(count), task.file().location());
+				assertEquals(oldOrders.get(count), task.file().sortOrderId());
+				count++;
+			}
+			assertEquals(oldPaths.size(), count);
+		}
+		store.put(new KvinTuple(item, property, null, 2, 0, "new"));
+		table.refresh();
+		try (var files = table.newScan().planFiles()) {
+			for (var task : files) {
+				if (!oldPaths.contains(task.file().location())) {
+					assertEquals(Integer.valueOf(table.sortOrder().orderId()), task.file().sortOrderId());
+				}
+			}
+		}
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
+			assertEquals(List.of("new", "old"), values.toList().stream().map(tuple -> tuple.value).toList());
+		}
+	}
+
+	@Test
+	public void mergesSequenceNumbersDescendingAcrossFilesAndDeduplicates() {
+		store.put(
+				new KvinTuple(item, property, null, 100, 1, "one"),
+				new KvinTuple(item, property, null, 100, 3, "three"),
+				new KvinTuple(item, property, null, 90, 5, "older"));
+		store.put(
+				new KvinTuple(item, property, null, 100, 2, "two"),
+				new KvinTuple(item, property, null, 100, 3, "three"),
+				new KvinTuple(item, property, null, 100, 0, "zero"));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
+			List<KvinTuple> tuples = values.toList();
+			assertEquals(List.of(3, 2, 1, 0, 5), tuples.stream().map(tuple -> tuple.seqNr).toList());
+			assertEquals(List.of(100L, 100L, 100L, 100L, 90L), tuples.stream().map(tuple -> tuple.time).toList());
+		}
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 2)) {
+			assertEquals(List.of(3, 2), values.toList().stream().map(tuple -> tuple.seqNr).toList());
 		}
 	}
 
@@ -154,6 +324,27 @@ public class KvinIcebergTest {
 			assertEquals(0, rows.get(5).seqNr);
 			assertEquals(true, rows.get(5).value);
 			assertEquals(42, rows.get(6).value);
+		}
+	}
+
+	@Test
+	public void readsBinaryValuesAlongsideNullAndPrimitiveValues() {
+		Record first = new Record(URIs.createURI("urn:test:field"), "first");
+		Record second = new Record(URIs.createURI("urn:test:field"), "second");
+		store.put(
+				new KvinTuple(item, property, null, 5, 0, first),
+				new KvinTuple(item, property, null, 4, 0, second),
+				new KvinTuple(item, property, null, 3, 0, null),
+				new KvinTuple(item, property, null, 2, 0, false),
+				new KvinTuple(item, property, null, 1, 0, 0));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
+			List<KvinTuple> rows = values.toList();
+			assertEquals(5, rows.size());
+			assertEquals(first, rows.get(0).value);
+			assertEquals(second, rows.get(1).value);
+			assertNull(rows.get(2).value);
+			assertEquals(false, rows.get(3).value);
+			assertEquals(0, rows.get(4).value);
 		}
 	}
 
