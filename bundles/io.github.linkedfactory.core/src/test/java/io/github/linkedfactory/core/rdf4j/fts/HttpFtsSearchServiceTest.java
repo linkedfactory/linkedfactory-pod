@@ -16,6 +16,8 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,6 +35,7 @@ public class HttpFtsSearchServiceTest {
 	private final SimpleValueFactory vf = SimpleValueFactory.getInstance();
 	private HttpServer server;
 	private AtomicReference<String> body;
+	private List<String> bodies;
 	private AtomicReference<String> requestPath;
 	private AtomicInteger requests;
 	private volatile int responseCode = 200;
@@ -41,6 +44,7 @@ public class HttpFtsSearchServiceTest {
 	@Before
 	public void setUp() throws IOException {
 		body = new AtomicReference<>();
+		bodies = new ArrayList<>();
 		requestPath = new AtomicReference<>();
 		requests = new AtomicInteger(0);
 		server = HttpServer.create(new InetSocketAddress(0), 0);
@@ -241,6 +245,32 @@ public class HttpFtsSearchServiceTest {
 		assertTrue(payload.path("query").path("terms").has("context"));
 	}
 
+	@Test
+	public void commitSplitsLargeBulkRequestIntoMultipleNdjsonPosts() throws Exception {
+		Path outboxDir = Files.createTempDirectory("fts-outbox-test");
+		HttpFtsSearchService service = new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+
+		service.begin();
+		for (int i = 0; i < 20_000; i++) {
+			service.addRemoveStatements(Set.of(vf.createStatement(
+					vf.createIRI("urn:s:" + i),
+					vf.createIRI("urn:label"),
+					vf.createLiteral("value-" + i + "-abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"))), Set.of());
+		}
+		service.commit();
+		service.shutdown();
+
+		assertTrue(bodies.size() > 1);
+		for (String requestBody : bodies) {
+			if (requestBody.isBlank()) {
+				continue;
+			}
+			assertTrue(requestBody.getBytes(StandardCharsets.UTF_8).length <= 5 * 1024 * 1024 + 1024);
+			String[] lines = requestBody.strip().split("\\n");
+			assertEquals(0, lines.length % 2);
+		}
+	}
+
 	private String endpoint() {
 		return "http://127.0.0.1:" + server.getAddress().getPort();
 	}
@@ -250,6 +280,7 @@ public class HttpFtsSearchServiceTest {
 		requestPath.set(exchange.getRequestURI().getPath());
 		try (InputStream in = exchange.getRequestBody()) {
 			body.set(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+			bodies.add(body.get());
 		}
 
 		byte[] response = responseBody.getBytes(StandardCharsets.UTF_8);

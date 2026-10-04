@@ -9,7 +9,7 @@ import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
-import org.apache.http.entity.StringEntity;
+import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
@@ -19,7 +19,7 @@ import org.eclipse.rdf4j.model.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,6 +28,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	private static final int MAX_ATTEMPTS = 3;
 	private static final long RETRY_BACKOFF_MILLIS = 100L;
+	private static final int MAX_BULK_BYTES = 5 * 1024 * 1024;
 	private static final ContentType NDJSON = ContentType.create("application/x-ndjson", StandardCharsets.UTF_8);
 	private static final String OP_STATEMENTS = "statements";
 	private static final String OP_UPSERT = "upsert";
@@ -194,11 +196,11 @@ public class HttpFtsSearchService implements FtsSearchService {
 		ObjectNode op = mapper.createObjectNode();
 		op.put("op", OP_STATEMENTS);
 		ObjectNode addedDocuments = documentsByStatement(added);
-		if (addedDocuments.size() > 0) {
+		if (!addedDocuments.isEmpty()) {
 			op.set("addedDocuments", addedDocuments);
 		}
 		ObjectNode removedDocuments = documentsByStatement(removed);
-		if (removedDocuments.size() > 0) {
+		if (!removedDocuments.isEmpty()) {
 			op.set("removedDocuments", removedDocuments);
 		}
 		return op;
@@ -343,7 +345,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 		ensureOutboxDir();
 		List<Path> pending;
 		try (var files = Files.list(outboxDir)) {
-			pending = files.filter(path -> path.getFileName().toString().endsWith(".json"))
+			pending = files.filter(path -> path.getFileName().toString().endsWith(".jsonl"))
 					.sorted()
 					.toList();
 		}
@@ -356,15 +358,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private boolean sendPayload(Path payloadFile) throws Exception {
-		String payload = Files.readString(payloadFile, StandardCharsets.UTF_8);
-		JsonNode root = mapper.readTree(payload);
-		JsonNode operationsNode = root.path("operations");
-		if (!operationsNode.isArray()) {
-			throw new IOException("Invalid FTS outbox payload: missing operations array");
-		}
-
-		ArrayNode operations = (ArrayNode) operationsNode;
-		PreparedPayload prepared = PreparedPayload.from(operations);
+		PreparedPayload prepared = PreparedPayload.from(payloadFile, mapper);
 
 		if (prepared.hasClear()) {
 			if (!sendRequest(
@@ -392,15 +386,14 @@ public class HttpFtsSearchService implements FtsSearchService {
 			}
 		}
 
-		String ndjson = prepared.toBulkNdjson(mapper);
-		if (ndjson.isBlank()) {
-			return true;
+		for (BulkRequest chunk : prepared.bulkRequests(mapper, MAX_BULK_BYTES)) {
+			String responseBody = sendRequestStream(endpoint + bulkPath, chunk, chunk.length(), NDJSON,
+					"while sending FTS updates");
+			if (responseBody == null) {
+				return false;
+			}
+			validateBulkResponse(responseBody);
 		}
-		String responseBody = sendRequestBody(endpoint + bulkPath, ndjson, NDJSON, "while sending FTS updates");
-		if (responseBody == null) {
-			return false;
-		}
-		validateBulkResponse(responseBody);
 		return true;
 	}
 
@@ -409,12 +402,18 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private String sendRequestBody(String url, String body, ContentType contentType, String action) throws Exception {
+		byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+		return sendRequestStream(url, () -> new java.io.ByteArrayInputStream(bytes), bytes.length, contentType, action);
+	}
+
+	private String sendRequestStream(String url, InputStreamSource body, long length, ContentType contentType, String action)
+			throws Exception {
 		IOException lastError = null;
 		for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-			try {
+			try (InputStream requestBody = body.openStream()) {
 				HttpPost request = new HttpPost(url);
 				request.setConfig(requestConfig);
-				request.setEntity(new StringEntity(body, contentType));
+				request.setEntity(new InputStreamEntity(requestBody, length, contentType));
 				try (CloseableHttpResponse response = client().execute(request)) {
 					int status = response.getStatusLine().getStatusCode();
 					HttpEntity entity = response.getEntity();
@@ -468,9 +467,8 @@ public class HttpFtsSearchService implements FtsSearchService {
 			if (!item.isObject()) {
 				continue;
 			}
-			var operations = item.fields();
-			while (operations.hasNext()) {
-				var operation = operations.next();
+			var operations = item.properties();
+			for (Map.Entry<String, JsonNode> operation : operations) {
 				JsonNode detail = operation.getValue();
 				int status = detail.path("status").asInt();
 				if (status < 300) {
@@ -517,15 +515,19 @@ public class HttpFtsSearchService implements FtsSearchService {
 		return Path.of(dir);
 	}
 
+	private interface InputStreamSource {
+		InputStream openStream() throws IOException;
+	}
+
 	private static final class TransactionState {
 		private final Path file;
-		private final java.io.BufferedWriter writer;
+		private final BufferedWriter writer;
 		private final ObjectMapper mapper;
 		private boolean empty = true;
 		private boolean finished = false;
 		private boolean persisted = false;
 
-		private TransactionState(Path file, java.io.BufferedWriter writer, ObjectMapper mapper) {
+		private TransactionState(Path file, BufferedWriter writer, ObjectMapper mapper) {
 			this.file = file;
 			this.writer = writer;
 			this.mapper = mapper;
@@ -533,9 +535,8 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 		static TransactionState create(ObjectMapper mapper) {
 			try {
-				Path file = Files.createTempFile("fts-http-bulk-", ".json");
-				java.io.BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
-				writer.write("{\"operations\":[");
+				Path file = Files.createTempFile("fts-http-bulk-", ".jsonl");
+				BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
 				return new TransactionState(file, writer, mapper);
 			} catch (IOException e) {
 				throw new RuntimeException("Unable to create FTS bulk payload", e);
@@ -553,7 +554,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 			}
 			try {
 				Files.createDirectories(outboxDir);
-				Path target = outboxDir.resolve(System.currentTimeMillis() + "-" + System.nanoTime() + ".json");
+				Path target = outboxDir.resolve(System.currentTimeMillis() + "-" + System.nanoTime() + ".jsonl");
 				Files.move(file, target, StandardCopyOption.REPLACE_EXISTING);
 				persisted = true;
 				return target;
@@ -564,10 +565,8 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 		void append(JsonNode op) {
 			try {
-				if (!empty) {
-					writer.write(',');
-				}
 				writer.write(mapper.writeValueAsString(op));
+				writer.write('\n');
 				writer.flush();
 				empty = false;
 			} catch (IOException e) {
@@ -578,7 +577,6 @@ public class HttpFtsSearchService implements FtsSearchService {
 		Path finishPayload() {
 			if (!finished) {
 				try {
-					writer.write("]}");
 					writer.flush();
 					writer.close();
 					finished = true;
@@ -616,35 +614,41 @@ public class HttpFtsSearchService implements FtsSearchService {
 		private boolean clear;
 		private boolean clearContexts;
 
-		static PreparedPayload from(ArrayNode operations) throws IOException {
+		static PreparedPayload from(Path payloadFile, ObjectMapper mapper) throws IOException {
 			PreparedPayload prepared = new PreparedPayload();
-			for (JsonNode op : operations) {
-				String type = op.path("op").asText();
-				if (OP_CLEAR.equals(type)) {
-					prepared.clear = true;
-					prepared.clearContexts = false;
-					prepared.clearedContexts.clear();
-					prepared.upserts.clear();
-					prepared.removals.clear();
-				} else if (OP_CLEAR_CONTEXTS.equals(type)) {
-					prepared.clearContexts = true;
-					JsonNode contexts = op.path("contexts");
-					if (!contexts.isArray()) {
-						throw new IOException("Invalid FTS outbox payload: clearContexts contexts must be an array");
+			try (var lines = Files.lines(payloadFile, StandardCharsets.UTF_8)) {
+				for (String line : (Iterable<String>) lines::iterator) {
+					if (line.isBlank()) {
+						continue;
 					}
-					prepared.clearedContexts.clear();
-					for (JsonNode context : contexts) {
-						prepared.clearedContexts.add(context.asText());
+					JsonNode op = mapper.readTree(line);
+					String type = op.path("op").asText();
+					if (OP_CLEAR.equals(type)) {
+						prepared.clear = true;
+						prepared.clearContexts = false;
+						prepared.clearedContexts.clear();
+						prepared.upserts.clear();
+						prepared.removals.clear();
+					} else if (OP_CLEAR_CONTEXTS.equals(type)) {
+						prepared.clearContexts = true;
+						JsonNode contexts = op.path("contexts");
+						if (!contexts.isArray()) {
+							throw new IOException("Invalid FTS outbox payload: clearContexts contexts must be an array");
+						}
+						prepared.clearedContexts.clear();
+						for (JsonNode context : contexts) {
+							prepared.clearedContexts.add(context.asText());
+						}
+					} else if (OP_STATEMENTS.equals(type)) {
+						mergeDocuments(op.get("addedDocuments"), prepared.upserts);
+						mergeDocuments(op.get("removedDocuments"), prepared.removals);
+					} else if (OP_UPSERT.equals(type)) {
+						mergeDocuments(op.get("documents"), prepared.upserts);
+					} else if (OP_REMOVE.equals(type)) {
+						mergeDocuments(op.get("documents"), prepared.removals);
+					} else {
+						throw new IOException("Invalid FTS outbox payload: unsupported operation " + type);
 					}
-				} else if (OP_STATEMENTS.equals(type)) {
-					mergeDocuments(op.get("addedDocuments"), prepared.upserts);
-					mergeDocuments(op.get("removedDocuments"), prepared.removals);
-				} else if (OP_UPSERT.equals(type)) {
-					mergeDocuments(op.get("documents"), prepared.upserts);
-				} else if (OP_REMOVE.equals(type)) {
-					mergeDocuments(op.get("documents"), prepared.removals);
-				} else {
-					throw new IOException("Invalid FTS outbox payload: unsupported operation " + type);
 				}
 			}
 			return prepared;
@@ -662,26 +666,46 @@ public class HttpFtsSearchService implements FtsSearchService {
 			return clearedContexts;
 		}
 
-		String toBulkNdjson(ObjectMapper mapper) throws IOException {
-			StringBuilder ndjson = new StringBuilder();
-			appendDocuments(ndjson, upserts, true, mapper);
-			appendDocuments(ndjson, removals, false, mapper);
-			return ndjson.toString();
+		List<BulkRequest> bulkRequests(ObjectMapper mapper, int maxBytes) throws IOException {
+			List<BulkRequest> requests = new ArrayList<>();
+			BulkChunkBuilder builder = new BulkChunkBuilder(maxBytes);
+			appendDocuments(builder, requests, upserts, true, mapper);
+			appendDocuments(builder, requests, removals, false, mapper);
+			builder.finishInto(requests);
+			return requests;
 		}
 
-		private static void appendDocuments(StringBuilder ndjson, Map<String, ObjectNode> documents, boolean create,
-				ObjectMapper mapper) throws IOException {
+		private static void appendDocuments(BulkChunkBuilder builder, List<BulkRequest> requests,
+				Map<String, ObjectNode> documents, boolean create, ObjectMapper mapper) throws IOException {
 			String operation = create ? "index" : "delete";
 			for (Map.Entry<String, ObjectNode> entry : documents.entrySet()) {
-				ObjectNode action = mapper.createObjectNode();
-				action.putObject(operation).put("_id", entry.getKey());
-				ndjson.append(mapper.writeValueAsString(action)).append('\n');
+				List<byte[]> documentLines = new ArrayList<>(create ? 2 : 1);
+				documentLines.add(actionLine(mapper, operation, entry.getKey()));
 				if (create) {
 					ObjectNode payload = entry.getValue().deepCopy();
 					payload.remove(FIELD_ID);
-					ndjson.append(mapper.writeValueAsString(payload)).append('\n');
+					documentLines.add(documentLine(mapper, payload));
 				}
+				builder.appendDocument(documentLines, requests);
 			}
+		}
+
+		private static byte[] actionLine(ObjectMapper mapper, String operation, String id) throws IOException {
+			ObjectNode action = mapper.createObjectNode();
+			action.putObject(operation).put("_id", id);
+			return serializeLine(mapper, action);
+		}
+
+		private static byte[] documentLine(ObjectMapper mapper, ObjectNode payload) throws IOException {
+			return serializeLine(mapper, payload);
+		}
+
+		private static byte[] serializeLine(ObjectMapper mapper, JsonNode node) throws IOException {
+			byte[] json = mapper.writeValueAsBytes(node);
+			byte[] line = new byte[json.length + 1];
+			System.arraycopy(json, 0, line, 0, json.length);
+			line[json.length] = '\n';
+			return line;
 		}
 
 		private static void mergeDocuments(JsonNode documentsNode, Map<String, ObjectNode> target) throws IOException {
@@ -691,9 +715,8 @@ public class HttpFtsSearchService implements FtsSearchService {
 			if (!documentsNode.isObject()) {
 				throw new IOException("Invalid FTS outbox payload: documents must be an object");
 			}
-			var documents = documentsNode.fields();
-			while (documents.hasNext()) {
-				var document = documents.next();
+			var documents = documentsNode.properties();
+			for (Map.Entry<String, JsonNode> document : documents) {
 				if (!document.getValue().isObject()) {
 					throw new IOException("Invalid FTS outbox payload: document payload must be an object");
 				}
@@ -701,4 +724,49 @@ public class HttpFtsSearchService implements FtsSearchService {
 			}
 		}
 	}
+
+	private static final class BulkChunkBuilder {
+		private final int maxBytes;
+		private final List<byte[]> lines = new ArrayList<>();
+		private long size;
+
+		private BulkChunkBuilder(int maxBytes) {
+			this.maxBytes = maxBytes;
+		}
+
+		void appendDocument(List<byte[]> documentLines, List<BulkRequest> requests) {
+			long documentSize = 0L;
+			for (byte[] line : documentLines) {
+				documentSize += line.length;
+			}
+			if (size > 0 && size + documentSize > maxBytes) {
+				finishInto(requests);
+			}
+			for (byte[] line : documentLines) {
+				lines.add(line);
+				size += line.length;
+			}
+		}
+
+		void finishInto(List<BulkRequest> requests) {
+			if (!lines.isEmpty()) {
+				requests.add(new BulkRequest(List.copyOf(lines), size));
+				lines.clear();
+				size = 0L;
+			}
+		}
+	}
+
+	private record BulkRequest(List<byte[]> lines, long length) implements InputStreamSource {
+
+
+		@Override
+			public InputStream openStream() {
+				List<InputStream> streams = new ArrayList<>(lines.size());
+				for (byte[] line : lines) {
+					streams.add(new ByteArrayInputStream(line));
+				}
+				return new SequenceInputStream(Collections.enumeration(streams));
+			}
+		}
 }

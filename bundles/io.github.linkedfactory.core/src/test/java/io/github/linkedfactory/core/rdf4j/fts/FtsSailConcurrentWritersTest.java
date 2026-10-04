@@ -79,7 +79,8 @@ public class FtsSailConcurrentWritersTest {
 								connection.begin();
 								connection.add(vf.createIRI("urn:s" + threadIndex + ":" + i),
 										vf.createIRI("urn:p"),
-										vf.createLiteral("value-" + threadIndex + "-" + i));
+										vf.createLiteral("value-" + threadIndex + "-" + i),
+										vf.createIRI("urn:context"));
 								connection.commit();
 							}
 						}
