@@ -30,11 +30,13 @@ public class FtsSailConnectionTest {
 			Statement addLiteral = vf.createStatement(
 					vf.createIRI("urn:s1"),
 					vf.createIRI("urn:p1"),
-					vf.createLiteral("value"));
+					vf.createLiteral("value"),
+					vf.createIRI("urn:context"));
 			Statement removeLiteral = vf.createStatement(
 					vf.createIRI("urn:s2"),
 					vf.createIRI("urn:p2"),
-					vf.createLiteral("removed"));
+					vf.createLiteral("removed"),
+					vf.createIRI("urn:context"));
 
 			connection.add(removeLiteral);
 			connection.commit();
@@ -42,7 +44,10 @@ public class FtsSailConnectionTest {
 			connection.begin();
 			connection.add(addLiteral);
 			connection.remove(removeLiteral);
-			connection.add(vf.createIRI("urn:s3"), vf.createIRI("urn:p3"), vf.createBNode());
+			connection.add(vf.createIRI("urn:s3"),
+					vf.createIRI("urn:p3"),
+					vf.createBNode(),
+					vf.createIRI("urn:context"));
 			connection.commit();
 
 			assertEquals(2, service.addRemoveCount);
@@ -137,7 +142,10 @@ public class FtsSailConnectionTest {
 
 			for (int i = 0; i < 10; i++) {
 				ftsConnection.begin();
-				ftsConnection.addStatement(vf.createIRI("urn:s" + i), vf.createIRI("urn:p"), vf.createLiteral("value" + i));
+				ftsConnection.addStatement(vf.createIRI("urn:s" + i),
+						vf.createIRI("urn:p"),
+						vf.createLiteral("value" + i),
+						vf.createIRI("urn:context"));
 				ftsConnection.commit();
 			}
 
@@ -190,7 +198,8 @@ public class FtsSailConnectionTest {
 			Statement stmt = vf.createStatement(
 					vf.createIRI("urn:s1"),
 					vf.createIRI("urn:p1"),
-					vf.createLiteral("value"));
+					vf.createLiteral("value"),
+					vf.createIRI("urn:context"));
 
 			connection.begin();
 			connection.add(stmt);

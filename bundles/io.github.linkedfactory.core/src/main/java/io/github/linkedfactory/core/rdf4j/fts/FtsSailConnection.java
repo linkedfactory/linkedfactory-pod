@@ -1,6 +1,5 @@
 package io.github.linkedfactory.core.rdf4j.fts;
 
-import net.enilink.komma.common.util.ILogger;
 import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
@@ -62,8 +61,8 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 	/**
 	 * Determines whether a statement should be indexed for full-text search.
 	 * <p>
-	 * A statement is considered indexable if its object is a literal,
-	 * has a context (belongs to a named graph) and its context is not in the excluded models set. 
+	 * A statement is considered indexable if its object is a literal and, when it has
+	 * a context, that context is not in the excluded models set.
 	 *
 	 * @param statement the statement to check
 	 * @return true if the statement should be indexed, false otherwise
@@ -286,10 +285,31 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 					break;
 				}
 			}
+			mergeSpilledOperations();
 			for (Operation op : operations) {
 				if (op instanceof AddRemoveOperation) {
 					((AddRemoveOperation) op).optimize();
+				} else if (op instanceof SpilledAddRemoveOperation) {
+					((SpilledAddRemoveOperation) op).optimize();
 				}
+			}
+		}
+
+		private void mergeSpilledOperations() {
+			for (int i = 1; i < operations.size(); i++) {
+				Operation previous = operations.get(i - 1);
+				Operation current = operations.get(i);
+				if (!(previous instanceof SpilledAddRemoveOperation) || !(current instanceof AddRemoveOperation)) {
+					continue;
+				}
+				SpilledAddRemoveOperation spilled = (SpilledAddRemoveOperation) previous;
+				AddRemoveOperation merged = spilled.load();
+				merged.getAdded().addAll(((AddRemoveOperation) current).getAdded());
+				merged.getRemoved().addAll(((AddRemoveOperation) current).getRemoved());
+				merged.optimize();
+				spilled.store(merged);
+				operations.remove(i);
+				i--;
 			}
 		}
 
@@ -548,6 +568,22 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 				} catch (IOException e) {
 					throw new RuntimeException("Unable to read spilled FTS buffer", e);
 				}
+			}
+
+			void store(AddRemoveOperation addRemove) {
+				try (DataOutputStream out = new DataOutputStream(
+						new BufferedOutputStream(Files.newOutputStream(file)))) {
+					writeStatements(out, addRemove.getAdded());
+					writeStatements(out, addRemove.getRemoved());
+				} catch (IOException e) {
+					throw new RuntimeException("Unable to rewrite spilled FTS buffer", e);
+				}
+			}
+
+			void optimize() {
+				AddRemoveOperation addRemove = load();
+				addRemove.optimize();
+				store(addRemove);
 			}
 
 			void delete() {

@@ -20,6 +20,7 @@ public class FtsSailConfigTest {
 		config.setFailOnError(false);
 		config.setOutboxDir("/var/lib/fts-outbox");
 		config.setDefaultLimit(25);
+		config.setRequestTimeoutMillis(120_000);
 
 		Model model = new LinkedHashModel();
 		var implNode = config.export(model);
@@ -35,5 +36,23 @@ public class FtsSailConfigTest {
 		assertFalse(parsed.isFailOnError());
 		assertEquals("/var/lib/fts-outbox", parsed.getOutboxDir());
 		assertEquals(25, parsed.getDefaultLimit());
+		assertEquals(120_000, parsed.getRequestTimeoutMillis());
+	}
+
+	@Test(expected = IllegalArgumentException.class)
+	public void rejectsUnlimitedRequestTimeout() {
+		new FtsSailConfig().setRequestTimeoutMillis(0);
+	}
+
+	@Test(expected = org.eclipse.rdf4j.sail.config.SailConfigException.class)
+	public void rejectsInvalidParsedRequestTimeout() {
+		FtsSailConfig config = new FtsSailConfig();
+		Model model = new LinkedHashModel();
+		var implNode = config.export(model);
+		var vf = org.eclipse.rdf4j.model.impl.SimpleValueFactory.getInstance();
+		var timeout = vf.createIRI(FtsSailConfig.CONFIG_NS, "requestTimeoutMillis");
+		model.remove(implNode, timeout, null);
+		model.add(implNode, timeout, vf.createLiteral(-1));
+		config.parse(model, implNode);
 	}
 }
