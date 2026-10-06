@@ -53,8 +53,6 @@ object Data {
   val bundleContext = Option(FrameworkUtil.getBundle(getClass)).map(_.getBundleContext).orNull
   val instanceLoc = if (bundleContext != null) Platform.getInstanceLocation else null
 
-  private def toPEA[T](func: () => T): PrivilegedExceptionAction[T] = { () => func() }
-
   // FIXME: make withPluginConfig return a result, use val from result
   private var _modelURI: URI = uninitialized
 
@@ -99,7 +97,7 @@ object Data {
           val uow = Globals.contextModelSet.vend.map(_.getUnitOfWork)
           createHierarchyExecutor.submit(new Runnable {
             override def run(): Unit = {
-              Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() => {
+              Subject.callAs(SecurityUtil.SYSTEM_USER_SUBJECT, () => {
                 uow.foreach(_.begin())
                 try {
                   withTransaction(m.getManager) { manager =>
@@ -108,7 +106,7 @@ object Data {
                 } finally {
                   uow.foreach(_.end())
                 }
-              }))
+              })
             }
           })
         }
@@ -118,12 +116,9 @@ object Data {
       }
     })
 
-    Subject.doAs(SecurityUtil.SYSTEM_USER_SUBJECT, toPEA(() =>
+    Subject.callAs(SecurityUtil.SYSTEM_USER_SUBJECT, () =>
       Globals.contextModelSet.vend.map { modelSet =>
         try {
-          // disable change support
-          modelSet.getDataChangeSupport.setDefaultEnabled(false)
-
           modelSet.getUnitOfWork.begin()
 
           modelSet.getModule.includeModule(new KommaModule() {
@@ -143,7 +138,7 @@ object Data {
           modelSet.getUnitOfWork.end()
         }
       }
-    ))
+    )
     kvin
   }
 
