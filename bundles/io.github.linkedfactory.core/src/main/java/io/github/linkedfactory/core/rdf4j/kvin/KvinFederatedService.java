@@ -46,7 +46,7 @@ public class KvinFederatedService implements FederatedService {
         final CloseableIteration<BindingSet> iter = evaluate(service,
                 new SingletonIteration<>(bindings), baseUri);
         try {
-            while (iter.hasNext()) {
+            if (iter.hasNext()) {
                 BindingSet bs = iter.next();
                 String firstVar = service.getBindingNames().iterator().next();
                 return QueryEvaluationUtil.getEffectiveBooleanValue(bs.getValue(firstVar));
