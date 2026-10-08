@@ -13,6 +13,8 @@ import org.apache.iceberg.ManifestFiles;
 import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.io.CloseableIterator;
 import org.apache.parquet.HadoopReadOptions;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -26,8 +28,11 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 public class KvinIcebergTest {
 	private File directory;
@@ -74,6 +79,282 @@ public class KvinIcebergTest {
 			tables.add((Table) idTableField.get(ids));
 		}
 		return tables;
+	}
+
+	private Object idTable(int kind) throws ReflectiveOperationException {
+		var field = KvinIceberg.class.getDeclaredField("ids");
+		field.setAccessible(true);
+		return ((Object[]) field.get(store))[kind];
+	}
+
+	private Table spyIdTable(int kind) throws ReflectiveOperationException {
+		Object ids = idTable(kind);
+		var field = ids.getClass().getDeclaredField("table");
+		field.setAccessible(true);
+		Table spy = spy((Table) field.get(ids));
+		field.set(ids, spy);
+		return spy;
+	}
+
+	private PriorityQueue<?> cursors(IExtendedIterator<KvinTuple> values) throws ReflectiveOperationException {
+		for (var field : values.getClass().getDeclaredFields()) {
+			if (field.getType() == PriorityQueue.class) {
+				field.setAccessible(true);
+				return (PriorityQueue<?>) field.get(values);
+			}
+		}
+		throw new AssertionError("Missing merge queue");
+	}
+
+	@Test
+	public void singleSeriesLimitClosesReadersWithoutAdvancing() throws Exception {
+		store.put(new KvinTuple(item, property, null, 3, 0, "new"),
+				new KvinTuple(item, property, null, 1, 0, "old"));
+		store.put(new KvinTuple(item, property, null, 2, 0, "middle"));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 1)) {
+			PriorityQueue<?> cursors = cursors(values);
+			assertEquals(2, cursors.size());
+			List<CloseableIterator<?>> readers = new ArrayList<>();
+			List<CloseableIterable<?>> resources = new ArrayList<>();
+			for (Object cursor : cursors) {
+				var field = cursor.getClass().getDeclaredField("iterator");
+				field.setAccessible(true);
+				CloseableIterator<?> reader = mock(CloseableIterator.class);
+				field.set(cursor, reader);
+				readers.add(reader);
+				var rowsField = cursor.getClass().getDeclaredField("rows");
+				rowsField.setAccessible(true);
+				CloseableIterable<?> rows = spy((CloseableIterable<?>) rowsField.get(cursor));
+				rowsField.set(cursor, rows);
+				resources.add(rows);
+			}
+			assertTrue(values.hasNext());
+			assertTrue(values.hasNext());
+			assertTrue(cursors.isEmpty());
+			assertEquals("new", values.next().value);
+			assertFalse(values.hasNext());
+			for (CloseableIterator<?> reader : readers) {
+				verifyNoInteractions(reader);
+			}
+			values.close();
+			for (CloseableIterable<?> rows : resources) {
+				verify(rows, times(1)).close();
+			}
+		}
+	}
+
+	@Test
+	public void deferredReadFailureClosesAllReaders() throws Exception {
+		store.put(new KvinTuple(item, property, null, 3, 0, 3),
+				new KvinTuple(item, property, null, 1, 0, 1));
+		store.put(new KvinTuple(item, property, null, 2, 0, 2));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
+			PriorityQueue<?> cursors = cursors(values);
+			List<CloseableIterable<?>> resources = new ArrayList<>();
+			IllegalStateException failure = new IllegalStateException("read failed");
+			for (Object cursor : cursors) {
+				var field = cursor.getClass().getDeclaredField("iterator");
+				field.setAccessible(true);
+				CloseableIterator<?> reader = mock(CloseableIterator.class);
+				when(reader.hasNext()).thenThrow(failure);
+				field.set(cursor, reader);
+				var rowsField = cursor.getClass().getDeclaredField("rows");
+				rowsField.setAccessible(true);
+				CloseableIterable<?> rows = spy((CloseableIterable<?>) rowsField.get(cursor));
+				rowsField.set(cursor, rows);
+				resources.add(rows);
+			}
+			assertEquals(3L, values.next().time);
+			assertSame(failure, assertThrows(IllegalStateException.class, values::hasNext));
+			assertTrue(cursors.isEmpty());
+			assertFalse(values.hasNext());
+			for (CloseableIterable<?> rows : resources) {
+				verify(rows, times(1)).close();
+			}
+		}
+	}
+
+	@Test
+	public void explicitMultiSeriesLimitsCloseReadersAndIgnoreDuplicates() throws Exception {
+		URI secondProperty = URIs.createURI("urn:test:second");
+		for (int round = 0; round < 2; round++) {
+			store.put(
+					new KvinTuple(item, property, null, 3, 0, 3),
+					new KvinTuple(item, property, null, 2, 0, 2),
+					new KvinTuple(item, property, null, 1, 0, 1),
+					new KvinTuple(item, secondProperty, null, 3, 0, 3),
+					new KvinTuple(item, secondProperty, null, 2, 0, 2),
+					new KvinTuple(item, secondProperty, null, 1, 0, 1),
+					new KvinTuple(other, property, null, 3, 0, 3),
+					new KvinTuple(other, property, null, 2, 0, 2),
+					new KvinTuple(other, property, null, 1, 0, 1),
+					new KvinTuple(other, secondProperty, null, 3, 0, 3),
+					new KvinTuple(other, secondProperty, null, 2, 0, 2),
+					new KvinTuple(other, secondProperty, null, 1, 0, 1));
+		}
+		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
+				List.of(property, secondProperty), null, 3, 1, 2, 0, null)) {
+			PriorityQueue<?> cursors = cursors(values);
+			List<KvinTuple> result = new ArrayList<>();
+			for (int i = 0; i < 8; i++) {
+				result.add(values.next());
+			}
+			assertTrue(cursors.isEmpty());
+			assertFalse(values.hasNext());
+			assertEquals(List.of(3L, 2L, 3L, 2L, 3L, 2L, 3L, 2L),
+					result.stream().map(tuple -> tuple.time).toList());
+			assertEquals(List.of(item, item, item, item, other, other, other, other),
+					result.stream().map(tuple -> tuple.item).toList());
+			assertEquals(List.of(property, property, secondProperty, secondProperty,
+					property, property, secondProperty, secondProperty),
+					result.stream().map(tuple -> tuple.property).toList());
+		}
+	}
+
+	@Test
+	public void batchesColdUriLookupsAndReusesCaches() throws Exception {
+		URI secondProperty = URIs.createURI("urn:test:second");
+		URI missing = URIs.createURI("urn:test:missing");
+		store.put(new KvinTuple(item, property, null, 1, 0, 1),
+				new KvinTuple(other, secondProperty, null, 2, 0, 2));
+		store.close();
+		store = new KvinIceberg(directory.toString());
+		Table items = spyIdTable(0);
+		Table properties = spyIdTable(2);
+		for (int round = 0; round < 2; round++) {
+			try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other, item, missing),
+					List.of(property, secondProperty, property, missing), null, 2, 1, 1, 0, null)) {
+				assertEquals(List.of(1, 2), values.toList().stream().map(tuple -> tuple.value).toList());
+			}
+		}
+		// Missing URIs are not negatively cached and must be checked again.
+		verify(items, times(2)).newScan();
+		verify(properties, times(2)).newScan();
+		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
+				List.of(property, secondProperty), null, 2, 1, 0, 0, null)) {
+			assertEquals(2, values.toList().size());
+		}
+		verify(items, times(2)).newScan();
+		verify(properties, times(2)).newScan();
+	}
+
+	@Test
+	public void batchesColdReversePropertyLookupsFromFileHeads() throws Exception {
+		URI secondProperty = URIs.createURI("urn:test:second");
+		store.put(new KvinTuple(item, property, null, 1, 0, 1));
+		store.put(new KvinTuple(item, secondProperty, null, 2, 0, 2));
+		store.close();
+		store = new KvinIceberg(directory.toString());
+		Table properties = spyIdTable(2);
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, null, null, 0)) {
+			assertEquals(List.of(property, secondProperty),
+					values.toList().stream().map(tuple -> tuple.property).toList());
+		}
+		verify(properties, times(1)).newScan();
+	}
+
+	@Test
+	public void missingMappingsBecomeVisibleAfterAnotherInstanceWrites() {
+		URI newProperty = URIs.createURI("urn:test:new-property");
+		store.put(new KvinTuple(item, property, null, 1, 0, 1));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
+				List.of(newProperty), null, 2, 0, 0, 0, null)) {
+			assertFalse(values.hasNext());
+		}
+		try (KvinIceberg second = new KvinIceberg(directory.toString())) {
+			second.put(new KvinTuple(other, newProperty, null, 2, 0, 2));
+		}
+		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
+				List.of(newProperty), null, 2, 0, 0, 0, null)) {
+			List<KvinTuple> result = values.toList();
+			assertEquals(1, result.size());
+			assertEquals(other, result.get(0).item);
+			assertEquals(newProperty, result.get(0).property);
+			assertEquals(2, result.get(0).value);
+		}
+	}
+
+	@Test
+	public void insufficientAndWildcardSeriesStillReturnAllAvailableSeries() {
+		URI secondProperty = URIs.createURI("urn:test:second");
+		store.put(new KvinTuple(item, property, null, 2, 0, 2),
+				new KvinTuple(item, property, null, 1, 0, 1),
+				new KvinTuple(other, secondProperty, null, 1, 0, 1));
+		for (List<URI> properties : List.of(List.<URI>of(), List.of(property, secondProperty))) {
+			try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
+					properties, null, 2, 1, 2, 0, null)) {
+				assertEquals(List.of(item, item, other),
+						values.toList().stream().map(tuple -> tuple.item).toList());
+			}
+		}
+	}
+
+	@Test
+	public void batchedLookupsRejectConflictingMappings() throws Exception {
+		store.put(new KvinTuple(item, property, null, 1, 0, 1));
+		Object items = idTable(0);
+		var append = items.getClass().getDeclaredMethod("append", Map.class);
+		append.setAccessible(true);
+		append.invoke(items, Map.of(item, 999L));
+		store.close();
+		store = new KvinIceberg(directory.toString());
+		IllegalStateException failure = assertThrows(IllegalStateException.class,
+				() -> store.fetch(List.of(item, other), List.of(property), null, 1, 0, 0, 0, null));
+		assertTrue(failure.getMessage().contains("Duplicate Iceberg URI mapping"));
+	}
+
+	@Test
+	public void batchedReverseLookupsRejectConflictingMappings() throws Exception {
+		store.put(new KvinTuple(item, property, null, 1, 0, 1));
+		Object properties = idTable(2);
+		var append = properties.getClass().getDeclaredMethod("append", Map.class);
+		append.setAccessible(true);
+		append.invoke(properties, Map.of(URIs.createURI("urn:test:conflicting"), 1L));
+		store.close();
+		store = new KvinIceberg(directory.toString());
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, null, null, 0)) {
+			IllegalStateException failure = assertThrows(IllegalStateException.class, values::hasNext);
+			assertTrue(failure.getMessage().contains("Duplicate Iceberg ID mapping"));
+		}
+	}
+
+	@Test
+	public void aggregationLimitsApplyToCompleteIntervalsAcrossSeries() {
+		URI secondProperty = URIs.createURI("urn:test:second");
+		store.put(new KvinTuple(item, property, null, 29, 0, 4),
+				new KvinTuple(item, property, null, 21, 0, 2),
+				new KvinTuple(item, property, null, 19, 0, 99),
+				new KvinTuple(item, secondProperty, null, 29, 0, 8),
+				new KvinTuple(item, secondProperty, null, 21, 0, 2));
+		store.put(new KvinTuple(item, property, null, 29, 0, 4));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item),
+				List.of(property, secondProperty), null, 29, 0, 1, 10, "sum")) {
+			List<KvinTuple> result = values.toList();
+			assertEquals(List.of(6, 10), result.stream().map(tuple -> tuple.value).toList());
+			assertEquals(List.of(20L, 20L), result.stream().map(tuple -> tuple.time).toList());
+			assertEquals(List.of(property, secondProperty),
+					result.stream().map(tuple -> tuple.property).toList());
+		}
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 29, 0, 0, 10, "sum")) {
+			assertEquals(List.of(6, 99), values.toList().stream().map(tuple -> tuple.value).toList());
+		}
+	}
+
+	@Test
+	public void deferredReadersKeepTheirSnapshotAcrossDeletes() {
+		store.put(new KvinTuple(item, property, null, 3, 0, 3),
+				new KvinTuple(item, property, null, 2, 0, 2),
+				new KvinTuple(item, property, null, 1, 0, 1));
+		try (IExtendedIterator<KvinTuple> snapshot = store.fetch(item, property, null, 0)) {
+			assertEquals(1, store.delete(item, property, null, 2, 2));
+			assertEquals(List.of(3, 2, 1), snapshot.toList().stream().map(tuple -> tuple.value).toList());
+		}
+		try (IExtendedIterator<KvinTuple> current = store.fetch(item, property, null, 0)) {
+			assertEquals(List.of(3, 1), current.toList().stream().map(tuple -> tuple.value).toList());
+		}
+		try (IExtendedIterator<KvinTuple> limited = store.fetch(item, property, null, 1)) {
+			assertEquals(List.of(3), limited.toList().stream().map(tuple -> tuple.value).toList());
+		}
 	}
 
 	@Test

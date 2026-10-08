@@ -21,6 +21,8 @@ The value table declares the sort order `itemId ASC, contextId ASC, propertyId A
 
 Manifest caching is enabled for both new and reopened value and URI-ID tables. It uses Iceberg's defaults: up to 100 MiB per table FileIO, with individual manifests limited to 8 MiB and entries expiring after 60 seconds without access. Caches are released when the store closes. Tables still refresh for every query, so caching immutable manifests does not delay visibility of committed writes from other instances; Parquet data is not cached.
 
+Fetches batch uncached item and property URI lookups, merge sorted files with constant-size per-series limit bookkeeping, and defer advancing a reader until another tuple is needed. Non-aggregated queries with explicit properties close their readers as soon as every requested item/property combination has reached its limit. Queries without explicit properties, or with combinations that have fewer matching tuples than the limit, still scan to exhaustion. Built-in aggregations accumulate values without buffering an entire time interval; their limits apply to aggregated results, not input tuples.
+
 ### JSON format
 The primary data format is the __LF JSON format__ that uses a nested structure where the first level contains the items and the second level the associated properties with their values:
 
