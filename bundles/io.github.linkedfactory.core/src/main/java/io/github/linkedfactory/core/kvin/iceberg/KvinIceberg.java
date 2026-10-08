@@ -222,61 +222,86 @@ public class KvinIceberg implements Kvin {
 				return cached;
 			}
 
-			final long[] result = {0};
-			String value = uri.toString();
-
-			scan(Expressions.equal("value", value), row -> {
-				if (!value.contentEquals(row.get(1).toString())) {
-					return;
-				}
-
-				long found = (Long) row.get(0);
-
-				if (result[0] != 0 && result[0] != found) {
-					throw new IllegalStateException("Duplicate Iceberg URI mapping for " + uri);
-				}
-
-				result[0] = found;
-			});
-
-			if (result[0] != 0) {
-				forward.put(uri, result[0]);
-				reverse.put(result[0], uri);
-			}
-
-			return result[0];
+			return resolveIds(List.of(uri), false).getOrDefault(uri, 0L);
 		}
 
-		URI uri(long id) {
-			URI cached = reverse.getIfPresent(id);
-			if (cached != null) {
-				return cached;
+		Map<URI, Long> resolveIds(List<URI> uris) {
+			return resolveIds(uris, true);
+		}
+
+		private Map<URI, Long> resolveIds(List<URI> uris, boolean refresh) {
+			Map<URI, Long> result = new HashMap<>();
+			Map<String, URI> missing = new HashMap<>();
+			for (URI uri : uris) {
+				Long cached = forward.getIfPresent(uri);
+				if (cached == null) {
+					missing.put(uri.toString(), uri);
+				} else {
+					result.put(uri, cached);
+				}
 			}
 
-			final URI[] result = {null};
-
-			scan(Expressions.equal("id", id), row -> {
-				if ((Long) row.get(0) != id) {
-					return;
+			if (!missing.isEmpty()) {
+				if (refresh) {
+					table.refresh();
 				}
-
-				URI found = URIs.createURI(row.get(1).toString());
-
-				if (result[0] != null && !result[0].equals(found)) {
-					throw new IllegalStateException("Duplicate Iceberg ID mapping for " + id);
-				}
-
-				result[0] = found;
-			});
-
-			if (result[0] == null) {
-				throw new IllegalStateException("Unknown Iceberg URI ID: " + id);
+				scan(Expressions.in("value", missing.keySet()), row -> {
+					URI uri = missing.get(row.get(1).toString());
+					if (uri == null) {
+						return;
+					}
+					long found = (Long) row.get(0);
+					Long previous = result.put(uri, found);
+					if (previous != null && previous != found) {
+						throw new IllegalStateException("Duplicate Iceberg URI mapping for " + uri);
+					}
+				});
+				result.forEach((uri, found) -> {
+					forward.put(uri, found);
+					reverse.put(found, uri);
+				});
 			}
 
-			reverse.put(id, result[0]);
-			forward.put(result[0], id);
+			return result;
+		}
 
-			return result[0];
+		Map<Long, URI> resolveUris(Set<Long> requestedIds) {
+			Map<Long, URI> result = new HashMap<>();
+			Set<Long> missing = new HashSet<>();
+			for (long id : requestedIds) {
+				URI cached = reverse.getIfPresent(id);
+				if (cached == null) {
+					missing.add(id);
+				} else {
+					result.put(id, cached);
+				}
+			}
+
+			if (!missing.isEmpty()) {
+				table.refresh();
+				scan(Expressions.in("id", missing), row -> {
+					long id = (Long) row.get(0);
+					if (!missing.contains(id)) {
+						return;
+					}
+					URI found = URIs.createURI(row.get(1).toString());
+					URI previous = result.put(id, found);
+					if (previous != null && !previous.equals(found)) {
+						throw new IllegalStateException("Duplicate Iceberg ID mapping for " + id);
+					}
+				});
+				for (long id : missing) {
+					if (!result.containsKey(id)) {
+						throw new IllegalStateException("Unknown Iceberg URI ID: " + id);
+					}
+				}
+				result.forEach((id, uri) -> {
+					reverse.put(id, uri);
+					forward.put(uri, id);
+				});
+			}
+
+			return result;
 		}
 
 		void scan(Expression filter, java.util.function.Consumer<org.apache.iceberg.data.Record> consumer) {
@@ -560,29 +585,20 @@ public class KvinIceberg implements Kvin {
 			return NiceIterator.emptyIterator();
 		}
 
-		Set<Long> itemIds = new HashSet<>();
+		Map<Long, URI> itemUris = new HashMap<>();
+		ids[0].resolveIds(items).forEach((uri, id) -> itemUris.put(id, uri));
+		Set<Long> itemIds = itemUris.keySet();
 
-		for (URI item : items) {
-			long id = id(0, item);
-			if (id != 0) {
-				itemIds.add(id);
-			}
-		}
-
-		long contextId = id(1, context == null ? DEFAULT_CONTEXT : context);
+		URI requestedContext = context == null ? DEFAULT_CONTEXT : context;
+		long contextId = ids[1].resolveIds(List.of(requestedContext)).getOrDefault(requestedContext, 0L);
 
 		if (itemIds.isEmpty() || contextId == 0) {
 			return NiceIterator.emptyIterator();
 		}
 
-		Set<Long> propertyIds = new HashSet<>();
-
-		for (URI property : properties) {
-			long id = id(2, property);
-			if (id != 0) {
-				propertyIds.add(id);
-			}
-		}
+		Map<Long, URI> requestedPropertyUris = new HashMap<>();
+		ids[2].resolveIds(properties).forEach((uri, id) -> requestedPropertyUris.put(id, uri));
+		Set<Long> propertyIds = requestedPropertyUris.keySet();
 
 		if (!properties.isEmpty() && propertyIds.isEmpty()) {
 			return NiceIterator.emptyIterator();
@@ -635,11 +651,18 @@ public class KvinIceberg implements Kvin {
 			throw (RuntimeException) e;
 		}
 
-		URI requestedContext = context == null ? DEFAULT_CONTEXT : context;
+		long requestedSeries = properties.isEmpty() ? 0 : (long) itemIds.size() * propertyIds.size();
 
 		return new NiceIterator<>() {
-			final Map<SeriesKey, Long> counts = new HashMap<>();
-			TupleKey previous;
+			KvinRow previous;
+			long seriesCount;
+			long completedSeries;
+			long seriesItemId;
+			long seriesPropertyId;
+			URI seriesItem;
+			URI seriesProperty;
+			// Advance only when another tuple is requested, so a satisfied limit reads no extra row.
+			RowCursor pending;
 			KvinTuple next;
 			boolean closed;
 
@@ -648,37 +671,68 @@ public class KvinIceberg implements Kvin {
 				if (next != null) {
 					return true;
 				}
+				if (closed) {
+					return false;
+				}
 
 				try {
-					while (!cursors.isEmpty()) {
-						RowCursor cursor = cursors.poll();
-						KvinRow row = cursor.row;
-
-						try {
-							if (cursor.advance()) {
-								cursors.add(cursor);
+					while (pending != null || !cursors.isEmpty()) {
+						if (pending != null) {
+							if (pending.advance()) {
+								cursors.add(pending);
 							} else {
-								cursor.close();
+								pending.close();
 							}
-						} catch (RuntimeException e) {
-							cursor.close();
-							throw e;
+							pending = null;
 						}
+						if (cursors.isEmpty()) {
+							break;
+						}
+						pending = cursors.poll();
+						KvinRow row = pending.row;
 
 						long itemId = row.itemId();
 						long propertyId = row.propertyId();
 						long time = row.time();
 						int seqNr = row.seqNr();
 
-						SeriesKey seriesKey = new SeriesKey(itemId, propertyId);
-						TupleKey rowKey = new TupleKey(itemId, row.contextId(), propertyId, time, seqNr);
-
-						if (!itemIds.contains(itemId) || row.contextId() != contextId || (!properties.isEmpty() && !propertyIds.contains(propertyId)) || (begin != null && time < begin) || (end != null && time > end) || rowKey.equals(previous) || (limit > 0 && counts.getOrDefault(seriesKey, 0L) >= limit)) {
+						if (!itemIds.contains(itemId) || row.contextId() != contextId || (!properties.isEmpty() && !propertyIds.contains(propertyId)) || (begin != null && time < begin) || (end != null && time > end)) {
 							continue;
 						}
 
-						previous = rowKey;
-						counts.merge(seriesKey, 1L, Long::sum);
+						if (previous != null && ROW_ORDER.compare(previous, row) == 0) {
+							continue;
+						}
+						if (seriesItem == null || seriesItemId != itemId || seriesPropertyId != propertyId) {
+							seriesItemId = itemId;
+							seriesPropertyId = propertyId;
+							seriesCount = 0;
+							seriesItem = itemUris.get(itemId);
+							seriesProperty = requestedPropertyUris.get(propertyId);
+							if (seriesProperty == null) {
+								seriesProperty = ids[2].reverse.getIfPresent(propertyId);
+							}
+							if (seriesProperty == null) {
+								Set<Long> headProperties = new HashSet<>();
+								headProperties.add(propertyId);
+								for (RowCursor cursor : cursors) {
+									KvinRow head = cursor.row;
+									if (itemIds.contains(head.itemId()) && head.contextId() == contextId
+											&& (begin == null || head.time() >= begin) && (end == null || head.time() <= end)) {
+										headProperties.add(head.propertyId());
+									}
+								}
+								seriesProperty = ids[2].resolveUris(headProperties).get(propertyId);
+							}
+						}
+						if (limit > 0 && seriesCount >= limit) {
+							continue;
+						}
+
+						previous = row;
+						if (limit > 0 && ++seriesCount == limit) {
+							completedSeries++;
+						}
 
 						Object value = row.value();
 
@@ -686,19 +740,29 @@ public class KvinIceberg implements Kvin {
 							value = Records.decodeRecord(bytes.duplicate());
 						}
 
-						next = new KvinTuple(ids[0].uri(itemId), ids[2].uri(propertyId), requestedContext, time, seqNr, value);
+						next = new KvinTuple(seriesItem, seriesProperty, requestedContext, time, seqNr, value);
+						if (limit > 0 && requestedSeries > 0 && completedSeries == requestedSeries) {
+							close();
+						}
 
 						return true;
 					}
 
 					close();
 					return false;
-				} catch (IOException e) {
-					close();
-					throw new UncheckedIOException(e);
-				} catch (RuntimeException e) {
-					close();
-					throw e;
+				} catch (IOException | RuntimeException e) {
+					next = null;
+					try {
+						close();
+					} catch (RuntimeException closeFailure) {
+						if (e != closeFailure) {
+							e.addSuppressed(closeFailure);
+						}
+					}
+					if (e instanceof IOException ioException) {
+						throw new UncheckedIOException(ioException);
+					}
+					throw (RuntimeException) e;
 				}
 			}
 
@@ -717,6 +781,10 @@ public class KvinIceberg implements Kvin {
 			public void close() {
 				if (!closed) {
 					closed = true;
+					if (pending != null) {
+						cursors.add(pending);
+						pending = null;
+					}
 					closeCursors(cursors);
 				}
 			}
@@ -732,6 +800,8 @@ public class KvinIceberg implements Kvin {
 			} catch (RuntimeException e) {
 				if (failure == null) {
 					failure = e;
+				} else if (failure != e) {
+					failure.addSuppressed(e);
 				}
 			}
 		}
@@ -887,12 +957,6 @@ public class KvinIceberg implements Kvin {
 		}
 
 		return new KvinRow((Long) record.get(0), (Long) record.get(1), (Long) record.get(2), (Long) record.get(3), (Integer) record.get(4), value);
-	}
-
-	private record SeriesKey(long itemId, long propertyId) {
-	}
-
-	private record TupleKey(long itemId, long contextId, long propertyId, long time, int seqNr) {
 	}
 
 	private record KvinRow(long itemId, long contextId, long propertyId, long time, int seqNr, Object value) {

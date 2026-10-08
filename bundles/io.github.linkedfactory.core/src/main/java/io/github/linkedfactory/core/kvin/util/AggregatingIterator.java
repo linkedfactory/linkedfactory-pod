@@ -31,7 +31,7 @@ import io.github.linkedfactory.core.kvin.KvinTuple;
 
 /**
  * An iterator for KVIN tuples supporting a set of aggregation operators (min,
- * max, sum, avg) that required all values within a given time range. This is
+ * max, sum, avg, first) using constant-space accumulation within a time range. This is
  * actually a helper class for {@link Kvin} compatible stores to provide
  * pre-aggregated values.
  *
@@ -44,8 +44,10 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 	final long interval;
 	final String op;
 	final long limit;
+	private final boolean customAggregation;
 
 	T next, baseNext;
+	private T seriesFirst;
 	int seqNr = 1;
 	long count = 0;
 
@@ -54,6 +56,18 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 		this.interval = interval;
 		this.op = op;
 		this.limit = limit;
+		Class<?> type = getClass();
+		boolean customAggregation = false;
+		while (type != AggregatingIterator.class) {
+			try {
+				type.getDeclaredMethod("aggregate", List.class, String.class);
+				customAggregation = true;
+				break;
+			} catch (NoSuchMethodException e) {
+				type = type.getSuperclass();
+			}
+		}
+		this.customAggregation = customAggregation;
 	}
 
 	protected abstract T createElement(URI item, URI property, URI context, long time, int seqNr, Object value);
@@ -63,7 +77,7 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 		if (next != null) {
 			return true;
 		}
-		if (base.hasNext()) {
+		if (baseNext != null || base.hasNext()) {
 			next = computeNext();
 		}
 		return next != null;
@@ -80,69 +94,71 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 	}
 
 	protected T computeNext() {
-		// keeps elements of current active interval
-		List<T> inInterval = new ArrayList<>();
-		long intervalStart = -1;
-		if (baseNext != null && (limit == 0 || count < limit)) {
-			inInterval.add(baseNext);
-			intervalStart = interval == 0 ? 0 : baseNext.time - (baseNext.time % interval);
+		T first;
+		while (true) {
+			if (baseNext != null) {
+				first = baseNext;
+				baseNext = null;
+			} else if (base.hasNext()) {
+				first = base.next();
+			} else {
+				return null;
+			}
+			if (seriesFirst == null || !sameSeries(first, seriesFirst)) {
+				seriesFirst = first;
+				count = 0;
+			}
+			if (limit <= 0 || count < limit) {
+				break;
+			}
 		}
-		T prev = baseNext;
-		baseNext = null;
+		long intervalStart = intervalStart(first);
+		Accumulator accumulator = new Accumulator(first.value, op);
+		// Preserve the list-based extension hook only for subclasses that override it.
+		List<T> elements = customAggregation ? new ArrayList<>() : null;
+		if (elements != null) {
+			elements.add(first);
+		}
+		boolean invalidNumber = false;
 		while (base.hasNext()) {
 			T entry = base.next();
-			if (prev != null && (entry.item != prev.item && !entry.item.equals(prev.item) ||
-					entry.property != prev.property && !entry.property.equals(prev.property))) {
+			if (!sameSeries(first, entry) || intervalStart(entry) != intervalStart) {
 				baseNext = entry;
-				count = 0;
-
-				if (!inInterval.isEmpty()) {
-					// start new interval if item or property changes and current interval is not empty
-					break;
+				break;
+			}
+			if (elements != null) {
+				elements.add(entry);
+			} else if (!invalidNumber) {
+				try {
+					accumulator.add(entry.value);
+				} catch (NumberFormatException nfe) {
+					// Drain the rest of this interval, just as the buffered implementation did.
+					invalidNumber = true;
 				}
 			}
-
-			// skip values of same item and property if required
-			if (limit > 0 && count >= limit) {
-				continue;
-			}
-
-			long entryIntervalStart = interval == 0 ? 0 : entry.time - (entry.time % interval);
-			if (intervalStart < 0) {
-				intervalStart = entryIntervalStart;
-			}
-
-			if (entryIntervalStart != intervalStart) {
-				baseNext = entry;
-				// start new interval
-				break;
-			} else {
-				inInterval.add(entry);
-				prev = entry;
-			}
 		}
-
-		// item and property has not changed
-		if (limit > 0 && count >= limit) {
-			return null;
-		}
-
-		// no values to aggregate
-		if (inInterval.isEmpty()) {
-			return null;
-		}
-
 		count++;
 		Object value;
-		T first = inInterval.get(0);
 		try {
-			value = aggregate(inInterval, op);
+			value = elements != null ? aggregate(elements, op) : invalidNumber ? 0 : accumulator.value();
 		} catch (NumberFormatException nfe) {
-			log.error("Invalid number format for item {} and property {} in interval [{}, {}]", first.item,
-					first.property, intervalStart, intervalStart + interval);
+			invalidNumber = true;
 			value = 0;
 		}
+		if (invalidNumber) {
+			log.error("Invalid number format for item {} and property {} in interval [{}, {}]", first.item,
+					first.property, intervalStart, intervalStart + interval);
+		}
 		return createElement(first.item, first.property, first.context, intervalStart, seqNr++, value);
+	}
+
+	private boolean sameSeries(T left, T right) {
+		return (left.item == right.item || left.item.equals(right.item)) &&
+				(left.property == right.property || left.property.equals(right.property));
+	}
+
+	private long intervalStart(T tuple) {
+		return interval == 0 ? 0 : tuple.time - (tuple.time % interval);
 	}
 
 	@Override
@@ -152,47 +168,51 @@ public abstract class AggregatingIterator<T extends KvinTuple> extends NiceItera
 
 	/**
 	 * Applies the given operator to the list of elements.
+	 * Subclasses overriding this hook receive the complete interval; the default
+	 * iterator path uses streaming accumulation instead of building a list.
 	 */
 	protected Object aggregate(List<T> elements, String op) {
-		ValueUtils utils = ValueUtils.getInstance();
 		Iterator<T> it = elements.iterator();
-		Object value = it.next().value;
-		switch (op) {
-			case "first":
-				// just use first value
-				break;
-			case "min":
-				while (it.hasNext()) {
-					Object current = it.next().value;
+		Accumulator accumulator = new Accumulator(it.next().value, op);
+		while (it.hasNext()) {
+			accumulator.add(it.next().value);
+		}
+		return accumulator.value();
+	}
+
+	private static final class Accumulator {
+		private final ValueUtils utils = ValueUtils.getInstance();
+		private final String op;
+		private Object value;
+		private long count = 1;
+
+		private Accumulator(Object value, String op) {
+			this.value = value;
+			this.op = op;
+		}
+
+		private void add(Object current) {
+			switch (op) {
+				case "min":
 					if (utils.compareWithConversion(value, current) > 0) {
 						value = current;
 					}
-				}
-				break;
-			case "max":
-				while (it.hasNext()) {
-					Object current = it.next().value;
+					break;
+				case "max":
 					if (utils.compareWithConversion(value, current) < 0) {
 						value = current;
 					}
-				}
-				break;
-			case "avg":
-				long count = 1;
-				while (it.hasNext()) {
-					Object current = it.next().value;
+					break;
+				case "avg":
+				case "sum":
 					value = utils.add(value, current);
-					count++;
-				}
-				value = utils.divide(value, count);
-				break;
-			case "sum":
-				while (it.hasNext()) {
-					Object current = it.next().value;
-					value = utils.add(value, current);
-				}
-				break;
+					break;
+			}
+			count++;
 		}
-		return value;
+
+		private Object value() {
+			return "avg".equals(op) ? utils.divide(value, count) : value;
+		}
 	}
 }
