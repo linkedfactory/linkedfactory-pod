@@ -10,16 +10,18 @@ import java.io.File;
 import java.util.Locale;
 
 import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.sail.NotifyingSailConnection;
 import org.eclipse.rdf4j.sail.Sail;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
+import org.eclipse.rdf4j.sail.helpers.NotifyingSailWrapper;
 import org.eclipse.rdf4j.sail.helpers.SailWrapper;
 
 import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 
-public class KvinSail extends SailWrapper {
+public class KvinSail extends NotifyingSailWrapper {
 
     protected final Kvin kvin;
     protected Injector injector;
@@ -59,7 +61,7 @@ public class KvinSail extends SailWrapper {
     }
 
     @Override
-    public SailConnection getConnection() throws SailException {
+    public NotifyingSailConnection getConnection() throws SailException {
         return new KvinConnection(this, super.getConnection());
     }
 
