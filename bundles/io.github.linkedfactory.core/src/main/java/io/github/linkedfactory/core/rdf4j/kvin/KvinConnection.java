@@ -12,15 +12,17 @@ import net.enilink.komma.core.URIs;
 import net.enilink.komma.literals.LiteralConverter;
 import net.enilink.komma.rdf4j.RDF4JValueConverter;
 import org.eclipse.rdf4j.model.*;
+import org.eclipse.rdf4j.sail.NotifyingSailConnection;
 import org.eclipse.rdf4j.sail.SailConnection;
 import org.eclipse.rdf4j.sail.SailException;
 import org.eclipse.rdf4j.sail.UpdateContext;
+import org.eclipse.rdf4j.sail.helpers.NotifyingSailConnectionWrapper;
 import org.eclipse.rdf4j.sail.helpers.SailConnectionWrapper;
 
 import java.util.*;
 import java.util.regex.Pattern;
 
-public class KvinConnection extends SailConnectionWrapper {
+public class KvinConnection extends NotifyingSailConnectionWrapper {
 
 	final KvinSail kvinSail;
 	final RDF4JValueConverter valueConverter;
@@ -30,7 +32,7 @@ public class KvinConnection extends SailConnectionWrapper {
 			Pattern.compile("^http://www.w3.org/1999/02/22-rdf-syntax-ns#_[1-9][0-9]*$");
 	private final Map<Resource, List<Statement>> stmtsBySubject = new LinkedHashMap<>();
 
-	public KvinConnection(KvinSail sail, SailConnection baseConnection) {
+	public KvinConnection(KvinSail sail, NotifyingSailConnection baseConnection) {
 		super(baseConnection);
 		this.kvinSail = sail;
 		this.valueConverter = sail.getValueConverter();
