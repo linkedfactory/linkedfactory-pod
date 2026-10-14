@@ -99,11 +99,20 @@ public class ElasticKeywordSearchBackend implements FtsSearchBackend {
 		if (request.isIncludeSnippet()) {
 			payload.putObject("highlight").putObject("fields").putObject("value");
 		}
-		payload.putObject("collapse").put("field", "subject");
-		ObjectNode sort = payload.putArray("sort").addObject();
-		sort.putObject("subject").put("order", "asc");
-		payload.withArray("sort").addObject().putObject("_score").put("order", "desc");
-		payload.withArray("sort").addObject().putObject("sortValue").put("order", "asc");
+		ObjectNode collapse = payload.putObject("collapse");
+		collapse.put("field", "subject");
+
+		ObjectNode innerHits = collapse.putObject("inner_hits");
+		innerHits.put("name", "top_hit");
+		innerHits.put("size", 1);
+
+		ArrayNode ihSort = innerHits.putArray("sort");
+		ihSort.addObject().putObject("_score").put("order", "desc");
+
+		ArrayNode sortArr = payload.putArray("sort");
+		sortArr.addObject().putObject("_score").put("order", "desc");
+		sortArr.addObject().putObject("subject").put("order", "asc");
+
 		payload.put("track_scores", true);
 
 		String url = endpoint + searchPath;
