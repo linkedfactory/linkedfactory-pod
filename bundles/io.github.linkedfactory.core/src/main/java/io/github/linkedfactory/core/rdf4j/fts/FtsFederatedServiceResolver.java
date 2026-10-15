@@ -18,7 +18,7 @@ public class FtsFederatedServiceResolver extends AbstractFederatedServiceResolve
 	}
 
 	public FtsFederatedServiceResolver(FtsFederatedServiceConfig config) {
-		this(config, java.util.List.of(new ElasticKeywordSearchBackendFactory()));
+		this(config, java.util.List.of(new ElasticKeywordSearchBackendFactory(), new LuceneSearchBackendFactory()));
 	}
 
 	public FtsFederatedServiceResolver(FtsFederatedServiceConfig config,

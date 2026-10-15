@@ -22,9 +22,12 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private static final IRI SEARCH_PATH = VF.createIRI(CONFIG_NS, "searchPath");
 	private static final IRI FAIL_ON_ERROR = VF.createIRI(CONFIG_NS, "failOnError");
 	private static final IRI OUTBOX_DIR = VF.createIRI(CONFIG_NS, "outboxDir");
+	private static final IRI INDEX_DIR = VF.createIRI(CONFIG_NS, "indexDir");
 	private static final IRI DEFAULT_LIMIT = VF.createIRI(CONFIG_NS, "defaultLimit");
 	private static final String DEFAULT_OUTBOX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
 			"linkedfactory-fts-outbox").toString();
+	private static final String DEFAULT_INDEX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
+			"linkedfactory-fts-lucene-index").toString();
 
 	private String backend = "elastic";
 	private String endpoint;
@@ -32,6 +35,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private String searchPath = "/fts/_search";
 	private boolean failOnError = true;
 	private String outboxDir = DEFAULT_OUTBOX_DIR;
+	private String indexDir = DEFAULT_INDEX_DIR;
 	private int defaultLimit = 100;
 
 	public FtsSailConfig() {
@@ -84,6 +88,16 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 		}
 	}
 
+	public String getIndexDir() {
+		return indexDir;
+	}
+
+	public void setIndexDir(String indexDir) {
+		if (indexDir != null && !indexDir.isBlank()) {
+			this.indexDir = indexDir.trim();
+		}
+	}
+
 	public String getSearchPath() {
 		return searchPath;
 	}
@@ -119,6 +133,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 		}
 		model.add(implNode, FAIL_ON_ERROR, VF.createLiteral(failOnError));
 		model.add(implNode, OUTBOX_DIR, VF.createLiteral(outboxDir));
+		model.add(implNode, INDEX_DIR, VF.createLiteral(indexDir));
 		model.add(implNode, DEFAULT_LIMIT, VF.createLiteral(defaultLimit));
 		return implNode;
 	}
@@ -150,6 +165,9 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 
 		Optional<Literal> outboxDirLiteral = Models.objectLiteral(model.filter(implNode, OUTBOX_DIR, null));
 		outboxDirLiteral.ifPresent(literal -> outboxDir = literal.getLabel());
+
+		Optional<Literal> indexDirLiteral = Models.objectLiteral(model.filter(implNode, INDEX_DIR, null));
+		indexDirLiteral.ifPresent(literal -> indexDir = literal.getLabel());
 
 		Optional<Literal> defaultLimitLiteral = Models.objectLiteral(model.filter(implNode, DEFAULT_LIMIT, null));
 		if (defaultLimitLiteral.isPresent()) {

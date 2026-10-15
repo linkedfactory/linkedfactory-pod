@@ -17,6 +17,7 @@ public class FtsSailConfigTest {
 		config.setSearchPath("/api/search");
 		config.setFailOnError(false);
 		config.setOutboxDir("/var/lib/fts-outbox");
+		config.setIndexDir("/var/lib/fts-lucene-index");
 		config.setDefaultLimit(25);
 
 		Model model = new LinkedHashModel();
@@ -31,6 +32,7 @@ public class FtsSailConfigTest {
 		assertEquals("/api/search", parsed.getSearchPath());
 		assertFalse(parsed.isFailOnError());
 		assertEquals("/var/lib/fts-outbox", parsed.getOutboxDir());
+		assertEquals("/var/lib/fts-lucene-index", parsed.getIndexDir());
 		assertEquals(25, parsed.getDefaultLimit());
 	}
 }
