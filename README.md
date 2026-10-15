@@ -166,17 +166,62 @@ The following example shows how to configure the federated service and the FtsSa
 
 Backend selection:
 - `fts:backend "elastic"` uses `fts:endpoint` and an HTTP search backend.
-- `fts:backend "lucene"` can be added later as a Lucene backend.
-- `fts:backend "internal"` can be added later for in-process indexing and should ignore `fts:endpoint`.
+- `fts:backend "lucene"` uses an embedded, local Lucene index (see below) instead of an external
+  search server. No network hop for indexing or querying.
 
 Common TTL options:
-- `fts:endpoint` search endpoint for external backends
-- `fts:searchPath` backend query path
-- `fts:bulkPath "/fts/bulk"` is the bulk endpoint path for indexing (where linkedfactory sends the changes and not related to the federated service)
+- `fts:endpoint` search endpoint for external backends (elastic); for the lucene backend this
+  field is not used, use `fts:indexDir` instead.
+- `fts:searchPath` backend query path (elastic only)
+- `fts:bulkPath "/fts/bulk"` is the bulk endpoint path for indexing (elastic only, not related to
+  the federated service)
 - `fts:defaultLimit` default result size
 - `fts:failOnError` fail or log on backend errors
+- `fts:indexDir` filesystem directory for the embedded Lucene index (lucene only)
 
 `fts:FtsSail` can also be used with in-memory stores by wrapping `openrdf:MemoryStore` instead of `NativeStore`.
+
+### Embedded Lucene backend
+
+`fts:backend "lucene"` indexes and searches RDF statements in-process, using a local Lucene index
+instead of an external search server:
+
+```ttl
+sail:delegate [
+   sail:sailType "fts:FtsSail" ;
+   fts:backend "lucene" ;
+   fts:indexDir "/var/lib/linkedfactory/fts-lucene-index" ; # writable directory for the index
+   fts:defaultLimit 100 ;
+   sail:delegate [
+      sail:sailType "openrdf:NativeStore" ;
+      ns:tripleIndexes "cspo,cpos,spoc,posc"
+   ]
+]
+```
+
+To try it against a running Pod:
+
+1. In the configuration ttl file, set `fts:backend "lucene"` and `fts:indexDir` to a writable
+   directory, as shown above. `fts:endpoint`, `fts:bulkPath`, and `fts:searchPath` are not used
+   by this backend.
+2. Point the launch configuration (`launch/equinox/pom.xml`, `net.enilink.config` property) at a
+   configuration file that includes the FTS sail, e.g. `configurations/default-with-search.ttl`.
+3. Start the Pod, then insert and query data through the usual SPARQL endpoint:
+
+```bash
+curl -sS -X POST 'http://localhost:8080/sparql' \
+  --data-urlencode 'update=INSERT DATA { <urn:example:item1> <urn:example:title> "quick brown fox" . }' \
+  --data-urlencode 'model=http://linkedfactory.github.io/data/'
+
+curl -sS -X POST 'http://localhost:8080/sparql' \
+  -H 'Accept: application/sparql-results+json' \
+  --data-urlencode 'query=PREFIX fts: <fts:> SELECT ?iri WHERE { SERVICE <fts:> { ?iri fts:keywords "fox" . } }' \
+  --data-urlencode 'model=http://linkedfactory.github.io/data/'
+```
+
+The query should return `urn:example:item1`. The embedded Lucene backend is still experimental:
+index lifecycle management (closing/cleanup) and operational guidance need further work before
+production use.
 
 The bulk request format is an `operations` array containing `upsert`, `remove`, `clear`, and `clearContexts` entries. Named graph context is included per statement as `context`.
 
