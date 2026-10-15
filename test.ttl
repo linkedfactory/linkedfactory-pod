@@ -1,0 +1,21 @@
+@prefix vocabulary: <tag:ex.test,2026:vocabulary:test#> .
+@prefix : <tag:ex.test,2026:data:test#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+:company1
+    a vocabulary:Company ;
+    vocabulary:name "ACME Corporation" .
+
+:alice
+    a vocabulary:Person ;
+    vocabulary:name "Alice" ;
+    vocabulary:age 30 ;
+    vocabulary:worksFor :company1 .
+
+:bob
+    a vocabulary:Person ;
+    vocabulary:name "Bob" ;
+    vocabulary:age 42 ;
+    vocabulary:worksFor :company1 .

@@ -1,0 +1,42 @@
+{
+  "id": "chatcmpl-aafad5f473437b41",
+  "object": "chat.completion",
+  "created": 1792071171,
+  "model": "google/gemma-4-31B-it",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! I am a large language model, trained by Google. You can think of me as a versatile virtual assistant capable of answering questions, writing creative content, translating languages, and helping you solve complex problems. \n\nHow can I help you today?",
+        "refusal": null,
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "reasoning": null
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": 106,
+      "token_ids": null,
+      "routed_experts": null
+    }
+  ],
+  "service_tier": null,
+  "system_fingerprint": "vllm-0.31.0-68585bb7",
+  "usage": {
+    "prompt_tokens": 19,
+    "total_tokens": 71,
+    "completion_tokens": 52,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "prompt_logprobs": null,
+  "prompt_token_ids": null,
+  "prompt_text": null,
+  "kv_transfer_params": null,
+  "ec_transfer_params": null,
+  "metrics": null
+}

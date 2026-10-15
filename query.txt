@@ -1,0 +1,13 @@
+PREFIX fts: <fts:>
+PREFIX ex: <tag:ex.test,2026:vocabulary:test#>
+SELECT ?iri ?score ?snippet WHERE {
+  SERVICE <fts:> {
+    ?iri fts:keywords "Alice" ;
+         fts:score ?score ;
+         fts:snippet ?snippet
+       .
+  }
+  ?iri ex:age ?age .
+   filter (?age < 40)
+
+}
