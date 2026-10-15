@@ -30,7 +30,10 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private static final IRI STORE_IDENTITY = VF.createIRI(CONFIG_NS, "storeIdentity");
 	private static final IRI REQUEST_TIMEOUT = VF.createIRI(CONFIG_NS, "requestTimeoutMillis");
 	private static final IRI EXCLUDED_MODELS = VF.createIRI(CONFIG_NS, "excludedModels");
+	private static final IRI INDEX_DIR = VF.createIRI(CONFIG_NS, "indexDir");
 	private static final IRI DEFAULT_LIMIT = VF.createIRI(CONFIG_NS, "defaultLimit");
+	private static final String DEFAULT_INDEX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
+			"linkedfactory-fts-lucene-index").toString();
 
 	private String backend = "elastic";
 	private String endpoint;
@@ -40,6 +43,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private boolean failOnError = true;
 	private String outboxDir;
 	private String storeIdentity;
+	private String indexDir = DEFAULT_INDEX_DIR;
 	private int defaultLimit = 100;
 	private int requestTimeoutMillis = HttpFtsSearchService.DEFAULT_REQUEST_TIMEOUT_MILLIS;
 
@@ -104,6 +108,16 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	public void setStoreIdentity(String storeIdentity) {
 		if (storeIdentity != null && !storeIdentity.isBlank()) {
 			this.storeIdentity = storeIdentity.trim();
+		}
+	}
+
+	public String getIndexDir() {
+		return indexDir;
+	}
+
+	public void setIndexDir(String indexDir) {
+		if (indexDir != null && !indexDir.isBlank()) {
+			this.indexDir = indexDir.trim();
 		}
 	}
 
@@ -182,6 +196,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 			model.add(implNode, STORE_IDENTITY, VF.createLiteral(storeIdentity));
 		}
 		model.add(implNode, REQUEST_TIMEOUT, VF.createLiteral(requestTimeoutMillis));
+		model.add(implNode, INDEX_DIR, VF.createLiteral(indexDir));
 		model.add(implNode, DEFAULT_LIMIT, VF.createLiteral(defaultLimit));
 		return implNode;
 	}
@@ -241,6 +256,9 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 				throw new SailConfigException("Invalid positive integer for fts:requestTimeoutMillis", e);
 			}
 		}
+
+		Optional<Literal> indexDirLiteral = Models.objectLiteral(model.filter(implNode, INDEX_DIR, null));
+		indexDirLiteral.ifPresent(literal -> indexDir = literal.getLabel());
 
 		Optional<Literal> defaultLimitLiteral = Models.objectLiteral(model.filter(implNode, DEFAULT_LIMIT, null));
 		if (defaultLimitLiteral.isPresent()) {

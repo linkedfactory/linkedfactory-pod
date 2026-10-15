@@ -13,6 +13,7 @@
 	<properties>
 		<parquet.version>1.17.1</parquet.version>
 		<hadoop.version>3.5.0</hadoop.version>
+		<lucene.version>10.4.0</lucene.version>
 	</properties>
 
 	<dependencies>
@@ -190,6 +191,30 @@
 			<artifactId>picocli</artifactId>
 			<version>4.7.7</version>
 		</dependency>
+		<dependency>
+			<groupId>org.apache.lucene</groupId>
+			<artifactId>lucene-core</artifactId>
+			<version>${lucene.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.lucene</groupId>
+			<artifactId>lucene-analysis-common</artifactId>
+			<version>${lucene.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.lucene</groupId>
+			<artifactId>lucene-queryparser</artifactId>
+			<version>${lucene.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.lucene</groupId>
+			<artifactId>lucene-highlighter</artifactId>
+			<version>${lucene.version}</version>
+			<scope>provided</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
@@ -242,7 +267,8 @@
 								org.apache.avro,
 								org.apache.hadoop,
 								com.fasterxml.woodstox,
-								org.codehaus.woodstox
+								org.codehaus.woodstox,
+								org.apache.lucene
 							</includeGroupIds>
 						</configuration>
 					</execution>
