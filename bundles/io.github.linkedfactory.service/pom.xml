@@ -231,6 +231,8 @@
 				<jmh.measurement.time>3s</jmh.measurement.time>
 				<jmh.forks>2</jmh.forks>
 				<jmh.temp.root></jmh.temp.root>
+				<!-- rows per request for KvinIngestionScalingBenchmark -->
+				<jmh.rows>5000,100000</jmh.rows>
 			</properties>
 			<build>
 				<plugins>
@@ -261,6 +263,7 @@
 								<argument>${jmh.result.format}</argument>
 								<argument>-rff</argument>
 								<argument>${jmh.result.file}</argument>
+								<argument>-prows=${jmh.rows}</argument>
 							</arguments>
 						</configuration>
 					</plugin>

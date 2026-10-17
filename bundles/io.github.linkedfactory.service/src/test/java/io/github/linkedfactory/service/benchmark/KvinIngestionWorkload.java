@@ -2,10 +2,16 @@ package io.github.linkedfactory.service.benchmark;
 
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.util.JsonFormatWriter;
+import io.github.linkedfactory.core.rdf4j.io.SPARQLResultsParquetWriterFactory;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import org.eclipse.rdf4j.model.ValueFactory;
+import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
+import org.eclipse.rdf4j.query.impl.MapBindingSet;
+import org.eclipse.rdf4j.query.resultio.TupleQueryResultWriter;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -37,6 +43,7 @@ public final class KvinIngestionWorkload {
 	private static final List<URI> SHUFFLED_CHANNELS = shuffledChannels();
 
 	private final int variantIndex;
+	private final int rowCount;
 	private final List<URI> items;
 	private final URI property;
 	private final long startTime;
@@ -44,16 +51,22 @@ public final class KvinIngestionWorkload {
 	private final List<KvinTuple> preseedTuples;
 	private final byte[] jsonPayload;
 	private final byte[] csvPayload;
+	private final byte[] parquetPayload;
 
 	public KvinIngestionWorkload() {
 		this(0);
 	}
 
 	KvinIngestionWorkload(int variantIndex) {
+		this(variantIndex, ROW_COUNT);
+	}
+
+	KvinIngestionWorkload(int variantIndex, int rowCount) {
 		if (variantIndex < 0 || variantIndex >= VARIANT_COUNT) {
 			throw new IllegalArgumentException("variantIndex must be in [0, " + VARIANT_COUNT + "): " + variantIndex);
 		}
 		this.variantIndex = variantIndex;
+		this.rowCount = rowCount;
 		int firstChannel = variantIndex * CHANNEL_COUNT;
 		this.items = List.copyOf(SHUFFLED_CHANNELS.subList(firstChannel, firstChannel + CHANNEL_COUNT));
 		this.property = PROPERTY_POOL.get(variantIndex);
@@ -61,7 +74,8 @@ public final class KvinIngestionWorkload {
 		this.tuples = createTuples();
 		this.preseedTuples = createPreseedTuples();
 		this.jsonPayload = createJsonPayload(tuples);
-		this.csvPayload = createCsvPayload(0, ROW_COUNT);
+		this.csvPayload = createCsvPayload(0, rowCount);
+		this.parquetPayload = createParquetPayload(tuples);
 	}
 
 	static List<KvinIngestionWorkload> variants() {
@@ -100,11 +114,15 @@ public final class KvinIngestionWorkload {
 		return csvPayload.clone();
 	}
 
+	public byte[] parquetPayload() {
+		return parquetPayload.clone();
+	}
+
 	public List<byte[]> csvPayloads(int fileCount) {
-		if (fileCount <= 0 || ROW_COUNT % fileCount != 0) {
-			throw new IllegalArgumentException("fileCount must divide " + ROW_COUNT + ": " + fileCount);
+		if (fileCount <= 0 || rowCount % fileCount != 0) {
+			throw new IllegalArgumentException("fileCount must divide " + rowCount + ": " + fileCount);
 		}
-		int rowsPerFile = ROW_COUNT / fileCount;
+		int rowsPerFile = rowCount / fileCount;
 		List<byte[]> payloads = new ArrayList<>(fileCount);
 		for (int file = 0; file < fileCount; file++) {
 			int startRow = file * rowsPerFile;
@@ -114,8 +132,8 @@ public final class KvinIngestionWorkload {
 	}
 
 	private List<KvinTuple> createTuples() {
-		List<KvinTuple> result = new ArrayList<>(TUPLE_COUNT);
-		for (int row = 0; row < ROW_COUNT; row++) {
+		List<KvinTuple> result = new ArrayList<>(rowCount * CHANNEL_COUNT);
+		for (int row = 0; row < rowCount; row++) {
 			for (int channel = 0; channel < CHANNEL_COUNT; channel++) {
 				long time = startTime + (row / SEQUENCES_PER_TIMESTAMP) * TIMESTAMP_STEP;
 				int seqNr = row % SEQUENCES_PER_TIMESTAMP + 1;
@@ -145,6 +163,29 @@ public final class KvinIngestionWorkload {
 			return json.getBytes(StandardCharsets.UTF_8);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
+		}
+	}
+
+	private static byte[] createParquetPayload(List<KvinTuple> tuples) {
+		try {
+			ByteArrayOutputStream output = new ByteArrayOutputStream();
+			TupleQueryResultWriter writer = new SPARQLResultsParquetWriterFactory().getWriter(output);
+			writer.startQueryResult(List.of("item", "property", "context", "time", "seqNr", "value"));
+			ValueFactory vf = SimpleValueFactory.getInstance();
+			for (KvinTuple tuple : tuples) {
+				MapBindingSet bindings = new MapBindingSet(6);
+				bindings.addBinding("item", vf.createIRI(tuple.item.toString()));
+				bindings.addBinding("property", vf.createIRI(tuple.property.toString()));
+				bindings.addBinding("context", vf.createIRI(tuple.context.toString()));
+				bindings.addBinding("time", vf.createLiteral(tuple.time));
+				bindings.addBinding("seqNr", vf.createLiteral(tuple.seqNr));
+				bindings.addBinding("value", vf.createLiteral((Double) tuple.value));
+				writer.handleSolution(bindings);
+			}
+			writer.endQueryResult();
+			return output.toByteArray();
+		} catch (Exception e) {
+			throw new IllegalStateException("Unable to create Parquet benchmark payload", e);
 		}
 	}
 
