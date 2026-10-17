@@ -73,6 +73,7 @@ public class KvinIngestionBenchmark {
 		private List<KvinIngestionWorkload> workloads;
 		private List<byte[]> jsonPayloadVariants;
 		private List<byte[]> csvPayloadVariants;
+		private List<byte[]> parquetPayloadVariants;
 		private List<List<byte[]>> csvPayloadPartitionVariants;
 		private int nextVariantIndex;
 		private KvinIngestionWorkload workload;
@@ -83,14 +84,16 @@ public class KvinIngestionBenchmark {
 		private KvinService parseOnlyService;
 		private byte[] jsonPayload;
 		private byte[] csvPayload;
+		private byte[] parquetPayload;
 		private List<byte[]> csvPayloads;
 		private boolean measuredWrites;
 
 		@Setup(Level.Trial)
 		public void setupTrial() {
-			workloads = KvinIngestionWorkload.variants();
+			workloads = createWorkloads();
 			jsonPayloadVariants = workloads.stream().map(KvinIngestionWorkload::jsonPayload).toList();
 			csvPayloadVariants = workloads.stream().map(KvinIngestionWorkload::csvPayload).toList();
+			parquetPayloadVariants = workloads.stream().map(KvinIngestionWorkload::parquetPayload).toList();
 			csvPayloadPartitionVariants = workloads.stream()
 					.map(variant -> variant.csvPayloads(SEQUENTIAL_CSV_FILE_COUNT)).toList();
 			nextVariantIndex = 0;
@@ -104,10 +107,11 @@ public class KvinIngestionBenchmark {
 		@Setup(Level.Invocation)
 		public void setupInvocation() throws IOException {
 			int variantIndex = nextVariantIndex;
-			nextVariantIndex = (nextVariantIndex + 1) % KvinIngestionWorkload.VARIANT_COUNT;
+			nextVariantIndex = (nextVariantIndex + 1) % workloads.size();
 			workload = workloads.get(variantIndex);
 			jsonPayload = jsonPayloadVariants.get(variantIndex);
 			csvPayload = csvPayloadVariants.get(variantIndex);
+			parquetPayload = parquetPayloadVariants.get(variantIndex);
 			csvPayloads = csvPayloadPartitionVariants.get(variantIndex);
 			String tempRoot = System.getProperty("jmh.temp.root", "");
 			Path directory = tempRoot.isEmpty()
@@ -119,6 +123,10 @@ public class KvinIngestionBenchmark {
 			service = new BenchmarkService(false);
 			parseOnlyService = new BenchmarkService(true);
 			measuredWrites = false;
+		}
+
+		protected List<KvinIngestionWorkload> createWorkloads() {
+			return KvinIngestionWorkload.variants();
 		}
 
 		@TearDown(Level.Invocation)
@@ -160,6 +168,10 @@ public class KvinIngestionBenchmark {
 
 		public void postCsv() throws IOException {
 			post(csvPayload, "text/csv", service, true);
+		}
+
+		public void postParquet() throws IOException {
+			post(parquetPayload, "application/vnd.apache.parquet", service, true);
 		}
 
 		public void putCsvDirect() throws IOException {
@@ -256,7 +268,7 @@ public class KvinIngestionBenchmark {
 				}
 			}
 			Assert.assertEquals("Unexpected persisted KVIN tuples", expected, actual);
-			Assert.assertEquals((measuredWrites ? KvinIngestionWorkload.TUPLE_COUNT : 0)
+			Assert.assertEquals((measuredWrites ? workload.tuples().size() : 0)
 					+ KvinIngestionWorkload.CHANNEL_COUNT, actual.size());
 		}
 
@@ -296,6 +308,12 @@ public class KvinIngestionBenchmark {
 	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
 	public void postCsv(BenchmarkState state) throws IOException {
 		state.postCsv();
+	}
+
+	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
+	public void postParquet(BenchmarkState state) throws IOException {
+		state.postParquet();
 	}
 
 	@Benchmark

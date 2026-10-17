@@ -5,6 +5,7 @@ import com.google.inject.Guice
 import io.github.linkedfactory.core.kvin.{Kvin, KvinListener, KvinTuple}
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb
 import io.github.linkedfactory.core.kvin.util.JsonFormatParser
+import io.github.linkedfactory.core.rdf4j.io.SPARQLResultsParquetWriterFactory
 import net.enilink.commons.iterator.NiceIterator
 import net.enilink.komma.core.{KommaModule, URI, URIs}
 import net.enilink.komma.model.*
@@ -12,8 +13,20 @@ import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.{Box, Full}
 import net.liftweb.http.provider.servlet.HTTPRequestServlet
 import net.liftweb.http.{CurrentReq, InMemoryResponse, LiftResponse, OutputStreamResponse, Req, S}
+import org.apache.parquet.ParquetReadOptions
+import org.apache.parquet.conf.PlainParquetConfiguration
+import org.apache.parquet.hadoop.ParquetFileReader
+import org.apache.parquet.example.data.Group
+import org.apache.parquet.example.data.simple.SimpleGroupFactory
+import org.apache.parquet.hadoop.ParquetFileWriter
+import org.apache.parquet.hadoop.example.ExampleParquetWriter
+import org.apache.parquet.io.{LocalInputFile, LocalOutputFile}
+import org.apache.parquet.schema.MessageTypeParser
+import org.eclipse.rdf4j.model.Value
 import org.junit.Assert.*
 import org.junit.{AfterClass, BeforeClass, Test}
+import org.eclipse.rdf4j.model.impl.SimpleValueFactory
+import org.eclipse.rdf4j.query.impl.MapBindingSet
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, File, IOException}
 import java.nio.file.attribute.BasicFileAttributes
@@ -92,19 +105,24 @@ object TestData {
  * Unit tests for the KVIN service endpoint
  */
 class KvinServiceTest {
-  private val kvinService: KvinService = new KvinService("linkedfactory" :: Nil, KvinServiceTest.store) {
-    override def apply(in: Req): () => Box[LiftResponse] = {
-      try {
-        Globals.contextModelSet.vend.map(_.getUnitOfWork.begin)
-        // S.request is used in Data.pathToURI therefore the request needs to be initialized here
-        CurrentReq.doWith(in) {
-          super.apply(in)
+  private def createService(store: Kvin, inMemoryParquetSize: Int = 32 * 1024 * 1024): KvinService =
+    new KvinService("linkedfactory" :: Nil, store) {
+      override protected val maxInMemoryParquetSize: Int = inMemoryParquetSize
+
+      override def apply(in: Req): () => Box[LiftResponse] = {
+        try {
+          Globals.contextModelSet.vend.map(_.getUnitOfWork.begin)
+          // S.request is used in Data.pathToURI therefore the request needs to be initialized here
+          CurrentReq.doWith(in) {
+            super.apply(in)
+          }
+        } finally {
+          Globals.contextModelSet.vend.map(_.getUnitOfWork.end)
         }
-      } finally {
-        Globals.contextModelSet.vend.map(_.getUnitOfWork.end)
       }
     }
-  }
+
+  private val kvinService: KvinService = createService(KvinServiceTest.store)
 
   def kvinRest(req: Req): () => Box[LiftResponse] = {
     kvinService(req)
@@ -131,6 +149,70 @@ class KvinServiceTest {
 
   def toReq(httpRequest: HttpServletRequest): Req = {
     Req(new HTTPRequestServlet(httpRequest, null), Nil, System.nanoTime)
+  }
+
+  private def postParquet(service: KvinService, payload: Array[Byte]): LiftResponse = {
+    val request = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      body = payload
+      contentType = "application/vnd.apache.parquet"
+    }
+    service(toReq(request))().openOr(null)
+  }
+
+  private def writeParquet(bindingNames: List[String], rows: Seq[MapBindingSet]): Array[Byte] = {
+    val output = new ByteArrayOutputStream()
+    val writer = new SPARQLResultsParquetWriterFactory().getWriter(output)
+    writer.startQueryResult(bindingNames.asJava)
+    rows.foreach(writer.handleSolution)
+    writer.endQueryResult()
+    output.toByteArray
+  }
+
+  /** Writes Parquet files with arbitrary schemas, e.g. like pandas or pyarrow. */
+  private def writeGroups(schema: String, rowGroupSize: Long = 128L * 1024 * 1024)
+                         (rows: SimpleGroupFactory => Seq[Group]): Array[Byte] = {
+    val messageType = MessageTypeParser.parseMessageType(schema)
+    val file = Files.createTempFile("kvin-parquet-test-", ".parquet")
+    try {
+      val writer = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(messageType)
+        .withConf(new PlainParquetConfiguration()).withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+        .withRowGroupSize(rowGroupSize).build()
+      try rows(new SimpleGroupFactory(messageType)).foreach(writer.write)
+      finally writer.close()
+      Files.readAllBytes(file)
+    } finally Files.delete(file)
+  }
+
+  private def rowGroupCount(payload: Array[Byte]): Int = {
+    val file = Files.createTempFile("kvin-parquet-test-", ".parquet")
+    try {
+      Files.write(file, payload)
+      val reader = ParquetFileReader.open(new LocalInputFile(file),
+        ParquetReadOptions.builder(new PlainParquetConfiguration()).build())
+      try reader.getRowGroups.size finally reader.close()
+    } finally Files.delete(file)
+  }
+
+  private def tupleBindings(tuple: KvinTuple): MapBindingSet = {
+    val vf = SimpleValueFactory.getInstance()
+    val bindings = new MapBindingSet(6)
+    bindings.addBinding("item", vf.createIRI(tuple.item.toString))
+    bindings.addBinding("property", vf.createIRI(tuple.property.toString))
+    bindings.addBinding("context", vf.createIRI(tuple.context.toString))
+    bindings.addBinding("time", vf.createLiteral(tuple.time))
+    bindings.addBinding("seqNr", vf.createLiteral(tuple.seqNr))
+    val value = tuple.value match {
+      case v: java.lang.Integer => vf.createLiteral(v.intValue)
+      case v: java.lang.Long => vf.createLiteral(v.longValue)
+      case v: java.lang.Float => vf.createLiteral(v.floatValue)
+      case v: java.lang.Double => vf.createLiteral(v.doubleValue)
+      case v: java.lang.Boolean => vf.createLiteral(v.booleanValue)
+      case v: String => vf.createLiteral(v)
+      case other => throw new IllegalArgumentException("Unsupported test value " + other)
+    }
+    bindings.addBinding("value", value)
+    bindings
   }
 
   @Test
@@ -160,6 +242,229 @@ class KvinServiceTest {
       headers = (("Accept", "application/json" :: Nil) :: Nil).toMap
     }
     assertEquals(Full(200), kvinRest(toReq(getReq))().map(_.toResponse.code))
+  }
+
+  @Test
+  def parquetPostPersistsPhysicalValues(): Unit = {
+    val values: Seq[Object] = Seq(Int.box(42), Long.box(43L), Float.box(4.5f), Double.box(5.5d),
+      Boolean.box(true), "ready")
+    values.zipWithIndex.foreach { case (value, index) =>
+      val tuple = new KvinTuple(URIs.createURI(s"urn:parquet:item:$index"),
+        URIs.createURI("urn:parquet:property"), URIs.createURI("urn:parquet:context"),
+        1710000000000L + index, index, value)
+      val payload = writeParquet(List("item", "property", "context", "time", "seqNr", "value"),
+        Seq(tupleBindings(tuple)))
+
+      val response = postParquet(kvinService, payload).toResponse
+      assertEquals(responseBody(response), 200, response.code)
+      val stored = KvinServiceTest.store.fetch(tuple.item, tuple.property, tuple.context, 0)
+      try assertEquals(List(tuple), stored.toList.asScala.toList)
+      finally stored.close()
+    }
+  }
+
+  @Test
+  def parquetPostUsesDefaultContextAndSequenceAndIgnoresExtraColumns(): Unit = {
+    val vf = SimpleValueFactory.getInstance()
+    val item = URIs.createURI("urn:parquet:defaults:item")
+    val property = URIs.createURI("urn:parquet:defaults:property")
+    val bindings = new MapBindingSet(5)
+    bindings.addBinding("item", vf.createIRI(item.toString))
+    bindings.addBinding("property", vf.createIRI(property.toString))
+    bindings.addBinding("time", vf.createLiteral(1710000004000L))
+    bindings.addBinding("value", vf.createLiteral(7.25d))
+    bindings.addBinding("unrelated", vf.createLiteral("ignored"))
+
+    val response = postParquet(kvinService,
+      writeParquet(List("item", "property", "time", "value", "unrelated"), Seq(bindings))).toResponse
+    assertEquals(responseBody(response), 200, response.code)
+    val stored = KvinServiceTest.store.fetch(item, property, Kvin.DEFAULT_CONTEXT, 0)
+    try assertEquals(List(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 1710000004000L, 0, 7.25d)),
+      stored.toList.asScala.toList)
+    finally stored.close()
+  }
+
+  @Test
+  def parquetPostResolvesRelativeUrisAgainstRequestPath(): Unit = {
+    val vf = SimpleValueFactory.getInstance()
+    val bindings = new MapBindingSet(4)
+    bindings.addBinding("item", vf.createLiteral("parquet-relative/machine1"))
+    bindings.addBinding("property", vf.createLiteral("temperature"))
+    bindings.addBinding("time", vf.createLiteral(1710000005000L))
+    bindings.addBinding("value", vf.createLiteral(21.5d))
+
+    val response = postParquet(kvinService,
+      writeParquet(List("item", "property", "time", "value"), Seq(bindings))).toResponse
+    assertEquals(responseBody(response), 200, response.code)
+    val item = URIs.createURI("http://foo.com/linkedfactory/parquet-relative/machine1")
+    val property = URIs.createURI("http://foo.com/linkedfactory/temperature")
+    val stored = KvinServiceTest.store.fetch(item, property, Kvin.DEFAULT_CONTEXT, 0)
+    try assertEquals(List(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 1710000005000L, 0, 21.5d)),
+      stored.toList.asScala.toList)
+    finally stored.close()
+  }
+
+  @Test
+  def parquetPostReadsMultipleRowGroups(): Unit = {
+    val item = URIs.createURI("urn:parquet:large:item")
+    val property = URIs.createURI("urn:parquet:large:property")
+    val tupleCount = 2000
+    val payload = writeGroups(
+      "message m { required binary item (STRING); required binary property (STRING); " +
+        "required int64 time; required double value; }", rowGroupSize = 4096) { factory =>
+      (0 until tupleCount).map(i => factory.newGroup().append("item", item.toString)
+        .append("property", property.toString).append("time", 1710000000000L + i).append("value", i.toDouble))
+    }
+    assertTrue("Expected multiple row groups", rowGroupCount(payload) > 1)
+
+    // a small in-memory limit also covers spooling to a temporary file
+    for (service <- Seq(kvinService, createService(KvinServiceTest.store, inMemoryParquetSize = 1024))) {
+      val response = postParquet(service, payload).toResponse
+      assertEquals(responseBody(response), 200, response.code)
+      val stored = KvinServiceTest.store.fetch(item, property, Kvin.DEFAULT_CONTEXT, 0)
+      try {
+        val tuples = stored.toList.asScala
+        assertEquals(tupleCount, tuples.size)
+        assertEquals(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 1710000000000L + tupleCount - 1, 0,
+          Double.box(tupleCount - 1)), tuples.head)
+        assertEquals(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 1710000000000L, 0, Double.box(0)),
+          tuples.last)
+      } finally stored.close()
+    }
+  }
+
+  @Test
+  def parquetPostConvertsTimestampUnitsAndLongSequenceNumbers(): Unit = {
+    val property = URIs.createURI("urn:parquet:timestamp:property")
+    val time = 1710000000123L
+    for ((unit, unitsPerMilli) <- Seq("MILLIS" -> 1L, "MICROS" -> 1000L, "NANOS" -> 1000000L)) {
+      // pandas and pyarrow write timestamps with time units and integers as int64
+      val item = URIs.createURI(s"urn:parquet:timestamp:$unit")
+      val payload = writeGroups("message m { optional binary item (STRING); optional binary property (STRING); " +
+        s"optional int64 time (TIMESTAMP($unit,true)); optional int64 seqNr; optional int64 value; }") { factory =>
+        Seq(factory.newGroup().append("item", item.toString).append("property", property.toString)
+          .append("time", time * unitsPerMilli + unitsPerMilli - 1).append("seqNr", 3L).append("value", 42L))
+      }
+
+      val response = postParquet(kvinService, payload).toResponse
+      assertEquals(responseBody(response), 200, response.code)
+      val stored = KvinServiceTest.store.fetch(item, property, Kvin.DEFAULT_CONTEXT, 0)
+      try assertEquals(List(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, time, 3, Long.box(42L))),
+        stored.toList.asScala.toList)
+      finally stored.close()
+    }
+  }
+
+  @Test
+  def parquetPostRejectsMissingValuesBeforeStoringAnyTuple(): Unit = {
+    // the exporter infers the column type from the first row and leaves values of other types empty
+    val vf = SimpleValueFactory.getInstance()
+    val rows = Seq(vf.createLiteral(1), vf.createLiteral(2.5d)).zipWithIndex.map { case (value, index) =>
+      val bindings = new MapBindingSet(4)
+      bindings.addBinding("item", vf.createIRI(s"urn:parquet:mixed:item:$index"))
+      bindings.addBinding("property", vf.createIRI("urn:parquet:mixed:property"))
+      bindings.addBinding("time", vf.createLiteral(1710000000000L))
+      bindings.addBinding("value", value)
+      bindings
+    }
+
+    val response = postParquet(kvinService,
+      writeParquet(List("item", "property", "time", "value"), rows)).toResponse
+    assertEquals(400, response.code)
+    assertTrue(responseBody(response), responseBody(response).contains("'value' contains missing values"))
+    val stored = KvinServiceTest.store.fetch(URIs.createURI("urn:parquet:mixed:item:0"),
+      URIs.createURI("urn:parquet:mixed:property"), Kvin.DEFAULT_CONTEXT, 0)
+    try assertFalse("No tuple should be stored", stored.hasNext)
+    finally stored.close()
+  }
+
+  @Test
+  def parquetPostHidesInternalErrorDetails(): Unit = {
+    for (service <- Seq(kvinService, createService(KvinServiceTest.store, inMemoryParquetSize = 0))) {
+      val response = postParquet(service, Array[Byte](1, 2, 3)).toResponse
+      assertEquals(400, response.code)
+      val body = responseBody(response)
+      assertTrue(body, body.contains("Invalid Parquet payload"))
+      assertFalse(body, body.contains("kvin-upload"))
+    }
+  }
+
+  @Test
+  def parquetExportUploadRoundTripPreservesTuples(): Unit = {
+    val context = URIs.createURI("urn:parquet:roundtrip:context")
+    val expected = List(
+      new KvinTuple(URIs.createURI("urn:parquet:roundtrip:item:1"),
+        URIs.createURI("urn:parquet:roundtrip:property:1"), context, 1710000002000L, 2, 12.5d),
+      new KvinTuple(URIs.createURI("urn:parquet:roundtrip:item:1"),
+        URIs.createURI("urn:parquet:roundtrip:property:1"), context, 1710000001000L, 1, 11.5d),
+      new KvinTuple(URIs.createURI("urn:parquet:roundtrip:item:2"),
+        URIs.createURI("urn:parquet:roundtrip:property:2"), context, 1710000003000L, 3, 13.5d)
+    )
+    val sourceDirectory = Files.createTempDirectory("kvin-parquet-source-")
+    val destinationDirectory = Files.createTempDirectory("kvin-parquet-destination-")
+    val source = new KvinLevelDb(sourceDirectory.toFile)
+    val destination = new KvinLevelDb(destinationDirectory.toFile)
+    try {
+      source.put(expected.asJava)
+      val exported = expected.map(tuple => (tuple.item, tuple.property)).distinct.flatMap { case (item, property) =>
+        val iterator = source.fetch(item, property, context, 0)
+        try iterator.toList.asScala
+        finally iterator.close()
+      }
+      val payload = writeParquet(List("item", "property", "context", "time", "seqNr", "value"),
+        exported.map(tupleBindings))
+
+      val response = postParquet(createService(destination), payload).toResponse
+      assertEquals(responseBody(response), 200, response.code)
+      val actual = expected.map(tuple => (tuple.item, tuple.property)).distinct.flatMap { case (item, property) =>
+        val iterator = destination.fetch(item, property, context, 0)
+        try iterator.toList.asScala
+        finally iterator.close()
+      }
+      assertEquals(expected.size, actual.size)
+      assertEquals(expected.toSet, actual.toSet)
+    } finally {
+      source.close()
+      destination.close()
+      KvinServiceTest.deleteDirectory(sourceDirectory)
+      KvinServiceTest.deleteDirectory(destinationDirectory)
+    }
+  }
+
+  @Test
+  def parquetPostRejectsMalformedInputAndSchema(): Unit = {
+    assertEquals(400, postParquet(kvinService, Array[Byte](1, 2, 3)).toResponse.code)
+
+    val vf = SimpleValueFactory.getInstance()
+    val names = List("item", "property", "time", "value")
+    def bindings(item: Option[Value] = Some(vf.createIRI("urn:parquet:invalid:item")),
+                 time: Option[Value] = Some(vf.createLiteral(1L)),
+                 value: Option[Value] = Some(vf.createLiteral(1.0d))): MapBindingSet = {
+      val row = new MapBindingSet(4)
+      item.foreach(v => row.addBinding("item", v))
+      row.addBinding("property", vf.createIRI("urn:parquet:invalid:property"))
+      time.foreach(v => row.addBinding("time", v))
+      value.foreach(v => row.addBinding("value", v))
+      row
+    }
+    def assertRejected(bindingNames: List[String], row: MapBindingSet): Unit =
+      assertEquals(400, postParquet(kvinService, writeParquet(bindingNames, Seq(row))).toResponse.code)
+
+    assertRejected(List("item", "time", "value"), bindings())
+    assertRejected(names, bindings(item = Some(vf.createLiteral(1))))
+    assertRejected(names, bindings(time = Some(vf.createLiteral("1"))))
+    assertRejected(names, bindings(item = Some(vf.createLiteral("relative item"))))
+    assertRejected(names, bindings(item = None))
+    assertRejected(names, bindings(time = None))
+    assertRejected(names, bindings(value = None))
+
+    // decimals would be misread as unscaled integers
+    val decimal = writeGroups("message m { required binary item (STRING); required binary property (STRING); " +
+      "required int64 time; required int32 value (DECIMAL(9,2)); }") { factory =>
+      Seq(factory.newGroup().append("item", "urn:parquet:invalid:item").append("property", "urn:parquet:invalid:property")
+        .append("time", 1L).append("value", 1234))
+    }
+    assertEquals(400, postParquet(kvinService, decimal).toResponse.code)
   }
 
   @Test

@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator}
+import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator, ParquetFormatParser}
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
 import io.github.linkedfactory.service.util.LineProtocolParser
@@ -32,7 +32,8 @@ import org.json4s.JsonDSL.*
 import net.liftweb.util.Helpers.*
 import org.apache.commons.csv.{CSVFormat, CSVPrinter}
 
-import java.io.{InputStream, OutputStream, OutputStreamWriter}
+import java.io.{IOException, InputStream, OutputStream, OutputStreamWriter}
+import java.nio.file.Files
 import java.text.SimpleDateFormat
 import java.util
 import java.util.Date
@@ -40,7 +41,9 @@ import scala.jdk.CollectionConverters.*
 
 class KvinService(path: List[String], store: Kvin) extends RestHelper with Loggable {
   val MAX_LIMIT = 500000
-  private val CSV_GROUPING_WINDOW_SIZE = 6000
+  private val INGESTION_GROUPING_WINDOW_SIZE = 6000
+  /** Parquet uploads up to this size are parsed in memory, larger ones are spooled to a temporary file. */
+  protected val maxInMemoryParquetSize: Int = 32 * 1024 * 1024
   val valueProperty: URI = URIs.createURI("value")
 
   val CORS_HEADERS: List[(String, String)] = ("Access-Control-Allow-Origin", "*") :: ("Access-Control-Allow-Credentials", "true") :: //
@@ -115,6 +118,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           req.rawInputStream.flatMap(saveLineValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
         case Full("text/csv") =>
           req.rawInputStream.flatMap(saveCsvValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
+        case Full("application/vnd.apache.parquet") =>
+          req.rawInputStream.flatMap(saveParquetValues(_, path ++ list.dropRight(1)))
         case _ =>
           req.rawInputStream.flatMap(saveJsonValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
       }
@@ -296,12 +301,55 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       val parser = new CsvFormatParser(parentUri, separator, in)
       parser.setContext(contextModelUri)
       val tuples: IExtendedIterator[KvinTuple] =
-        new KvinTupleGroupingIterator(parser.parse(), CSV_GROUPING_WINDOW_SIZE)
+        new KvinTupleGroupingIterator(parser.parse(), INGESTION_GROUPING_WINDOW_SIZE)
       try store.put(tuples) finally tuples.close()
       Empty
     } catch {
       case e: Exception => new Failure(e.getMessage, Full(e), Empty)
     }
+  }
+
+  // handle Parquet post content
+  protected def saveParquetValues(in: InputStream, path: List[String]): Box[?] = {
+    var parentUri = Data.pathToURI(path)
+    if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
+
+    try {
+      // Parquet requires random access, hence the content is buffered in memory or, if large, in a temporary file
+      val head = in.readNBytes(maxInMemoryParquetSize + 1)
+      if (head.length <= maxInMemoryParquetSize) {
+        putParquetValues(new ParquetFormatParser(parentUri, head))
+      } else {
+        val tempFile = Files.createTempFile("kvin-upload-", ".parquet")
+        try {
+          val out = Files.newOutputStream(tempFile)
+          try {
+            out.write(head)
+            in.transferTo(out)
+          } finally out.close()
+          putParquetValues(new ParquetFormatParser(parentUri, tempFile))
+        } finally {
+          try Files.deleteIfExists(tempFile)
+          catch {
+            case e: IOException => logger.warn("Unable to delete temporary file " + tempFile, e)
+          }
+        }
+      }
+      Empty
+    } catch {
+      // validation errors describe the content, other messages may expose internals like file paths
+      case e: IllegalArgumentException => new Failure(e.getMessage, Full(e), Empty)
+      case e: Exception =>
+        logger.warn("Unable to process Parquet upload", e)
+        new Failure("Invalid Parquet payload", Full(e), Empty)
+    }
+  }
+
+  private def putParquetValues(parser: ParquetFormatParser): Unit = {
+    parser.setContext(contextModelUri)
+    val tuples: IExtendedIterator[KvinTuple] =
+      new KvinTupleGroupingIterator(parser.parse(), INGESTION_GROUPING_WINDOW_SIZE)
+    try store.put(tuples) finally tuples.close()
   }
 
   // handle InfluxDB line protocol content

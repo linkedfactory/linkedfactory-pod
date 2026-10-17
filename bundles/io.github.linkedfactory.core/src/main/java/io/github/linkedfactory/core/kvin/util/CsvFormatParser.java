@@ -90,6 +90,13 @@ public class CsvFormatParser {
 	}
 
 	protected URI createURI(String uriString) {
+		return createURI(base, uriString);
+	}
+
+	/**
+	 * Creates a URI and resolves it against the base URI if it is relative.
+	 */
+	static URI createURI(URI base, String uriString) {
 		if (uriString == null || uriString.isEmpty()) {
 			throw new IllegalArgumentException("URI string is null or empty");
 		}
