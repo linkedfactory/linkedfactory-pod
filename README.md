@@ -204,7 +204,8 @@ libraries for `linux-x86-64`, `linux-aarch64`, and `darwin-aarch64` only; there 
 build. On Windows, use WSL2 for local development and testing — production deployment is
 unaffected since the pod ships via Docker (Linux) and CI runs on `ubuntu-latest`. Tests that
 instantiate the Lance backend are skipped automatically on Windows
-(`LanceFtsIndexTest`, `LanceFtsEndToEndTest`), not failed.
+(`LanceFtsIndexTest`, `LanceFtsEndToEndTest`), not failed — they only actually run on
+Linux/macOS/WSL.
 
 This backend is experimental: indexing is fast and competitive with the other backends at
 every scale tested, but `delete`/`remove` currently does a full, unindexed scan per batch and
@@ -212,6 +213,67 @@ is significantly slower than Lucene's delete at large scale (no scalar index on
 `subject`/`predicate`/`value` yet). Relevance score and snippet/highlighting are not exposed by
 the Lance Java API at all today, so `fts:score` and snippet bindings are always empty for this
 backend.
+
+#### Running the Lance tests (Windows: via WSL2)
+
+The required `--add-opens` flag for Apache Arrow's memory management (needed since Java 9+
+closes reflective access to JDK internals by default) is already configured in this bundle's
+`pom.xml` surefire plugin — a plain `mvn test` picks it up automatically, no extra flags needed.
+
+From a Linux/macOS/WSL shell, with JDK 21 and Maven on `PATH`:
+
+```bash
+cd linkedfactory-pod
+mvn -N install
+mvn -pl bundles/io.github.linkedfactory.core -am install -DskipTests
+mvn -pl bundles/io.github.linkedfactory.core test -Dtest="io.github.linkedfactory.core.rdf4j.fts.Lance**"
+```
+
+A successful run reports `LanceFtsIndexTest` (11 tests) and `LanceFtsEndToEndTest` (2 tests),
+`BUILD SUCCESS`, zero skipped.
+
+From Windows (Git Bash), invoking WSL directly in one line — note `MSYS_NO_PATHCONV=1`, without
+which Git Bash mangles the `/mnt/d/...` path before it reaches `wsl.exe`:
+
+```bash
+MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash -c 'cd /mnt/d/path/to/linkedfactory-pod && mvn -N install && mvn -pl bundles/io.github.linkedfactory.core -am install -DskipTests && mvn -pl bundles/io.github.linkedfactory.core test -Dtest="io.github.linkedfactory.core.rdf4j.fts.Lance**"'
+```
+
+If your WSL distro has no JDK 21 / Maven yet, a portable (no `sudo`/`apt` needed) setup:
+
+```bash
+mkdir -p ~/tools && cd ~/tools
+curl -sL -o jdk21.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_linux_hotspot_21.0.12.1_1.tar.gz"
+curl -sL -o maven.tar.gz "https://dlcdn.apache.org/maven/maven-3/3.9.16/binaries/apache-maven-3.9.16-bin.tar.gz"
+tar xzf jdk21.tar.gz && tar xzf maven.tar.gz && rm jdk21.tar.gz maven.tar.gz
+export JAVA_HOME="$HOME/tools/jdk-21.0.12.1+1"
+export PATH="$JAVA_HOME/bin:$HOME/tools/apache-maven-3.9.16/bin:$PATH"
+```
+
+#### Trying it against a running Pod
+
+Statements with **no explicit named graph are never indexed by any FTS backend** (a rule in
+`FtsSailConnection`, not specific to Lance) — insert data into a named graph, as below.
+
+1. In the configuration ttl file, set `fts:backend "lance"` and `fts:indexDir` to a writable
+   directory on the machine the Pod runs on (same `configurations/default-with-search.ttl` +
+   `launch/equinox/pom.xml` `net.enilink.config` switch described for the elastic backend
+   above).
+2. Start the Pod (on Linux/macOS, or inside WSL on Windows), then insert and query through the
+   usual SPARQL endpoint:
+
+```bash
+curl -sS -X POST 'http://localhost:8080/sparql' \
+  --data-urlencode 'update=INSERT DATA { GRAPH <urn:example:graph> { <urn:example:item1> <urn:example:title> "quick brown fox" . } }' \
+  --data-urlencode 'model=http://linkedfactory.github.io/data/'
+
+curl -sS -X POST 'http://localhost:8080/sparql' \
+  -H 'Accept: application/sparql-results+json' \
+  --data-urlencode 'query=PREFIX fts: <fts:> SELECT ?iri WHERE { SERVICE <fts:> { ?iri fts:keywords "fox" . } }' \
+  --data-urlencode 'model=http://linkedfactory.github.io/data/'
+```
+
+The query should return `urn:example:item1`.
 
 The bulk request format is an `operations` array containing `upsert`, `remove`, `clear`, and `clearContexts` entries. Named graph context is included per statement as `context`.
 
