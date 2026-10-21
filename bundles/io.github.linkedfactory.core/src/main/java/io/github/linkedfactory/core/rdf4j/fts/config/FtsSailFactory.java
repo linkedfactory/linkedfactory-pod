@@ -4,6 +4,7 @@ import io.github.linkedfactory.core.rdf4j.fts.FtsSail;
 import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceConfig;
 import io.github.linkedfactory.core.rdf4j.fts.FtsIndexUpdateCoordinatorFactory;
 import io.github.linkedfactory.core.rdf4j.fts.FileFtsIndexUpdateCoordinatorFactory;
+import io.github.linkedfactory.core.rdf4j.fts.LanceSearchBackendFactory;
 import org.eclipse.rdf4j.sail.Sail;
 import org.eclipse.rdf4j.sail.config.SailConfigException;
 import org.eclipse.rdf4j.sail.config.SailFactory;
@@ -128,11 +129,13 @@ public class FtsSailFactory implements SailFactory {
 				throw new SailConfigException("Unsupported FTS update strategy: " + ftsConfig.getBackend()
 						+ ". Available strategies: " + strategyFactories.keySet());
 			}
+			boolean lance = LanceSearchBackendFactory.BACKEND_TYPE.equalsIgnoreCase(ftsConfig.getBackend());
+			String resolvedEndpoint = lance ? ftsConfig.getIndexDir() : ftsConfig.getEndpoint();
 			sail = new FtsSail(strategyFactory.create(ftsConfig),
 					Path.of(ftsConfig.getOutboxDir()), ftsConfig.getStoreIdentity(),
 					new FtsFederatedServiceConfig(
 							ftsConfig.getBackend(),
-							ftsConfig.getEndpoint(),
+							resolvedEndpoint,
 							ftsConfig.getSearchPath(),
 							ftsConfig.isFailOnError(),
 							ftsConfig.getDefaultLimit()),

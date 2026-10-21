@@ -21,6 +21,7 @@ public class FtsSailConfigTest {
 		config.setFailOnError(false);
 		config.setOutboxDir("/var/lib/fts-outbox");
 		config.setStoreIdentity("store-a");
+		config.setIndexDir("/var/lib/fts-index");
 		config.setDefaultLimit(25);
 		config.setRequestTimeoutMillis(120_000);
 
@@ -38,6 +39,7 @@ public class FtsSailConfigTest {
 		assertFalse(parsed.isFailOnError());
 		assertEquals("/var/lib/fts-outbox", parsed.getOutboxDir());
 		assertEquals("store-a", parsed.getStoreIdentity());
+		assertEquals("/var/lib/fts-index", parsed.getIndexDir());
 		assertEquals(25, parsed.getDefaultLimit());
 		assertEquals(120_000, parsed.getRequestTimeoutMillis());
 	}

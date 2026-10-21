@@ -169,15 +169,18 @@ The following example shows how to configure the federated service and the FtsSa
 Backend selection:
 - `fts:backend "elastic"` uses `fts:endpoint` and an HTTP search backend.
 - `fts:backend "lucene"` can be added later as a Lucene backend.
-- `fts:backend "internal"` can be added later for in-process indexing and should ignore `fts:endpoint`.
+- `fts:backend "lance"` uses an embedded Lance dataset (see below) instead of an external
+  search server. No network hop for indexing or querying.
 
 Common TTL options:
-- `fts:endpoint` search endpoint for external backends
+- `fts:endpoint` search endpoint for external backends (elastic); for the lance backend this
+  field is not used, use `fts:indexDir` instead.
 - `fts:searchPath` backend query path
 - `fts:bulkPath "/fts/bulk"` is the bulk endpoint path for indexing (where linkedfactory sends the changes and not related to the federated service)
 - `fts:defaultLimit` default result size
 
 - `fts:failOnError` legacy synchronous-service behavior; durable WAL delivery always retries asynchronously
+- `fts:indexDir` filesystem directory for the embedded Lance dataset (lance only)
 - `fts:outboxDir` absolute persistent directory on a filesystem that supports atomic same-directory rename and file/directory synchronization; dedicate it to one RDF store/index, keep it out of temporary storage, and include it in the store's backup/recovery plan
 - `fts:storeIdentity` stable identifier for this RDF store/index; it must remain unchanged across restarts and must differ for every store
 - `fts:backend "elastic"` selects the current `ElasticHttpFtsIndexUpdateStrategy`; other update strategies must be explicitly implemented and registered
@@ -193,6 +196,40 @@ An FTS activation error after the RDF commit means the RDF data is committed but
 The HTTP backend's default socket inactivity timeout is 300 seconds (`fts:requestTimeoutMillis`); connection establishment and pool acquisition each have a 5-second timeout. The socket timeout is not a total request deadline. The default coordinator shutdown grace is 10 seconds per wait (graceful wait, then another wait after interruption), but `FtsSail` intentionally waits for an active callback to terminate before closing the RDF store. Configure the service manager's stop timeout above the expected in-flight delivery duration plus both coordinator waits and process-shutdown overhead (allow at least 330 seconds for a stalled request with defaults), but note that this is not a hard upper bound: a strategy or HTTP request that ignores interruption or continues making progress can take longer. Configure a shorter backend timeout when faster shutdown is required, and rely on the durable WAL to replay unfinished work after a forced process stop.
 
 `fts:FtsSail` can also be used with in-memory stores by wrapping `openrdf:MemoryStore` instead of `NativeStore`.
+
+### Embedded Lance backend
+
+`fts:backend "lance"` indexes and searches RDF statements in-process, using a local
+[Lance](https://github.com/lance-format/lance) dataset instead of an external search server:
+
+```ttl
+sail:delegate [
+   sail:sailType "fts:FtsSail" ;
+   fts:backend "lance" ;
+   fts:indexDir "/var/lib/linkedfactory/fts-lance-index" ; # writable directory for the dataset
+   fts:outboxDir "/var/lib/linkedfactory/fts/linkedfactory-data/outbox" ; # durable, store-specific WAL directory
+   fts:storeIdentity "linkedfactory-data" ; # stable ID unique to this RDF store/index
+   fts:defaultLimit 100 ;
+   sail:delegate [
+      sail:sailType "openrdf:NativeStore" ;
+      ns:tripleIndexes "cspo,cpos,spoc,posc"
+   ]
+]
+```
+
+**Linux/macOS only — no Windows support.** The `org.lance:lance-core` Java bindings ship native
+libraries for `linux-x86-64`, `linux-aarch64`, and `darwin-aarch64` only; there is no Windows
+build. On Windows, use WSL2 for local development and testing — production deployment is
+unaffected since the pod ships via Docker (Linux) and CI runs on `ubuntu-latest`. Tests that
+instantiate the Lance backend are skipped automatically on Windows
+(`LanceFtsIndexTest`, `LanceFtsEndToEndTest`), not failed.
+
+This backend is experimental: indexing is fast and competitive with the other backends at
+every scale tested, but `delete`/`remove` currently does a full, unindexed scan per batch and
+is significantly slower than Lucene's delete at large scale (no scalar index on
+`subject`/`predicate`/`value` yet). Relevance score and snippet/highlighting are not exposed by
+the Lance Java API at all today, so `fts:score` and snippet bindings are always empty for this
+backend.
 
 The bulk request format is an `operations` array containing `upsert`, `remove`, `clear`, and `clearContexts` entries. Named graph context is included per statement as `context`.
 
