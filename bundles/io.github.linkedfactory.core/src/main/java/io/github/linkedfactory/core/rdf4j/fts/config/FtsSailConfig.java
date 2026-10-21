@@ -27,11 +27,14 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private static final IRI SEARCH_PATH = VF.createIRI(CONFIG_NS, "searchPath");
 	private static final IRI FAIL_ON_ERROR = VF.createIRI(CONFIG_NS, "failOnError");
 	private static final IRI OUTBOX_DIR = VF.createIRI(CONFIG_NS, "outboxDir");
+	private static final IRI INDEX_DIR = VF.createIRI(CONFIG_NS, "indexDir");
 	private static final IRI REQUEST_TIMEOUT = VF.createIRI(CONFIG_NS, "requestTimeoutMillis");
 	private static final IRI EXCLUDED_MODELS = VF.createIRI(CONFIG_NS, "excludedModels");
 	private static final IRI DEFAULT_LIMIT = VF.createIRI(CONFIG_NS, "defaultLimit");
 	private static final String DEFAULT_OUTBOX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
 			"linkedfactory-fts-outbox").toString();
+	private static final String DEFAULT_INDEX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
+			"linkedfactory-fts-index").toString();
 
 	private String backend = "elastic";
 	private String endpoint;
@@ -40,6 +43,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private List<String> excludedModels = new ArrayList<>();
 	private boolean failOnError = true;
 	private String outboxDir = DEFAULT_OUTBOX_DIR;
+	private String indexDir = DEFAULT_INDEX_DIR;
 	private int defaultLimit = 100;
 	private int requestTimeoutMillis = HttpFtsSearchService.DEFAULT_REQUEST_TIMEOUT_MILLIS;
 
@@ -90,6 +94,16 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	public void setOutboxDir(String outboxDir) {
 		if (outboxDir != null && !outboxDir.isBlank()) {
 			this.outboxDir = outboxDir.trim();
+		}
+	}
+
+	public String getIndexDir() {
+		return indexDir;
+	}
+
+	public void setIndexDir(String indexDir) {
+		if (indexDir != null && !indexDir.isBlank()) {
+			this.indexDir = indexDir.trim();
 		}
 	}
 
@@ -162,6 +176,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 		}
 		model.add(implNode, FAIL_ON_ERROR, VF.createLiteral(failOnError));
 		model.add(implNode, OUTBOX_DIR, VF.createLiteral(outboxDir));
+		model.add(implNode, INDEX_DIR, VF.createLiteral(indexDir));
 		model.add(implNode, REQUEST_TIMEOUT, VF.createLiteral(requestTimeoutMillis));
 		model.add(implNode, DEFAULT_LIMIT, VF.createLiteral(defaultLimit));
 		return implNode;
@@ -202,6 +217,9 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 
 		Optional<Literal> outboxDirLiteral = Models.objectLiteral(model.filter(implNode, OUTBOX_DIR, null));
 		outboxDirLiteral.ifPresent(literal -> outboxDir = literal.getLabel());
+
+		Optional<Literal> indexDirLiteral = Models.objectLiteral(model.filter(implNode, INDEX_DIR, null));
+		indexDirLiteral.ifPresent(literal -> indexDir = literal.getLabel());
 
 		Optional<Literal> timeoutLiteral = Models.objectLiteral(model.filter(implNode, REQUEST_TIMEOUT, null));
 		if (timeoutLiteral.isPresent()) {

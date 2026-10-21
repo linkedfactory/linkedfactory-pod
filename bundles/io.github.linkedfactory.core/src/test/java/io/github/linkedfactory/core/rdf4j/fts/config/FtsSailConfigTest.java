@@ -19,6 +19,7 @@ public class FtsSailConfigTest {
 		config.setExcludedModels(List.of("urn:model:A", "urn:model:B"));
 		config.setFailOnError(false);
 		config.setOutboxDir("/var/lib/fts-outbox");
+		config.setIndexDir("/var/lib/fts-index");
 		config.setDefaultLimit(25);
 		config.setRequestTimeoutMillis(120_000);
 
@@ -35,6 +36,7 @@ public class FtsSailConfigTest {
 		assertArrayEquals(List.of("urn:model:A", "urn:model:B").toArray(), parsed.getExcludedModels().toArray());
 		assertFalse(parsed.isFailOnError());
 		assertEquals("/var/lib/fts-outbox", parsed.getOutboxDir());
+		assertEquals("/var/lib/fts-index", parsed.getIndexDir());
 		assertEquals(25, parsed.getDefaultLimit());
 		assertEquals(120_000, parsed.getRequestTimeoutMillis());
 	}

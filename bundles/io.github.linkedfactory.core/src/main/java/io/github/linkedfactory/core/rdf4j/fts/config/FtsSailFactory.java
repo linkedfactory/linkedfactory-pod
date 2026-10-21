@@ -2,7 +2,11 @@ package io.github.linkedfactory.core.rdf4j.fts.config;
 
 import io.github.linkedfactory.core.rdf4j.fts.FtsSail;
 import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceConfig;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchService;
 import io.github.linkedfactory.core.rdf4j.fts.HttpFtsSearchService;
+import io.github.linkedfactory.core.rdf4j.fts.LanceFtsIndexRegistry;
+import io.github.linkedfactory.core.rdf4j.fts.LanceFtsSearchService;
+import io.github.linkedfactory.core.rdf4j.fts.LanceSearchBackendFactory;
 import org.eclipse.rdf4j.sail.Sail;
 import org.eclipse.rdf4j.sail.config.SailConfigException;
 import org.eclipse.rdf4j.sail.config.SailFactory;
@@ -34,16 +38,21 @@ public class FtsSailFactory implements SailFactory {
 
 		FtsSail sail;
 		if (config instanceof FtsSailConfig ftsConfig) {
-			sail = new FtsSail(
-					new HttpFtsSearchService(
+			boolean lance = LanceSearchBackendFactory.BACKEND_TYPE.equalsIgnoreCase(ftsConfig.getBackend());
+			String resolvedEndpoint = lance ? ftsConfig.getIndexDir() : ftsConfig.getEndpoint();
+			FtsSearchService searchService = lance
+					? new LanceFtsSearchService(LanceFtsIndexRegistry.getOrCreate(resolvedEndpoint))
+					: new HttpFtsSearchService(
 							ftsConfig.getEndpoint(),
 							ftsConfig.getBulkPath(),
 							ftsConfig.isFailOnError(),
 							ftsConfig.getOutboxDir(),
-							ftsConfig.getRequestTimeoutMillis()),
+							ftsConfig.getRequestTimeoutMillis());
+			sail = new FtsSail(
+					searchService,
 					new FtsFederatedServiceConfig(
 							ftsConfig.getBackend(),
-							ftsConfig.getEndpoint(),
+							resolvedEndpoint,
 							ftsConfig.getSearchPath(),
 							ftsConfig.isFailOnError(),
 							ftsConfig.getDefaultLimit()),
