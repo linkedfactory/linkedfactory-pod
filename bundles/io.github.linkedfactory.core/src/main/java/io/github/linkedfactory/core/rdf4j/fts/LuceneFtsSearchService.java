@@ -6,6 +6,7 @@ import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class LuceneFtsSearchService implements FtsSearchService {
+public class LuceneFtsSearchService implements FtsSearchBackend {
 	private final LuceneFtsIndex index;
 	private final ThreadLocal<Transaction> txState = new ThreadLocal<>();
 
@@ -122,5 +123,10 @@ public class LuceneFtsSearchService implements FtsSearchService {
 					statement.getPredicate().stringValue(), value, iri, context);
 			target.computeIfAbsent(statement.getSubject().stringValue(), key -> new ArrayList<>()).add(entry);
 		}
+	}
+
+	@Override
+	public List<FtsSearchHit> search(FtsSearchRequest request) throws Exception {
+		return index.search(request);
 	}
 }

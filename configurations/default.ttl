@@ -7,9 +7,14 @@
 @prefix auth: <http://enilink.net/vocab/auth#> .
 @prefix foaf: <http://xmlns.com/foaf/0.1/> .
 @prefix config: <enilink:config/> .
+@prefix rep: <http://www.openrdf.org/config/repository#>.
+@prefix sr: <http://www.openrdf.org/config/repository/sail#>.
+@prefix sail: <http://www.openrdf.org/config/sail#>.
+@prefix ns: <http://www.openrdf.org/config/sail/native#>.
+@prefix fts: <http://linkedfactory.github.io/config/sail/fts#>.
 
 # set query timeout to 60 seconds
-config: config:queryTimeout 200000 .
+config: config:queryTimeout 60000 .
 
 # import definition of administrators group
 <> owl:imports <platform:/plugin/net.enilink.platform.core/config/group-admin.ttl> .
@@ -38,11 +43,34 @@ group:Administrators foaf:member user:admin .
 
 <urn:enilink:metadata> a models:PersistentModelSet ;
     models:inference false ;
-    models:repository <workspace:/genius/meta/> .
+    models:repository <workspace:/dtsc-test/meta/> .
 
-<urn:enilink:data> a models:KvinPersistentModelSet ;
-    models:inference false ;
-    models:repository <workspace:/genius/data/> .
+<urn:enilink:data> a models:RepositoryModelSet ;
+    models:repository <urn:linkedfactory:data-repo> .
+
+<urn:linkedfactory:data-repo> a rep:Repository ;
+   rep:repositoryID "linkedfactory-data" ;
+   rdfs:label "LinkedFactory data repository (Kvin + FTS)" ;
+   rep:repositoryImpl [
+      rep:repositoryType "openrdf:SailRepository" ;
+      sr:sailImpl [
+         sail:sailType "kvin:KvinSail" ;
+         sail:delegate [
+            sail:sailType "fts:FtsSail" ;
+            fts:backend "lucene" ;
+            fts:indexDir "workspace/fts-index" ;
+            #fts:endpoint "http://localhost:9200" ;
+            #fts:bulkPath "/linkedfactory/_bulk" ;
+            #fts:searchPath "/linkedfactory/_search" ;
+            #fts:defaultLimit 100 ;
+            #fts:failOnError true ;
+            sail:delegate [
+               sail:sailType "openrdf:NativeStore" ;
+               ns:tripleIndexes "cspo,cpos,spoc,posc"
+            ]
+         ]
+      ]
+   ] .
 
 @prefix login: <plugin://net.enilink.platform.core/Login/> .
 login: login:jaasConfigUrl <jaas.conf> ;

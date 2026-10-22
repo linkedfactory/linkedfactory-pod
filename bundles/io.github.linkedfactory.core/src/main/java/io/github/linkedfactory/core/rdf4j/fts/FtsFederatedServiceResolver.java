@@ -5,33 +5,27 @@ import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedSe
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
 
 import java.net.URI;
-import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 public class FtsFederatedServiceResolver extends AbstractFederatedServiceResolver {
 	private final FtsFederatedServiceConfig config;
-	private final Map<String, FtsSearchBackendFactory> backendFactories;
+	private final FtsSearchBackendFactory backendFactory;
 
 	public FtsFederatedServiceResolver() {
 		this(FtsFederatedServiceConfig.defaults());
 	}
 
 	public FtsFederatedServiceResolver(FtsFederatedServiceConfig config) {
-		this(config, java.util.List.of(new ElasticKeywordSearchBackendFactory(), new LuceneSearchBackendFactory()));
+		this.config = config == null || config.getBackend() == null || config.getBackend().isBlank()
+				? FtsFederatedServiceConfig.defaults()
+				: config;
+			this.backendFactory = this.config.getBackend().toLowerCase().equals(FtsFederatedServiceConfig.HTTP_ELASTICSEARCH_BACKEND)
+					? new ElasticKeywordSearchBackendFactory()
+					: new LuceneSearchBackendFactory();
 	}
 
-	public FtsFederatedServiceResolver(FtsFederatedServiceConfig config,
-			Collection<? extends FtsSearchBackendFactory> backendFactories) {
+	public FtsFederatedServiceResolver(FtsFederatedServiceConfig config, FtsSearchBackendFactory backendFactory) {
 		this.config = config == null ? FtsFederatedServiceConfig.defaults() : config;
-		this.backendFactories = new LinkedHashMap<>();
-		if (backendFactories != null) {
-			for (FtsSearchBackendFactory factory : backendFactories) {
-				if (factory != null) {
-					this.backendFactories.put(factory.backendType().toLowerCase(), factory);
-				}
-			}
-		}
+		this.backendFactory = backendFactory == null ? new LuceneSearchBackendFactory() : backendFactory;
 	}
 
 	@Override
@@ -40,16 +34,14 @@ public class FtsFederatedServiceResolver extends AbstractFederatedServiceResolve
 			return null;
 		}
 
-		String backendType = config.getBackend().toLowerCase();
-		FtsSearchBackendFactory backendFactory = backendFactories.get(backendType);
-		if (backendFactory == null) {
-			throw new QueryEvaluationException("Unknown FTS backend '" + backendType + "'. Available backends: "
-					+ backendFactories.keySet());
+		if (backendFactory == null || !backendFactory.backendType().equalsIgnoreCase(config.getBackend())) {
+			throw new QueryEvaluationException("missing or wrong FTS backend '" + (backendFactory != null ? backendFactory.backendType() : null) + "'. configured backends: "
+					+ config.getBackend());
 		}
 		try {
 			return new FtsFederatedService(backendFactory.create(effectiveConfig(serviceUrl)));
 		} catch (Exception e) {
-			throw new QueryEvaluationException("Unable to initialize FTS backend '" + backendType + "'", e);
+			throw new QueryEvaluationException("Unable to initialize FTS backend '" + backendFactory.backendType() + "'", e);
 		}
 	}
 

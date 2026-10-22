@@ -3,7 +3,9 @@ package io.github.linkedfactory.core.rdf4j.fts;
 public class FtsFederatedServiceConfig {
 
 	// FIXME the default settings should be for internal embedded search service when added
-	public static final String DEFAULT_BACKEND = "elastic";
+	public static  String HTTP_ELASTICSEARCH_BACKEND = "elastic";
+	public static String EMBEDDED_LUCENE_BACKEND = "lucene";
+	public static final String DEFAULT_BACKEND = EMBEDDED_LUCENE_BACKEND ;
 	public static final String DEFAULT_ENDPOINT = "http://localhost:9200";
 	public static final String DEFAULT_SEARCH_PATH = "/fts/_search";
 	public static final int DEFAULT_LIMIT = 100;

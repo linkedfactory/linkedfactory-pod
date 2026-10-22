@@ -36,7 +36,7 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private static final String DEFAULT_INDEX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
 			"linkedfactory-fts-index").toString();
 
-	private String backend = "elastic";
+	private String backend = "lucene";
 	private String endpoint;
 	private String bulkPath = "/fts/bulk";
 	private String searchPath = "/fts/_search";

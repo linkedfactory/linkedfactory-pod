@@ -27,8 +27,7 @@ public class FtsFederatedServiceResolverTest {
 			}
 		};
 		FtsFederatedServiceResolver resolver = new FtsFederatedServiceResolver(
-				new FtsFederatedServiceConfig("custom", "http://default:9200", "/fts/_search", true, 100),
-				List.of(factory));
+				new FtsFederatedServiceConfig("custom", "http://default:9200", "/fts/_search", true, 100), factory);
 
 		var service = resolver.getService("fts:/custom/search");
 		assertNotNull(service);
@@ -40,7 +39,7 @@ public class FtsFederatedServiceResolverTest {
 	public void rejectsAbsoluteServiceUrlOverrides() throws Exception {
 		FtsFederatedServiceResolver resolver = new FtsFederatedServiceResolver(
 				new FtsFederatedServiceConfig("custom", "http://default:9200", "/fts/_search", true, 100),
-				List.of(new FtsSearchBackendFactory() {
+				new FtsSearchBackendFactory() {
 					@Override
 					public String backendType() {
 						return "custom";
@@ -50,7 +49,7 @@ public class FtsFederatedServiceResolverTest {
 					public FtsSearchBackend create(FtsFederatedServiceConfig config) {
 						return request -> List.of();
 					}
-				}));
+				});
 		try {
 			resolver.getService("fts:http://evil.example");
 			fail("Expected QueryEvaluationException");
@@ -64,12 +63,12 @@ public class FtsFederatedServiceResolverTest {
 	public void failsForUnknownBackend() throws Exception {
 		FtsFederatedServiceResolver resolver = new FtsFederatedServiceResolver(
 				new FtsFederatedServiceConfig("unknown", "http://default:9200", "/fts/_search", true, 100),
-				List.of(new ElasticKeywordSearchBackendFactory()));
+				new ElasticKeywordSearchBackendFactory());
 		try {
 			resolver.getService("fts:");
 			fail("Expected QueryEvaluationException");
 		} catch (QueryEvaluationException expected) {
-			assertTrue(expected.getMessage().contains("Unknown FTS backend"));
+			assertTrue(expected.getMessage().contains("missing or wrong FTS backend"));
 		}
 	}
 }
