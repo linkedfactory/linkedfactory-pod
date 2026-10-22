@@ -293,6 +293,49 @@
 
 	<profiles>
 		<profile>
+			<id>jmh</id>
+			<properties>
+				<jmh.backends>lucene,elastic</jmh.backends>
+				<jmh.batch.sizes>10000,100000,1000000</jmh.batch.sizes>
+				<jmh.warmups>1</jmh.warmups>
+				<jmh.measurements>3</jmh.measurements>
+				<jmh.forks>1</jmh.forks>
+				<jmh.result.file>${project.build.directory}/fts-backend-jmh.json</jmh.result.file>
+			</properties>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.codehaus.mojo</groupId>
+						<artifactId>exec-maven-plugin</artifactId>
+						<version>3.5.0</version>
+						<configuration>
+							<executable>${java.home}/bin/java</executable>
+							<classpathScope>test</classpathScope>
+							<arguments>
+								<argument>-cp</argument>
+								<classpath/>
+								<argument>org.openjdk.jmh.Main</argument>
+								<argument>io.github.linkedfactory.core.rdf4j.fts.benchmark.FtsBackendLifecycleBenchmark</argument>
+								<argument>-p</argument>
+								<argument>backend=${jmh.backends}</argument>
+								<argument>batchSize=${jmh.batch.sizes}</argument>
+								<argument>-wi</argument>
+								<argument>${jmh.warmups}</argument>
+								<argument>-i</argument>
+								<argument>${jmh.measurements}</argument>
+								<argument>-f</argument>
+								<argument>${jmh.forks}</argument>
+								<argument>-rf</argument>
+								<argument>json</argument>
+								<argument>-rff</argument>
+								<argument>${jmh.result.file}</argument>
+							</arguments>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+		<profile>
 			<id>cli</id>
 			<build>
 				<plugins>
