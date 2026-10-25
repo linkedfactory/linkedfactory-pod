@@ -311,24 +311,18 @@
 						<configuration>
 							<executable>${java.home}/bin/java</executable>
 							<classpathScope>test</classpathScope>
+							<environmentVariables>
+								<JMH_BACKENDS>${jmh.backends}</JMH_BACKENDS>
+								<JMH_BATCH_SIZES>${jmh.batch.sizes}</JMH_BATCH_SIZES>
+								<JMH_WARMUPS>${jmh.warmups}</JMH_WARMUPS>
+								<JMH_MEASUREMENTS>${jmh.measurements}</JMH_MEASUREMENTS>
+								<JMH_FORKS>${jmh.forks}</JMH_FORKS>
+								<JMH_RESULT_FILE>${jmh.result.file}</JMH_RESULT_FILE>
+							</environmentVariables>
 							<arguments>
 								<argument>-cp</argument>
 								<classpath/>
-								<argument>org.openjdk.jmh.Main</argument>
-								<argument>io.github.linkedfactory.core.rdf4j.fts.benchmark.FtsBackendLifecycleBenchmark</argument>
-								<argument>-p</argument>
-								<argument>backend=${jmh.backends}</argument>
-								<argument>batchSize=${jmh.batch.sizes}</argument>
-								<argument>-wi</argument>
-								<argument>${jmh.warmups}</argument>
-								<argument>-i</argument>
-								<argument>${jmh.measurements}</argument>
-								<argument>-f</argument>
-								<argument>${jmh.forks}</argument>
-								<argument>-rf</argument>
-								<argument>json</argument>
-								<argument>-rff</argument>
-								<argument>${jmh.result.file}</argument>
+								<argument>io.github.linkedfactory.core.rdf4j.fts.benchmark.FtsBackendLifecycleBenchmarkRunner</argument>
 							</arguments>
 						</configuration>
 					</plugin>
