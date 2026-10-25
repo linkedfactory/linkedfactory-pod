@@ -285,6 +285,43 @@
 
 	<profiles>
 		<profile>
+			<id>jmh</id>
+			<properties>
+				<jmh.backends>lance,elastic</jmh.backends>
+				<jmh.batch.sizes>10000,100000,1000000</jmh.batch.sizes>
+				<jmh.warmups>1</jmh.warmups>
+				<jmh.measurements>3</jmh.measurements>
+				<jmh.forks>1</jmh.forks>
+				<jmh.result.file>${project.build.directory}/fts-backend-jmh.json</jmh.result.file>
+			</properties>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.codehaus.mojo</groupId>
+						<artifactId>exec-maven-plugin</artifactId>
+						<version>3.5.0</version>
+						<configuration>
+							<executable>${java.home}/bin/java</executable>
+							<classpathScope>test</classpathScope>
+							<environmentVariables>
+								<JMH_BACKENDS>${jmh.backends}</JMH_BACKENDS>
+								<JMH_BATCH_SIZES>${jmh.batch.sizes}</JMH_BATCH_SIZES>
+								<JMH_WARMUPS>${jmh.warmups}</JMH_WARMUPS>
+								<JMH_MEASUREMENTS>${jmh.measurements}</JMH_MEASUREMENTS>
+								<JMH_FORKS>${jmh.forks}</JMH_FORKS>
+								<JMH_RESULT_FILE>${jmh.result.file}</JMH_RESULT_FILE>
+							</environmentVariables>
+							<arguments>
+								<argument>-cp</argument>
+								<classpath/>
+								<argument>io.github.linkedfactory.core.rdf4j.fts.benchmark.FtsBackendLifecycleBenchmarkRunner</argument>
+							</arguments>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+		<profile>
 			<id>cli</id>
 			<build>
 				<plugins>
