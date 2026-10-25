@@ -58,3 +58,5 @@ Check that the JSON file contains all 12 cases before using full-run results. JM
 $results = Get-Content 'bundles/io.github.linkedfactory.core/target/fts-backend-jmh.json' -Raw | ConvertFrom-Json
 if ($results.Count -ne 12) { throw "Expected 12 JMH cases, found $($results.Count)" }
 ```
+
+The `jmh` profile runs `FtsBackendLifecycleBenchmarkRunner`, a small `main()` that builds JMH's `Options` via the Java API and reads `backend`/`batchSize`/etc. from environment variables set by the profile. An earlier version invoked `org.openjdk.jmh.Main` directly with `-p` command-line flags; that silently dropped the `backend=...` and `batchSize=...` values on both Windows and Linux (a real bug in how exec-maven-plugin 3.5.0 builds its argument list), causing every run to default to `@Param`'s own built-in value set instead of the requested one. Verified with the full 12-case run above, including against a real Elasticsearch 8.17.0 instance.
