@@ -35,9 +35,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +53,16 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 public class FtsBackendLifecycleBenchmark {
 	private static final int COMMIT_SIZE = 5_000;
+	private static final long LITERAL_SEED = 42L;
+	private static final String[] VOCABULARY = {
+			"the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
+			"model", "data", "search", "index", "query", "value", "record", "field",
+			"graph", "triple", "engine", "vector", "token", "term", "document", "corpus",
+			"result", "system", "process", "update", "delete", "insert", "commit", "transaction",
+			"batch", "stream", "cache", "memory", "storage", "network", "cluster", "node",
+			"latency", "throughput", "scale", "metric", "sample", "measure", "duration", "pattern"
+	};
+	private static final double[] VOCABULARY_CUMULATIVE_WEIGHTS = buildCumulativeWeights();
 	private static final SimpleValueFactory VF = SimpleValueFactory.getInstance();
 	private static final ObjectMapper MAPPER = new ObjectMapper();
 	private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
@@ -74,16 +86,48 @@ public class FtsBackendLifecycleBenchmark {
 	public void prepareStatements() {
 		batches = new ArrayList<>((batchSize + COMMIT_SIZE - 1) / COMMIT_SIZE);
 		IRI context = VF.createIRI("urn:fts-benchmark:model");
+		Random random = new Random(LITERAL_SEED);
 		for (int offset = 0; offset < batchSize; offset += COMMIT_SIZE) {
 			Set<Statement> batch = new LinkedHashSet<>(COMMIT_SIZE);
 			for (int i = offset; i < Math.min(offset + COMMIT_SIZE, batchSize); i++) {
 				batch.add(VF.createStatement(
 						VF.createIRI("urn:fts-benchmark:item:" + i),
 						VF.createIRI("urn:fts-benchmark:property:" + (i % 16)),
-						VF.createLiteral("benchmark value " + i + " fox"), context));
+						VF.createLiteral(randomLiteral(random)), context));
 			}
 			batches.add(batch);
 		}
+	}
+
+	private static double[] buildCumulativeWeights() {
+		double[] cumulative = new double[VOCABULARY.length];
+		double sum = 0;
+		for (int i = 0; i < VOCABULARY.length; i++) {
+			sum += 1.0 / (i + 1);
+			cumulative[i] = sum;
+		}
+		return cumulative;
+	}
+
+	private static String randomLiteral(Random random) {
+		int wordCount = 2 + random.nextInt(7);
+		StringBuilder literal = new StringBuilder();
+		for (int w = 0; w < wordCount; w++) {
+			if (w > 0) {
+				literal.append(' ');
+			}
+			literal.append(pickWeightedWord(random));
+		}
+		return literal.toString();
+	}
+
+	private static String pickWeightedWord(Random random) {
+		double target = random.nextDouble() * VOCABULARY_CUMULATIVE_WEIGHTS[VOCABULARY_CUMULATIVE_WEIGHTS.length - 1];
+		int index = Arrays.binarySearch(VOCABULARY_CUMULATIVE_WEIGHTS, target);
+		if (index < 0) {
+			index = -index - 1;
+		}
+		return VOCABULARY[Math.min(index, VOCABULARY.length - 1)];
 	}
 
 	@Setup(Level.Invocation)
