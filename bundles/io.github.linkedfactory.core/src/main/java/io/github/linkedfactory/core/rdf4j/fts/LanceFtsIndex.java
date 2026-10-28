@@ -24,6 +24,8 @@ import org.lance.ipc.ScanOptions;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -37,7 +39,8 @@ public class LanceFtsIndex implements AutoCloseable {
 			Field.nullable("predicate", ArrowType.Utf8.INSTANCE),
 			Field.nullable("value", ArrowType.Utf8.INSTANCE),
 			Field.nullable("is_iri", ArrowType.Bool.INSTANCE),
-			Field.nullable("context", ArrowType.Utf8.INSTANCE)));
+			Field.nullable("context", ArrowType.Utf8.INSTANCE),
+			Field.nullable("row_key", ArrowType.Utf8.INSTANCE)));
 
 	public record FieldValue(String subject, String predicate, String value, boolean iri, String context) {
 	}
@@ -158,7 +161,7 @@ public class LanceFtsIndex implements AutoCloseable {
 
 	private void reindexValueColumn() {
 		ScalarIndexParams invertedParams = ScalarIndexParams.create(
-				"inverted", "{\"base_tokenizer\":\"simple\",\"language\":\"English\",\"with_position\":true}");
+				"inverted", "{\"base_tokenizer\":\"simple\",\"language\":\"English\",\"with_position\":false}");
 		IndexParams indexParams = IndexParams.builder().setScalarIndexParams(invertedParams).build();
 		dataset.createIndex(
 				IndexOptions.builder(Collections.singletonList("value"), IndexType.INVERTED, indexParams)
@@ -167,28 +170,50 @@ public class LanceFtsIndex implements AutoCloseable {
 						.build());
 	}
 
-	private static final int DELETE_BATCH_SIZE = 5000;
+	private static final int DELETE_BATCH_SIZE = 100;
+	private boolean rowKeyIndexReady = false;
 
 	private void deleteRows(List<FieldValue> rows) throws Exception {
 		if (dataset == null) {
 			return;
 		}
+		if (!rowKeyIndexReady) {
+			reindexRowKeyColumn();
+			rowKeyIndexReady = true;
+		}
 		for (int offset = 0; offset < rows.size(); offset += DELETE_BATCH_SIZE) {
 			List<FieldValue> batch = rows.subList(offset, Math.min(offset + DELETE_BATCH_SIZE, rows.size()));
-			List<String> predicates = new ArrayList<>();
+			List<String> rowKeys = new ArrayList<>();
 			for (FieldValue row : batch) {
-				StringBuilder predicate = new StringBuilder();
-				predicate.append("subject = ").append(quote(row.subject()))
-						.append(" AND predicate = ").append(quote(row.predicate()))
-						.append(" AND value = ").append(quote(row.value()));
-				if (row.context() == null) {
-					predicate.append(" AND context IS NULL");
-				} else {
-					predicate.append(" AND context = ").append(quote(row.context()));
-				}
-				predicates.add("(" + predicate + ")");
+				rowKeys.add(quote(rowKey(row)));
 			}
-			dataset.delete(String.join(" OR ", predicates));
+			dataset.delete("row_key IN (" + String.join(",", rowKeys) + ")");
+			dataset.compact();
+		}
+	}
+
+	private void reindexRowKeyColumn() {
+		ScalarIndexParams btreeParams = ScalarIndexParams.create("btree");
+		IndexParams indexParams = IndexParams.builder().setScalarIndexParams(btreeParams).build();
+		dataset.createIndex(
+				IndexOptions.builder(Collections.singletonList("row_key"), IndexType.BTREE, indexParams)
+						.withIndexName("row_key_idx")
+						.replace(true)
+						.build());
+	}
+
+	private static String rowKey(FieldValue row) {
+		String joined = row.subject() + "\u0000" + row.predicate() + "\u0000" + row.value() + "\u0000"
+				+ (row.context() == null ? "" : row.context());
+		try {
+			byte[] digest = MessageDigest.getInstance("SHA-256").digest(joined.getBytes(StandardCharsets.UTF_8));
+			StringBuilder hex = new StringBuilder(digest.length * 2);
+			for (byte b : digest) {
+				hex.append(String.format("%02x", b));
+			}
+			return hex.toString();
+		} catch (NoSuchAlgorithmException e) {
+			throw new IllegalStateException(e);
 		}
 	}
 
@@ -199,11 +224,13 @@ public class LanceFtsIndex implements AutoCloseable {
 			VarCharVector valueVector = (VarCharVector) root.getVector("value");
 			BitVector iriVector = (BitVector) root.getVector("is_iri");
 			VarCharVector contextVector = (VarCharVector) root.getVector("context");
+			VarCharVector rowKeyVector = (VarCharVector) root.getVector("row_key");
 			subjectVector.allocateNew();
 			predicateVector.allocateNew();
 			valueVector.allocateNew();
 			iriVector.allocateNew();
 			contextVector.allocateNew();
+			rowKeyVector.allocateNew();
 			for (int i = 0; i < rows.size(); i++) {
 				FieldValue row = rows.get(i);
 				subjectVector.setSafe(i, row.subject().getBytes(StandardCharsets.UTF_8));
@@ -215,6 +242,7 @@ public class LanceFtsIndex implements AutoCloseable {
 				} else {
 					contextVector.setSafe(i, row.context().getBytes(StandardCharsets.UTF_8));
 				}
+				rowKeyVector.setSafe(i, rowKey(row).getBytes(StandardCharsets.UTF_8));
 			}
 			root.setRowCount(rows.size());
 
