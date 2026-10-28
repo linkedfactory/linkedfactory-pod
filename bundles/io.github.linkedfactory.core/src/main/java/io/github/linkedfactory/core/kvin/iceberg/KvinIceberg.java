@@ -29,9 +29,11 @@ import org.apache.iceberg.data.GenericRecord;
 import org.apache.iceberg.data.parquet.GenericParquetReaders;
 import org.apache.iceberg.data.parquet.GenericParquetWriter;
 import org.apache.iceberg.exceptions.CommitFailedException;
+import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.io.CloseableGroup;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.io.DataWriter;
@@ -63,6 +65,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -72,6 +75,13 @@ import java.util.UUID;
  * descending sequence number. Deletes use Iceberg copy-on-write rewrites,
  * therefore deleted tuples are immediately absent from subsequently planned
  * fetch scans.</p>
+ *
+ * <p>After a successful append, automatic sorted compaction rewrites small files
+ * when {@code kvin.compaction.min-files} (default 32, minimum 2) is reached.
+ * Files smaller than half {@code write.target-file-size-bytes} (default 128 MiB)
+ * are eligible; merged output rolls at the target size. Existing snapshots and
+ * readers retain their original files. Compaction failures are logged and thrown
+ * to the caller, but the preceding append remains committed.</p>
  */
 public class KvinIceberg implements Kvin {
 	private static final Logger log = LoggerFactory.getLogger(KvinIceberg.class);
@@ -79,6 +89,10 @@ public class KvinIceberg implements Kvin {
 	private static final int BATCH_SIZE = 8192;
 	private static final int MAX_COMMIT_RETRIES = 5;
 	private static final int ID_CACHE_SIZE = 250_000;
+	private static final String COMPACTION_MIN_FILES = "kvin.compaction.min-files";
+	private static final int DEFAULT_COMPACTION_MIN_FILES = 32;
+	private static final long DEFAULT_COMPACTION_TARGET_SIZE = 128L * 1024 * 1024;
+	private static final int COMPACTION_MAX_INPUT_FILES = 128;
 
 	private static final PartitionSpec SPEC = PartitionSpec.unpartitioned();
 
@@ -446,7 +460,11 @@ public class KvinIceberg implements Kvin {
 			if (!files.isEmpty()) {
 				commitAppend(files);
 				committed = true;
+				compactSmallFiles();
 			}
+		} catch (CommitStateUnknownException e) {
+			// A possibly committed file must never be removed.
+			throw e;
 		} catch (IOException e) {
 			if (!committed) {
 				cleanup(paths);
@@ -479,6 +497,126 @@ public class KvinIceberg implements Kvin {
 
 				log.warn("Iceberg append conflicted; retrying ({}/{})", attempt, MAX_COMMIT_RETRIES);
 			}
+		}
+	}
+
+	private void compactSmallFiles() throws IOException {
+		List<String> paths = new ArrayList<>();
+		try {
+			table.refresh();
+			int minimum = Integer.parseInt(table.properties().getOrDefault(COMPACTION_MIN_FILES, Integer.toString(DEFAULT_COMPACTION_MIN_FILES)));
+			long targetSize = Long.parseLong(table.properties().getOrDefault(TableProperties.WRITE_TARGET_FILE_SIZE_BYTES, Long.toString(DEFAULT_COMPACTION_TARGET_SIZE)));
+			if (minimum < 2 || targetSize <= 0) {
+				throw new IllegalArgumentException("Iceberg compaction requires kvin.compaction.min-files >= 2 and a positive write.target-file-size-bytes");
+			}
+			if (table.currentSnapshot() == null || !table.sortOrder().sameOrder(SORT_ORDER)) {
+				return;
+			}
+
+			long snapshotId = table.currentSnapshot().snapshotId();
+			Map<String, DataFile> candidates = new LinkedHashMap<>();
+			int maximum = Math.max(minimum, COMPACTION_MAX_INPUT_FILES);
+			try (CloseableIterable<FileScanTask> tasks = table.newScan().useSnapshot(snapshotId).planFiles()) {
+				for (FileScanTask task : tasks) {
+					if (!task.deletes().isEmpty()) {
+						throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg compaction");
+					}
+					DataFile file = task.file();
+					SortOrder order = table.sortOrders().get(file.sortOrderId());
+					if (candidates.size() < maximum && file.format() == FileFormat.PARQUET
+							&& file.specId() == table.spec().specId() && order != null && order.sameOrder(SORT_ORDER)
+							&& file.fileSizeInBytes() < targetSize / 2) {
+						candidates.putIfAbsent(file.location(), file);
+					}
+				}
+			}
+			if (candidates.size() < minimum) {
+				return;
+			}
+
+			Set<DataFile> replacements = mergeCompactionFiles(candidates.values(), targetSize, paths);
+			if (replacements.size() >= candidates.size()) {
+				cleanup(paths);
+				return;
+			}
+			// Validate against exactly the snapshot read: concurrent appends are safe,
+			// but replaced inputs and newly added row-level deletes must conflict.
+			table.newRewrite().validateFromSnapshot(snapshotId)
+					.rewriteFiles(new LinkedHashSet<>(candidates.values()), replacements).commit();
+		} catch (CommitStateUnknownException e) {
+			log.error("Iceberg compaction commit state is unknown; appended tuples remain committed and output files are retained", e);
+			throw e;
+		} catch (IOException | RuntimeException e) {
+			cleanup(paths);
+			log.error("Iceberg compaction failed after tuples were appended; the append remains committed", e);
+			throw e;
+		}
+	}
+
+	private Set<DataFile> mergeCompactionFiles(Iterable<DataFile> files, long targetSize, List<String> paths) throws IOException {
+		Set<DataFile> replacements = new LinkedHashSet<>();
+		PriorityQueue<CompactionCursor> queue = new PriorityQueue<>((a, b) -> ORDER.compare(a.row, b.row));
+		try (CloseableGroup readers = new CloseableGroup()) {
+			for (DataFile file : files) {
+				CloseableIterable<org.apache.iceberg.data.Record> rows = Parquet.read(table.io().newInputFile(file.location()))
+						.project(SCHEMA).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build();
+				readers.addCloseable(rows);
+				CompactionCursor cursor = new CompactionCursor(rows.iterator());
+				if (cursor.advance()) {
+					queue.add(cursor);
+				}
+			}
+			while (!queue.isEmpty()) {
+				DataWriter<org.apache.iceberg.data.Record> writer = newCompactionWriter(targetSize, paths);
+				long item = 0, context = 0, property = 0;
+				boolean first = true;
+				try (writer) {
+					do {
+						CompactionCursor cursor = queue.remove();
+						org.apache.iceberg.data.Record row = cursor.row;
+						long nextItem = (Long) row.get(0), nextContext = (Long) row.get(1), nextProperty = (Long) row.get(2);
+						row.set(5, first || nextItem != item || nextContext != context || nextProperty != property);
+						writer.write(row);
+						item = nextItem;
+						context = nextContext;
+						property = nextProperty;
+						first = false;
+						if (cursor.advance()) {
+							queue.add(cursor);
+						}
+					} while (!queue.isEmpty() && writer.length() < targetSize);
+				}
+				replacements.add(writer.toDataFile());
+			}
+		}
+		return replacements;
+	}
+
+	private DataWriter<org.apache.iceberg.data.Record> newCompactionWriter(long targetSize, List<String> paths) throws IOException {
+		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet").toString();
+		paths.add(path);
+		Files.createDirectories(Path.of(path).getParent());
+		var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table)
+				.set(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, Long.toString(Math.min(targetSize, 8L * 1024 * 1024)))
+				.writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
+				.createWriterFunc(message -> GenericParquetWriter.create(SCHEMA, message)).<org.apache.iceberg.data.Record>build();
+		return new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null, table.sortOrder());
+	}
+
+	private static final class CompactionCursor {
+		private final CloseableIterator<org.apache.iceberg.data.Record> iterator;
+		private org.apache.iceberg.data.Record row;
+
+		private CompactionCursor(CloseableIterator<org.apache.iceberg.data.Record> iterator) {
+			this.iterator = iterator;
+		}
+
+		private boolean advance() {
+			if (!iterator.hasNext()) {
+				return false;
+			}
+			row = iterator.next();
+			return true;
 		}
 	}
 
@@ -628,7 +766,7 @@ public class KvinIceberg implements Kvin {
 					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
 				}
 
-				RowCursor cursor = new RowCursor(table, task, filter);
+				RowCursor cursor = new RowCursor(table, task, filter, limit > 0);
 
 				try {
 					if (cursor.advance()) {
@@ -732,6 +870,10 @@ public class KvinIceberg implements Kvin {
 						previous = row;
 						if (limit > 0 && ++seriesCount == limit) {
 							completedSeries++;
+							pending.skipThrough(itemId, contextId, propertyId);
+							for (RowCursor cursor : cursors) {
+								cursor.skipThrough(itemId, contextId, propertyId);
+							}
 						}
 
 						Object value = row.value();
@@ -967,14 +1109,25 @@ public class KvinIceberg implements Kvin {
 		final CloseableIterator<org.apache.iceberg.data.Record> iterator;
 		KvinRow row;
 
-		RowCursor(Table table, FileScanTask task, Expression filter) {
+		RowCursor(Table table, FileScanTask task, Expression filter, boolean limited) {
 			if (!task.deletes().isEmpty()) {
 				throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
 			}
 
-			this.rows = Parquet.read(table.io().newInputFile(task.file().location())).split(task.start(), task.length()).project(SCHEMA).filter(filter).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build();
+			try {
+				this.rows = limited ? new SeriesSkippingReader(SCHEMA, task, filter)
+						: Parquet.read(table.io().newInputFile(task.file().location())).split(task.start(), task.length()).project(SCHEMA).filter(filter).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build();
+			} catch (IOException e) {
+				throw new UncheckedIOException("Unable to open Iceberg series reader", e);
+			}
 
 			this.iterator = rows.iterator();
+		}
+
+		void skipThrough(long item, long context, long property) {
+			if (rows instanceof SeriesSkippingReader reader) {
+				reader.skipThrough(item, context, property);
+			}
 		}
 
 		boolean advance() {
@@ -998,15 +1151,38 @@ public class KvinIceberg implements Kvin {
 
 	@Override
 	public synchronized IExtendedIterator<URI> properties(URI item, URI context) {
-		Set<URI> result = new LinkedHashSet<>();
-
-		try (IExtendedIterator<KvinTuple> rows = fetch(item, null, context, 0)) {
-			while (rows.hasNext()) {
-				result.add(rows.next().property);
-			}
+		long itemId = ids[0].resolveIds(List.of(item)).getOrDefault(item, 0L);
+		URI requestedContext = context == null ? DEFAULT_CONTEXT : context;
+		long contextId = ids[1].resolveIds(List.of(requestedContext)).getOrDefault(requestedContext, 0L);
+		if (itemId == 0 || contextId == 0) {
+			return NiceIterator.emptyIterator();
 		}
-
-		return WrappedIterator.create(result.iterator());
+		Expression filter = Expressions.and(Expressions.equal("itemId", itemId),
+				Expressions.and(Expressions.equal("contextId", contextId), Expressions.equal("first", true)));
+		Schema projection = SCHEMA.select("itemId", "contextId", "propertyId", "first");
+		Set<Long> propertyIds = new TreeSet<>();
+		table.refresh();
+		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter).planFiles()) {
+			for (FileScanTask task : tasks) {
+				if (!task.deletes().isEmpty()) {
+					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
+				}
+				try (CloseableIterable<org.apache.iceberg.data.Record> rows = Parquet.read(
+						table.io().newInputFile(task.file().location())).split(task.start(), task.length())
+						.project(projection).filter(filter)
+						.createReaderFunc(schema -> GenericParquetReaders.buildReader(projection, schema)).build()) {
+					for (org.apache.iceberg.data.Record row : rows) {
+						if ((Long) row.get(0) == itemId && (Long) row.get(1) == contextId && (Boolean) row.get(3)) {
+							propertyIds.add((Long) row.get(2));
+						}
+					}
+				}
+			}
+		} catch (IOException e) {
+			throw new UncheckedIOException("Unable to read Iceberg properties", e);
+		}
+		Map<Long, URI> uris = ids[2].resolveUris(propertyIds);
+		return WrappedIterator.create(propertyIds.stream().map(uris::get).iterator());
 	}
 
 	@Override
