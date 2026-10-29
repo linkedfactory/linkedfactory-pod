@@ -243,16 +243,18 @@ public class KvinIcebergTest {
 	}
 
 	@Test
-	public void batchesColdReversePropertyLookupsFromFileHeads() throws Exception {
+	public void batchesColdReversePropertyLookupsFromBufferedRecords() throws Exception {
 		URI secondProperty = URIs.createURI("urn:test:second");
-		store.put(new KvinTuple(item, property, null, 1, 0, 1));
-		store.put(new KvinTuple(item, secondProperty, null, 2, 0, 2));
+		store.put(new KvinTuple(item, property, null, 1, 0, 1),
+				new KvinTuple(item, secondProperty, null, 2, 0, 2));
 		store.close();
 		store = new KvinIceberg(directory.toString());
 		Table properties = spyIdTable(2);
-		try (IExtendedIterator<KvinTuple> values = store.fetch(item, null, null, 0)) {
-			assertEquals(List.of(property, secondProperty),
-					values.toList().stream().map(tuple -> tuple.property).toList());
+		for (int round = 0; round < 2; round++) {
+			try (IExtendedIterator<KvinTuple> values = store.fetch(item, null, null, 0)) {
+				assertEquals(List.of(property, secondProperty),
+						values.toList().stream().map(tuple -> tuple.property).toList());
+			}
 		}
 		verify(properties, times(1)).newScan();
 	}

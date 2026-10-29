@@ -37,6 +37,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -161,7 +162,7 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 
 	@Override
 	public long getId(URI uri, IdKind kind, boolean createIfNotExists) {
-		return resolveIds(List.of(uri), kind, createIfNotExists).getOrDefault(uri, 0L);
+		return getIds(List.of(uri), kind, createIfNotExists).getOrDefault(uri, 0L);
 	}
 
 	/**
@@ -169,6 +170,11 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 	 * mappings are omitted unless {@code create} is true.
 	 */
 	public Map<URI, Long> resolveIds(List<URI> uris, IdKind kind, boolean create) {
+		return getIds(uris, kind, create);
+	}
+
+	@Override
+	public Map<URI, Long> getIds(Collection<URI> uris, IdKind kind, boolean create) {
 		synchronized (coordinator) {
 			ensureOpen();
 			if (create && !uris.isEmpty()) {
@@ -199,7 +205,7 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 
 	@Override
 	public URI getUri(long id, IdKind kind) {
-		return resolveUris(Set.of(id), kind).get(id);
+		return getUris(Set.of(id), kind).get(id);
 	}
 
 	URI cachedUri(long id, IdKind kind) {
@@ -209,8 +215,14 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 	}
 
 	Map<Long, URI> resolveUris(Set<Long> requested, IdKind kind) {
+		return getUris(requested, kind);
+	}
+
+	@Override
+	public Map<Long, URI> getUris(Collection<Long> requestedIds, IdKind kind) {
 		synchronized (coordinator) {
 			ensureOpen();
+			Set<Long> requested = new HashSet<>(requestedIds);
 			Map<Long, URI> result = new HashMap<>();
 			int k = index(kind);
 			pending[k].forEach((uri, id) -> {

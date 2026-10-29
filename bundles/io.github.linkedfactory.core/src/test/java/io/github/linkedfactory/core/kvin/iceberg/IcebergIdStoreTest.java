@@ -1,6 +1,7 @@
 package io.github.linkedfactory.core.kvin.iceberg;
 
 import io.github.linkedfactory.core.kvin.ids.IdKind;
+import io.github.linkedfactory.core.kvin.ids.IdStore;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
@@ -38,6 +39,29 @@ public class IcebergIdStoreTest {
 	public void tearDown() throws Exception {
 		store.close();
 		FileUtils.deleteDirectory(directory.toFile());
+	}
+
+	@Test
+	public void bulkInterfaceResolvesCachedPendingAndPersistedMappingsForEveryKind() {
+		URI first = URIs.createURI("urn:ids:first");
+		URI second = URIs.createURI("urn:ids:second");
+		URI missing = URIs.createURI("urn:ids:missing");
+		IdStore ids = store;
+		for (IdKind kind : IdKind.values()) {
+			assertTrue(ids.getIds(List.of(), kind, true).isEmpty());
+			assertTrue(ids.getUris(List.of(), kind).isEmpty());
+			assertEquals(Map.of(first, 1L), ids.getIds(List.of(first, first), kind, true));
+			store.flush();
+			try (var reader = new IcebergIdStore(directory.toString())) {
+				assertEquals(Map.of(first, 1L), reader.getIds(List.of(first, missing, first), kind, false));
+				assertEquals(Map.of(1L, first), reader.getUris(List.of(1L, 1L), kind));
+			}
+			assertEquals(Map.of(first, 1L, second, 2L),
+					ids.getIds(List.of(first, second, second), kind, true));
+			assertEquals(Map.of(1L, first, 2L, second), ids.getUris(List.of(2L, 1L, 2L), kind));
+			assertThrows(IllegalStateException.class, () -> ids.getUris(List.of(3L), kind));
+			store.flush();
+		}
 	}
 
 	@Test
