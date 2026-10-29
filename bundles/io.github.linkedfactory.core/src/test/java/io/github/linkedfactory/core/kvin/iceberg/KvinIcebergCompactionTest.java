@@ -69,10 +69,10 @@ public class KvinIcebergCompactionTest {
 	}
 
 	private Table spyStoreTable() throws Exception {
-		var field = KvinIceberg.class.getDeclaredField("table");
+		var field = IcebergRecordStore.class.getDeclaredField("table");
 		field.setAccessible(true);
-		Table spy = spy((Table) field.get(store));
-		field.set(store, spy);
+		Table spy = spy((Table) field.get(store.getRecordStore()));
+		field.set(store.getRecordStore(), spy);
 		return spy;
 	}
 

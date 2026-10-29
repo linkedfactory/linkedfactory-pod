@@ -17,6 +17,20 @@ Formally, the triple-based data model of RDF _(S, P, O)_ is extended to a quad-b
 ### Iceberg storage
 To use Iceberg instead of the default value store, configure `<store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ]` in the service configuration. KvinIceberg maintains a value table in `iceberg/` and separate URI-ID tables in `iceberg-ids/items/`, `iceberg-ids/properties/`, and `iceberg-ids/contexts/`, with bounded in-memory lookup caches. Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots, using a value-skipping Parquet reader for limited queries and Iceberg's generic Parquet readers otherwise. Use a new store directory rather than pointing it at an existing KvinParquet archive. Retention-period cleanup is not supported by KvinIceberg.
 
+The standalone `IcebergRecordStore` implements `KvinRecordStore` and operates exclusively on numeric `KvinRecord` identifiers, without creating or reading URI-ID tables. Null contexts select ID `0`; null properties and the interface's `-1` property sentinel select all properties. Latest-value fetches include negative timestamps. `IcebergIdStore` implements `IdStore` for all `IdKind` values and can be used without a record store. Both public constructors take the archive root and preserve the existing directory layout.
+
+```java
+try (var records = new IcebergRecordStore("archive");
+     var ids = new IcebergIdStore("archive")) {
+    var kvin = new KvinIceberg(records, ids);
+    // Use kvin with URIs, or records and ids independently.
+}
+```
+
+The injected stores remain caller-owned; closing the facade does not close them. The existing location-based `KvinIceberg` constructors own and close both stores. `createBranch` delegates to an injected `IcebergRecordStore` (other record-store implementations need not support branches). A location-based facade refuses to open populated record tables with missing ID tables rather than inventing replacement mappings.
+
+ID allocation stages mappings, including forward and reverse lookups, until `flush()` or `close()`; batches automatically flush at 8192 new mappings. Allocation is serialized using `iceberg-ids.lock`, held until flushing, so independent processes must flush before waiting for another process to allocate. Instances within the same JVM coordinate automatically, flushing the previous writer when another instance allocates. The facade resolves IDs in batches and flushes mappings before passing records to the record store, keeping pending mappings and record buffers bounded. A flush failure retains the allocation lock and pending mappings for retry, preventing reassignment of IDs already handed to callers.
+
 The value table declares the sort order `itemId ASC, contextId ASC, propertyId ASC, time DESC, seqNr DESC` in Iceberg metadata. Each batch is physically sorted in that order, and new data files record its sort-order ID. Opening an existing store updates the table's default sort order if needed, without rewriting or relabeling old files. Sorted data and column statistics support scan pruning; sort-order metadata alone does not guarantee faster searches or globally ordered query results.
 
 After successful appends, automatic compaction merge-sorts small value files when their count reaches the Iceberg table property `kvin.compaction.min-files` (default 32, minimum 2). Files smaller than half `write.target-file-size-bytes` are eligible; output files roll at that target (128 MiB if unset). Each pass merges at most 128 files, or the configured minimum if larger. Compaction runs synchronously, adding latency to the triggering write, and preserves duplicates, series-start markers, and files referenced by existing readers and snapshots. Compaction failures are logged and propagated, but the preceding append remains committed; an uncertain compaction commit retains its output files rather than risking data loss.

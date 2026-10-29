@@ -1,415 +1,80 @@
 package io.github.linkedfactory.core.kvin.iceberg;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
-import io.github.linkedfactory.core.kvin.Record;
-import io.github.linkedfactory.core.kvin.parquet.Records;
-import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
+import io.github.linkedfactory.core.kvin.ids.IdKind;
+import io.github.linkedfactory.core.kvin.ids.IdStore;
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
+import io.github.linkedfactory.core.kvin.records.KvinRecordStore;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
-import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
-import net.enilink.komma.core.URIs;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.iceberg.CatalogProperties;
-import org.apache.iceberg.DataFile;
-import org.apache.iceberg.FileFormat;
-import org.apache.iceberg.FileScanTask;
-import org.apache.iceberg.ManifestFiles;
-import org.apache.iceberg.PartitionSpec;
-import org.apache.iceberg.Schema;
-import org.apache.iceberg.SortOrder;
-import org.apache.iceberg.SortOrderBuilder;
-import org.apache.iceberg.Table;
-import org.apache.iceberg.TableProperties;
-import org.apache.iceberg.data.GenericRecord;
-import org.apache.iceberg.data.parquet.GenericParquetReaders;
-import org.apache.iceberg.data.parquet.GenericParquetWriter;
-import org.apache.iceberg.exceptions.CommitFailedException;
-import org.apache.iceberg.exceptions.CommitStateUnknownException;
-import org.apache.iceberg.expressions.Expression;
-import org.apache.iceberg.expressions.Expressions;
-import org.apache.iceberg.hadoop.HadoopTables;
-import org.apache.iceberg.io.CloseableGroup;
-import org.apache.iceberg.io.CloseableIterable;
-import org.apache.iceberg.io.CloseableIterator;
-import org.apache.iceberg.io.DataWriter;
-import org.apache.iceberg.parquet.Parquet;
-import org.apache.iceberg.types.Types;
-import org.apache.parquet.column.ParquetProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.PriorityQueue;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.UUID;
+import java.util.*;
 
 /**
- * Iceberg-backed KVIN store.
- *
- * <p>Data files are sorted by item, context, property, descending time, and
- * descending sequence number. Deletes use Iceberg copy-on-write rewrites,
- * therefore deleted tuples are immediately absent from subsequently planned
- * fetch scans.</p>
- *
- * <p>After a successful append, automatic sorted compaction rewrites small files
- * when {@code kvin.compaction.min-files} (default 32, minimum 2) is reached.
- * Files smaller than half {@code write.target-file-size-bytes} (default 128 MiB)
- * are eligible; merged output rolls at the target size. Existing snapshots and
- * readers retain their original files. Compaction failures are logged and thrown
- * to the caller, but the preceding append remains committed.</p>
+ * URI-based KVIN facade composing a numeric record store and a URI-ID store.
+ * The location constructors own their components; injected components remain
+ * owned by the caller. ID mappings are flushed before records are committed.
  */
 public class KvinIceberg implements Kvin {
-	private static final Logger log = LoggerFactory.getLogger(KvinIceberg.class);
-
 	private static final int BATCH_SIZE = 8192;
-	private static final int MAX_COMMIT_RETRIES = 5;
-	private static final int ID_CACHE_SIZE = 250_000;
-	private static final String COMPACTION_MIN_FILES = "kvin.compaction.min-files";
-	private static final int DEFAULT_COMPACTION_MIN_FILES = 32;
-	private static final long DEFAULT_COMPACTION_TARGET_SIZE = 128L * 1024 * 1024;
-	private static final int COMPACTION_MAX_INPUT_FILES = 128;
-
-	private static final PartitionSpec SPEC = PartitionSpec.unpartitioned();
-
-	private static final Schema ID_SCHEMA = new Schema(Types.NestedField.required(1, "id", Types.LongType.get()), Types.NestedField.required(2, "value", Types.StringType.get()));
-
-	private static final Schema SCHEMA = new Schema(Types.NestedField.required(1, "itemId", Types.LongType.get()), Types.NestedField.required(2, "contextId", Types.LongType.get()), Types.NestedField.required(3, "propertyId", Types.LongType.get()), Types.NestedField.required(4, "time", Types.LongType.get()), Types.NestedField.required(5, "seqNr", Types.IntegerType.get()), Types.NestedField.required(6, "first", Types.BooleanType.get()), Types.NestedField.optional(7, "valueInt", Types.IntegerType.get()), Types.NestedField.optional(8, "valueLong", Types.LongType.get()), Types.NestedField.optional(9, "valueFloat", Types.FloatType.get()), Types.NestedField.optional(10, "valueDouble", Types.DoubleType.get()), Types.NestedField.optional(11, "valueString", Types.StringType.get()), Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()), Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
-
-	private static final SortOrder SORT_ORDER = configureSortOrder(SortOrder.builderFor(SCHEMA)).build();
-
-	private static final Comparator<org.apache.iceberg.data.Record> ORDER = Comparator.comparingLong((org.apache.iceberg.data.Record r) -> (Long) r.get(0)).thenComparingLong(r -> (Long) r.get(1)).thenComparingLong(r -> (Long) r.get(2)).thenComparing((a, b) -> Long.compare((Long) b.get(3), (Long) a.get(3))).thenComparing((a, b) -> Integer.compare((Integer) b.get(4), (Integer) a.get(4)));
-
-	private static final Comparator<KvinRow> ROW_ORDER = Comparator.comparingLong(KvinRow::itemId).thenComparingLong(KvinRow::contextId).thenComparingLong(KvinRow::propertyId).thenComparing((a, b) -> Long.compare(b.time(), a.time())).thenComparing((a, b) -> Integer.compare(b.seqNr(), a.seqNr()));
-
-	private final Path root;
-	private final Table table;
-	private final IdTable[] ids = new IdTable[3];
+	private final KvinRecordStore recordStore;
+	private final IdStore idStore;
+	private final boolean owned;
 
 	public KvinIceberg(String archiveLocation) {
 		this(archiveLocation, null);
 	}
 
 	public KvinIceberg(String archiveLocation, Duration retentionPeriod) {
-		this.root = Path.of(archiveLocation).toAbsolutePath().normalize();
-
 		if (retentionPeriod != null) {
 			throw new UnsupportedOperationException("Iceberg retention cleanup is not implemented");
 		}
-
+		IcebergRecordStore records = new IcebergRecordStore(archiveLocation);
 		try {
-			Files.createDirectories(root);
-
-			String location = root.resolve("iceberg").toString();
-			HadoopTables tables = new HadoopTables(new Configuration());
-			boolean existing = Files.exists(root.resolve("iceberg/metadata"));
-
-			if (existing) {
-				table = tables.load(location);
-
-				if (!table.schema().sameSchema(SCHEMA) || !table.spec().isUnpartitioned()) {
-					throw new IllegalStateException("Incompatible Iceberg table at " + location);
-				}
-			} else {
-				if (Files.exists(root.resolve("metadata"))) {
-					throw new IllegalArgumentException("Existing KvinParquet archive cannot be opened as KvinIceberg: " + root);
-				}
-
-				table = tables.create(SCHEMA, SPEC, SORT_ORDER, tableProperties(), location);
-			}
-
-			enableManifestCaching(table);
-
-			String[] names = {"items", "contexts", "properties"};
-
-			for (int i = 0; i < ids.length; i++) {
-				Path path = root.resolve("iceberg-ids").resolve(names[i]);
-
-				if (Files.exists(path.resolve("metadata"))) {
-					ids[i] = new IdTable(tables.load(path.toString()));
-
-					if (!ids[i].table.schema().sameSchema(ID_SCHEMA) || !ids[i].table.spec().isUnpartitioned()) {
-						throw new IllegalStateException("Incompatible Iceberg ID table at " + path);
-					}
-				} else {
-					if (existing && table.currentSnapshot() != null) {
-						throw new IOException("Missing Iceberg ID table at " + path);
-					}
-
-					ids[i] = new IdTable(tables.create(ID_SCHEMA, SPEC, tableProperties(), path.toString()));
-				}
-
-				enableManifestCaching(ids[i].table);
-			}
-
-			if (!table.sortOrder().sameOrder(SORT_ORDER)) {
-				configureSortOrder(table.replaceSortOrder()).commit();
-			}
-		} catch (IOException e) {
-			throw new UncheckedIOException("Unable to initialize Iceberg store at " + root, e);
+			idStore = new IcebergIdStore(archiveLocation, records.hasSnapshot());
+		} catch (RuntimeException e) {
+			records.close();
+			throw e;
 		}
+		recordStore = records;
+		owned = true;
 	}
 
-	private static <T extends SortOrderBuilder<T>> T configureSortOrder(T builder) {
-		return builder.asc("itemId").asc("contextId").asc("propertyId").desc("time").desc("seqNr");
+	/**
+	 * Composes caller-owned stores. Closing this facade does not close either store.
+	 */
+	public KvinIceberg(KvinRecordStore recordStore, IdStore idStore) {
+		this.recordStore = Objects.requireNonNull(recordStore);
+		this.idStore = Objects.requireNonNull(idStore);
+		owned = false;
 	}
 
-	private static Map<String, String> tableProperties() {
-		return Map.of(TableProperties.DEFAULT_FILE_FORMAT, FileFormat.PARQUET.name(), TableProperties.FORMAT_VERSION, "2", TableProperties.PARQUET_COMPRESSION, "zstd");
+	public KvinRecordStore getRecordStore() {
+		return recordStore;
 	}
 
-	private static void enableManifestCaching(Table table) {
-		Map<String, String> properties = new HashMap<>(table.io().properties());
-		properties.put(CatalogProperties.IO_MANIFEST_CACHE_ENABLED, "true");
-		table.io().initialize(properties);
+	public IdStore getIdStore() {
+		return idStore;
 	}
 
-	private long id(int kind, URI uri) {
-		return ids[kind].id(uri);
-	}
-
-	private final class IdTable {
-		final Table table;
-
-		final Cache<URI, Long> forward = CacheBuilder.newBuilder().maximumSize(ID_CACHE_SIZE).build();
-
-		final Cache<Long, URI> reverse = CacheBuilder.newBuilder().maximumSize(ID_CACHE_SIZE).build();
-
-		long nextId;
-		boolean nextIdInitialized;
-
-		IdTable(Table table) {
-			this.table = table;
+	private Map<URI, Long> ids(List<URI> uris, IdKind kind, boolean create) {
+		if (idStore instanceof IcebergIdStore iceberg) {
+			return iceberg.resolveIds(uris, kind, create);
 		}
-
-		void refresh() {
-			table.refresh();
-
-			/*
-			 * A different process may have appended ID mappings. We retain cached
-			 * mappings but calculate the high-water mark again only if new IDs must
-			 * be assigned during the current put operation.
-			 */
-			nextIdInitialized = false;
-		}
-
-		synchronized void ensureNextId() {
-			if (nextIdInitialized) {
-				return;
-			}
-
-			final long[] max = {0};
-
-			scan(Expressions.alwaysTrue(), row -> max[0] = Math.max(max[0], (Long) row.get(0)));
-
-			nextId = max[0];
-			nextIdInitialized = true;
-		}
-
-		long id(URI uri) {
-			Long cached = forward.getIfPresent(uri);
-			if (cached != null) {
-				return cached;
-			}
-
-			return resolveIds(List.of(uri), false).getOrDefault(uri, 0L);
-		}
-
-		Map<URI, Long> resolveIds(List<URI> uris) {
-			return resolveIds(uris, true);
-		}
-
-		private Map<URI, Long> resolveIds(List<URI> uris, boolean refresh) {
-			Map<URI, Long> result = new HashMap<>();
-			Map<String, URI> missing = new HashMap<>();
-			for (URI uri : uris) {
-				Long cached = forward.getIfPresent(uri);
-				if (cached == null) {
-					missing.put(uri.toString(), uri);
-				} else {
-					result.put(uri, cached);
-				}
-			}
-
-			if (!missing.isEmpty()) {
-				if (refresh) {
-					table.refresh();
-				}
-				scan(Expressions.in("value", missing.keySet()), row -> {
-					URI uri = missing.get(row.get(1).toString());
-					if (uri == null) {
-						return;
-					}
-					long found = (Long) row.get(0);
-					Long previous = result.put(uri, found);
-					if (previous != null && previous != found) {
-						throw new IllegalStateException("Duplicate Iceberg URI mapping for " + uri);
-					}
-				});
-				result.forEach((uri, found) -> {
-					forward.put(uri, found);
-					reverse.put(found, uri);
-				});
-			}
-
-			return result;
-		}
-
-		Map<Long, URI> resolveUris(Set<Long> requestedIds) {
-			Map<Long, URI> result = new HashMap<>();
-			Set<Long> missing = new HashSet<>();
-			for (long id : requestedIds) {
-				URI cached = reverse.getIfPresent(id);
-				if (cached == null) {
-					missing.add(id);
-				} else {
-					result.put(id, cached);
-				}
-			}
-
-			if (!missing.isEmpty()) {
-				table.refresh();
-				scan(Expressions.in("id", missing), row -> {
-					long id = (Long) row.get(0);
-					if (!missing.contains(id)) {
-						return;
-					}
-					URI found = URIs.createURI(row.get(1).toString());
-					URI previous = result.put(id, found);
-					if (previous != null && !previous.equals(found)) {
-						throw new IllegalStateException("Duplicate Iceberg ID mapping for " + id);
-					}
-				});
-				for (long id : missing) {
-					if (!result.containsKey(id)) {
-						throw new IllegalStateException("Unknown Iceberg URI ID: " + id);
-					}
-				}
-				result.forEach((id, uri) -> {
-					reverse.put(id, uri);
-					forward.put(uri, id);
-				});
-			}
-
-			return result;
-		}
-
-		void scan(Expression filter, java.util.function.Consumer<org.apache.iceberg.data.Record> consumer) {
-			try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter).planFiles()) {
-				for (FileScanTask task : tasks) {
-					if (!task.deletes().isEmpty()) {
-						throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg ID reads");
-					}
-
-					try (CloseableIterable<org.apache.iceberg.data.Record> rows = Parquet.read(table.io().newInputFile(task.file().location())).split(task.start(), task.length()).project(ID_SCHEMA).filter(filter).createReaderFunc(schema -> GenericParquetReaders.buildReader(ID_SCHEMA, schema)).build()) {
-						for (org.apache.iceberg.data.Record row : rows) {
-							consumer.accept(row);
-						}
-					}
-				}
-			} catch (IOException e) {
-				throw new UncheckedIOException("Unable to read Iceberg ID table", e);
-			}
-		}
-
-		void append(Map<URI, Long> mappings) throws IOException {
-			if (mappings.isEmpty()) {
-				return;
-			}
-
-			String path = root.resolve("iceberg-ids/data/" + UUID.randomUUID() + ".parquet").toString();
-
-			Files.createDirectories(Path.of(path).getParent());
-
-			var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table).writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0).createWriterFunc(message -> GenericParquetWriter.create(ID_SCHEMA, message)).<org.apache.iceberg.data.Record>build();
-
-			DataWriter<org.apache.iceberg.data.Record> writer = new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null);
-
-			try (writer) {
-				for (Map.Entry<URI, Long> entry : mappings.entrySet()) {
-					GenericRecord row = GenericRecord.create(ID_SCHEMA);
-					row.set(0, entry.getValue());
-					row.set(1, entry.getKey().toString());
-					writer.write(row);
-				}
-			}
-
-			commitIdAppend(writer.toDataFile());
-
-			for (Map.Entry<URI, Long> entry : mappings.entrySet()) {
-				forward.put(entry.getKey(), entry.getValue());
-				reverse.put(entry.getValue(), entry.getKey());
-				nextId = Math.max(nextId, entry.getValue());
-			}
-
-			nextIdInitialized = true;
-		}
-
-		private void commitIdAppend(DataFile file) {
-			for (int attempt = 1; attempt <= MAX_COMMIT_RETRIES; attempt++) {
-				try {
-					table.refresh();
-					table.newAppend().appendFile(file).commit();
-					return;
-				} catch (CommitFailedException e) {
-					if (attempt == MAX_COMMIT_RETRIES) {
-						throw e;
-					}
-
-					log.warn("Iceberg ID append conflicted; retrying ({}/{})", attempt, MAX_COMMIT_RETRIES);
+		Map<URI, Long> result = new HashMap<>();
+		for (URI uri : uris) {
+			if (!result.containsKey(uri)) {
+				long id = idStore.getId(uri, kind, create);
+				if (id != 0) {
+					result.put(uri, id);
 				}
 			}
 		}
-	}
-
-	private long assign(int kind, URI uri, Map<URI, Long>[] pending) {
-		Long staged = pending[kind].get(uri);
-		if (staged != null) {
-			return staged;
-		}
-
-		long existing = id(kind, uri);
-		if (existing != 0) {
-			return existing;
-		}
-
-		ids[kind].ensureNextId();
-
-		long next = ++ids[kind].nextId;
-		pending[kind].put(uri, next);
-
-		return next;
-	}
-
-	private void appendMappings(Map<URI, Long>[] pending) throws IOException {
-		for (int kind = 0; kind < ids.length; kind++) {
-			ids[kind].append(pending[kind]);
-			pending[kind].clear();
-		}
+		return result;
 	}
 
 	@Override
@@ -419,388 +84,80 @@ public class KvinIceberg implements Kvin {
 
 	@Override
 	public synchronized void put(Iterable<KvinTuple> tuples) {
-		List<GenericRecord> batch = new ArrayList<>(BATCH_SIZE);
-		List<DataFile> files = new ArrayList<>();
-		List<String> paths = new ArrayList<>();
+		recordStore.put(() -> new Iterator<>() {
+			final Iterator<KvinTuple> source = tuples.iterator();
+			Iterator<KvinRecord> batch = Collections.emptyIterator();
 
-		@SuppressWarnings("unchecked") Map<URI, Long>[] pending = new Map[]{new HashMap<>(), new HashMap<>(), new HashMap<>()};
-
-		boolean committed = false;
-
-		try (FileChannel channel = FileChannel.open(root.resolve("iceberg-ids.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE); var lock = channel.lock()) {
-
-			for (IdTable idTable : ids) {
-				idTable.refresh();
-			}
-
-			for (KvinTuple tuple : tuples) {
-				GenericRecord row = GenericRecord.create(SCHEMA);
-
-				row.set(0, assign(0, tuple.item, pending));
-				row.set(1, assign(1, tuple.context == null ? DEFAULT_CONTEXT : tuple.context, pending));
-				row.set(2, assign(2, tuple.property, pending));
-				row.set(3, tuple.time);
-				row.set(4, tuple.seqNr);
-				row.set(5, false);
-
-				setValue(row, tuple.value);
-				batch.add(row);
-
-				if (batch.size() == BATCH_SIZE) {
-					appendMappings(pending);
-					writeBatch(batch, files, paths);
-				}
-			}
-
-			if (!batch.isEmpty()) {
-				appendMappings(pending);
-				writeBatch(batch, files, paths);
-			}
-
-			if (!files.isEmpty()) {
-				commitAppend(files);
-				committed = true;
-				compactSmallFiles();
-			}
-		} catch (CommitStateUnknownException e) {
-			// A possibly committed file must never be removed.
-			throw e;
-		} catch (IOException e) {
-			if (!committed) {
-				cleanup(paths);
-			}
-
-			throw new UncheckedIOException("Unable to write Iceberg data", e);
-		} catch (RuntimeException e) {
-			if (!committed) {
-				cleanup(paths);
-			}
-
-			throw e;
-		}
-	}
-
-	private void commitAppend(List<DataFile> files) throws IOException {
-		for (int attempt = 1; attempt <= MAX_COMMIT_RETRIES; attempt++) {
-			try {
-				table.refresh();
-
-				var append = table.newAppend();
-				files.forEach(append::appendFile);
-				append.commit();
-
-				return;
-			} catch (CommitFailedException e) {
-				if (attempt == MAX_COMMIT_RETRIES) {
-					throw e;
-				}
-
-				log.warn("Iceberg append conflicted; retrying ({}/{})", attempt, MAX_COMMIT_RETRIES);
-			}
-		}
-	}
-
-	private void compactSmallFiles() throws IOException {
-		List<String> paths = new ArrayList<>();
-		try {
-			table.refresh();
-			int minimum = Integer.parseInt(table.properties().getOrDefault(COMPACTION_MIN_FILES, Integer.toString(DEFAULT_COMPACTION_MIN_FILES)));
-			long targetSize = Long.parseLong(table.properties().getOrDefault(TableProperties.WRITE_TARGET_FILE_SIZE_BYTES, Long.toString(DEFAULT_COMPACTION_TARGET_SIZE)));
-			if (minimum < 2 || targetSize <= 0) {
-				throw new IllegalArgumentException("Iceberg compaction requires kvin.compaction.min-files >= 2 and a positive write.target-file-size-bytes");
-			}
-			if (table.currentSnapshot() == null || !table.sortOrder().sameOrder(SORT_ORDER)) {
-				return;
-			}
-
-			long snapshotId = table.currentSnapshot().snapshotId();
-			Map<String, DataFile> candidates = new LinkedHashMap<>();
-			int maximum = Math.max(minimum, COMPACTION_MAX_INPUT_FILES);
-			try (CloseableIterable<FileScanTask> tasks = table.newScan().useSnapshot(snapshotId).planFiles()) {
-				for (FileScanTask task : tasks) {
-					if (!task.deletes().isEmpty()) {
-						throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg compaction");
+			@Override
+			public boolean hasNext() {
+				if (!batch.hasNext() && source.hasNext()) {
+					List<KvinTuple> input = new ArrayList<>(BATCH_SIZE);
+					while (input.size() < BATCH_SIZE && source.hasNext()) {
+						input.add(source.next());
 					}
-					DataFile file = task.file();
-					SortOrder order = table.sortOrders().get(file.sortOrderId());
-					if (candidates.size() < maximum && file.format() == FileFormat.PARQUET
-							&& file.specId() == table.spec().specId() && order != null && order.sameOrder(SORT_ORDER)
-							&& file.fileSizeInBytes() < targetSize / 2) {
-						candidates.putIfAbsent(file.location(), file);
-					}
+					Map<URI, Long> items = ids(input.stream().map(t -> t.item).distinct().toList(), IdKind.ITEM, true);
+					Map<URI, Long> contexts = ids(input.stream().map(t -> context(t.context)).distinct().toList(), IdKind.CONTEXT, true);
+					Map<URI, Long> properties = ids(input.stream().map(t -> t.property).distinct().toList(), IdKind.PROPERTY, true);
+					idStore.flush();
+					batch = input.stream().map(t -> new KvinRecord(items.get(t.item), contexts.get(context(t.context)),
+							properties.get(t.property), t.time, t.seqNr, t.value)).iterator();
 				}
-			}
-			if (candidates.size() < minimum) {
-				return;
+				return batch.hasNext();
 			}
 
-			Set<DataFile> replacements = mergeCompactionFiles(candidates.values(), targetSize, paths);
-			if (replacements.size() >= candidates.size()) {
-				cleanup(paths);
-				return;
-			}
-			// Validate against exactly the snapshot read: concurrent appends are safe,
-			// but replaced inputs and newly added row-level deletes must conflict.
-			table.newRewrite().validateFromSnapshot(snapshotId)
-					.rewriteFiles(new LinkedHashSet<>(candidates.values()), replacements).commit();
-		} catch (CommitStateUnknownException e) {
-			log.error("Iceberg compaction commit state is unknown; appended tuples remain committed and output files are retained", e);
-			throw e;
-		} catch (IOException | RuntimeException e) {
-			cleanup(paths);
-			log.error("Iceberg compaction failed after tuples were appended; the append remains committed", e);
-			throw e;
-		}
-	}
-
-	private Set<DataFile> mergeCompactionFiles(Iterable<DataFile> files, long targetSize, List<String> paths) throws IOException {
-		Set<DataFile> replacements = new LinkedHashSet<>();
-		PriorityQueue<CompactionCursor> queue = new PriorityQueue<>((a, b) -> ORDER.compare(a.row, b.row));
-		try (CloseableGroup readers = new CloseableGroup()) {
-			for (DataFile file : files) {
-				CloseableIterable<org.apache.iceberg.data.Record> rows = Parquet.read(table.io().newInputFile(file.location()))
-						.project(SCHEMA).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build();
-				readers.addCloseable(rows);
-				CompactionCursor cursor = new CompactionCursor(rows.iterator());
-				if (cursor.advance()) {
-					queue.add(cursor);
+			@Override
+			public KvinRecord next() {
+				if (!hasNext()) {
+					throw new java.util.NoSuchElementException();
 				}
+				return batch.next();
 			}
-			while (!queue.isEmpty()) {
-				DataWriter<org.apache.iceberg.data.Record> writer = newCompactionWriter(targetSize, paths);
-				long item = 0, context = 0, property = 0;
-				boolean first = true;
-				try (writer) {
-					do {
-						CompactionCursor cursor = queue.remove();
-						org.apache.iceberg.data.Record row = cursor.row;
-						long nextItem = (Long) row.get(0), nextContext = (Long) row.get(1), nextProperty = (Long) row.get(2);
-						row.set(5, first || nextItem != item || nextContext != context || nextProperty != property);
-						writer.write(row);
-						item = nextItem;
-						context = nextContext;
-						property = nextProperty;
-						first = false;
-						if (cursor.advance()) {
-							queue.add(cursor);
-						}
-					} while (!queue.isEmpty() && writer.length() < targetSize);
-				}
-				replacements.add(writer.toDataFile());
-			}
-		}
-		return replacements;
+		});
 	}
 
-	private DataWriter<org.apache.iceberg.data.Record> newCompactionWriter(long targetSize, List<String> paths) throws IOException {
-		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet").toString();
-		paths.add(path);
-		Files.createDirectories(Path.of(path).getParent());
-		var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table)
-				.set(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, Long.toString(Math.min(targetSize, 8L * 1024 * 1024)))
-				.writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
-				.createWriterFunc(message -> GenericParquetWriter.create(SCHEMA, message)).<org.apache.iceberg.data.Record>build();
-		return new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null, table.sortOrder());
-	}
-
-	private static final class CompactionCursor {
-		private final CloseableIterator<org.apache.iceberg.data.Record> iterator;
-		private org.apache.iceberg.data.Record row;
-
-		private CompactionCursor(CloseableIterator<org.apache.iceberg.data.Record> iterator) {
-			this.iterator = iterator;
-		}
-
-		private boolean advance() {
-			if (!iterator.hasNext()) {
-				return false;
-			}
-			row = iterator.next();
-			return true;
-		}
-	}
-
-	private static void setValue(GenericRecord row, Object value) throws IOException {
-		if (value instanceof Integer) {
-			row.set(6, value);
-		} else if (value instanceof Long) {
-			row.set(7, value);
-		} else if (value instanceof Float) {
-			row.set(8, value);
-		} else if (value instanceof Double) {
-			row.set(9, value);
-		} else if (value instanceof String) {
-			row.set(10, value);
-		} else if (value instanceof Boolean) {
-			row.set(11, value);
-		} else if (value instanceof byte[] bytes) {
-			row.set(12, ByteBuffer.wrap(bytes));
-		} else if (value instanceof ByteBuffer bytes) {
-			row.set(12, bytes.duplicate());
-		} else if (value instanceof Record || value instanceof URI || value instanceof BigInteger || value instanceof BigDecimal || value instanceof Short || value instanceof Object[]) {
-			row.set(12, ByteBuffer.wrap(Records.encodeRecord(value)));
-		} else if (value != null) {
-			throw new IllegalArgumentException("Unsupported KVIN value type: " + value.getClass());
-		}
-	}
-
-	private void cleanup(List<String> paths) {
-		for (String path : paths) {
-			try {
-				Files.deleteIfExists(Path.of(path));
-			} catch (IOException e) {
-				log.warn("Unable to remove uncommitted Iceberg file {}", path, e);
-			}
-		}
-	}
-
-	private void writeBatch(List<GenericRecord> batch, List<DataFile> files, List<String> paths) throws IOException {
-		batch.sort(ORDER);
-
-		for (int i = 0; i < batch.size(); i++) {
-			GenericRecord current = batch.get(i);
-
-			boolean first = i == 0 || !current.get(0).equals(batch.get(i - 1).get(0)) || !current.get(1).equals(batch.get(i - 1).get(1)) || !current.get(2).equals(batch.get(i - 1).get(2));
-
-			current.set(5, first);
-		}
-
-		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet").toString();
-
-		paths.add(path);
-		Files.createDirectories(Path.of(path).getParent());
-
-		var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table).writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0).createWriterFunc(message -> GenericParquetWriter.create(SCHEMA, message)).<org.apache.iceberg.data.Record>build();
-
-		DataWriter<org.apache.iceberg.data.Record> writer = new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null, table.sortOrder());
-
-		try (writer) {
-			batch.forEach(writer::write);
-		}
-
-		files.add(writer.toDataFile());
-		batch.clear();
-	}
-
-	public synchronized void createBranch(String branchName) {
-		table.refresh();
-
-		if (table.currentSnapshot() == null) {
-			throw new IllegalStateException("Cannot create a branch without a snapshot");
-		}
-
-		table.manageSnapshots().createBranch(branchName, table.currentSnapshot().snapshotId()).commit();
+	private static URI context(URI context) {
+		return context == null ? DEFAULT_CONTEXT : context;
 	}
 
 	@Override
 	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long limit) {
-		return fetchRows(List.of(item), property == null ? List.of() : List.of(property), context, null, null, limit);
+		return fetchRows(List.of(item), property == null ? List.of() : List.of(property), context, null, null, limit, 0, null);
 	}
 
 	@Override
-	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin, long limit, long interval, String op) {
+	public IExtendedIterator<KvinTuple> fetch(URI item, URI property, URI context, long end, long begin,
+			long limit, long interval, String op) {
 		return fetch(List.of(item), property == null ? List.of() : List.of(property), context, end, begin, limit, interval, op);
 	}
 
 	@Override
-	public IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end, long begin, long limit, long interval, String op) {
-		IExtendedIterator<KvinTuple> rows = fetchRows(items, properties, context, end, begin, op == null ? limit : 0);
-
-		if (op == null) {
-			return rows;
-		}
-
-		return new AggregatingIterator<>(rows, interval, op.trim().toLowerCase(), limit) {
-			@Override
-			protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
-				return new KvinTuple(item, property, context, time, seqNr, value);
-			}
-		};
+	public IExtendedIterator<KvinTuple> fetch(List<URI> items, List<URI> properties, URI context, long end,
+			long begin, long limit, long interval, String op) {
+		return fetchRows(items, properties, context, end, begin, limit, interval, op);
 	}
 
-	private synchronized IExtendedIterator<KvinTuple> fetchRows(List<URI> items, List<URI> properties, URI context, Long end, Long begin, long limit) {
+	private synchronized IExtendedIterator<KvinTuple> fetchRows(List<URI> items, List<URI> properties, URI context,
+			Long end, Long begin, long limit, long interval, String op) {
 		if (items.isEmpty()) {
 			return NiceIterator.emptyIterator();
 		}
-
-		Map<Long, URI> itemUris = new HashMap<>();
-		ids[0].resolveIds(items).forEach((uri, id) -> itemUris.put(id, uri));
-		Set<Long> itemIds = itemUris.keySet();
-
-		URI requestedContext = context == null ? DEFAULT_CONTEXT : context;
-		long contextId = ids[1].resolveIds(List.of(requestedContext)).getOrDefault(requestedContext, 0L);
-
-		if (itemIds.isEmpty() || contextId == 0) {
+		Map<Long, URI> itemUris = reverse(ids(items, IdKind.ITEM, false));
+		URI requestedContext = context(context);
+		long contextId = idStore.getId(requestedContext, IdKind.CONTEXT, false);
+		if (itemUris.isEmpty() || contextId == 0) {
 			return NiceIterator.emptyIterator();
 		}
-
-		Map<Long, URI> requestedPropertyUris = new HashMap<>();
-		ids[2].resolveIds(properties).forEach((uri, id) -> requestedPropertyUris.put(id, uri));
-		Set<Long> propertyIds = requestedPropertyUris.keySet();
-
-		if (!properties.isEmpty() && propertyIds.isEmpty()) {
+		Map<Long, URI> propertyUris = reverse(ids(properties, IdKind.PROPERTY, false));
+		if (!properties.isEmpty() && propertyUris.isEmpty()) {
 			return NiceIterator.emptyIterator();
 		}
-
-		Expression filter = Expressions.and(Expressions.in("itemId", itemIds), Expressions.equal("contextId", contextId));
-
-		if (!properties.isEmpty()) {
-			filter = Expressions.and(filter, Expressions.in("propertyId", propertyIds));
-		}
-
-		if (begin != null) {
-			filter = Expressions.and(filter, Expressions.greaterThanOrEqual("time", begin));
-		}
-
-		if (end != null) {
-			filter = Expressions.and(filter, Expressions.lessThanOrEqual("time", end));
-		}
-
-		table.refresh();
-
-		PriorityQueue<RowCursor> cursors = new PriorityQueue<>(Comparator.comparing(cursor -> cursor.row, ROW_ORDER));
-
-		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter).planFiles()) {
-			for (FileScanTask task : tasks) {
-				if (!task.deletes().isEmpty()) {
-					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
-				}
-
-				RowCursor cursor = new RowCursor(table, task, filter, limit > 0);
-
-				try {
-					if (cursor.advance()) {
-						cursors.add(cursor);
-					} else {
-						cursor.close();
-					}
-				} catch (RuntimeException e) {
-					cursor.close();
-					throw e;
-				}
-			}
-		} catch (RuntimeException | IOException e) {
-			closeCursors(cursors);
-
-			if (e instanceof IOException ioException) {
-				throw new UncheckedIOException(ioException);
-			}
-
-			throw (RuntimeException) e;
-		}
-
-		long requestedSeries = properties.isEmpty() ? 0 : (long) itemIds.size() * propertyIds.size();
-
+		List<Long> itemIds = new ArrayList<>(itemUris.keySet());
+		List<Long> propertyIds = new ArrayList<>(propertyUris.keySet());
+		IExtendedIterator<KvinRecord> records = end == null
+				? recordStore.fetch(itemIds.getFirst(), propertyIds.isEmpty() ? null : propertyIds.getFirst(), contextId, limit)
+				: recordStore.fetch(itemIds, propertyIds, contextId, end, begin, limit, interval, op);
 		return new NiceIterator<>() {
-			KvinRow previous;
-			long seriesCount;
-			long completedSeries;
-			long seriesItemId;
-			long seriesPropertyId;
-			URI seriesItem;
-			URI seriesProperty;
-			// Advance only when another tuple is requested, so a satisfied limit reads no extra row.
-			RowCursor pending;
+			final IExtendedIterator<KvinRecord> base = records;
 			KvinTuple next;
 			boolean closed;
 
@@ -812,108 +169,45 @@ public class KvinIceberg implements Kvin {
 				if (closed) {
 					return false;
 				}
-
 				try {
-					while (pending != null || !cursors.isEmpty()) {
-						if (pending != null) {
-							if (pending.advance()) {
-								cursors.add(pending);
-							} else {
-								pending.close();
-							}
-							pending = null;
-						}
-						if (cursors.isEmpty()) {
-							break;
-						}
-						pending = cursors.poll();
-						KvinRow row = pending.row;
-
-						long itemId = row.itemId();
-						long propertyId = row.propertyId();
-						long time = row.time();
-						int seqNr = row.seqNr();
-
-						if (!itemIds.contains(itemId) || row.contextId() != contextId || (!properties.isEmpty() && !propertyIds.contains(propertyId)) || (begin != null && time < begin) || (end != null && time > end)) {
-							continue;
-						}
-
-						if (previous != null && ROW_ORDER.compare(previous, row) == 0) {
-							continue;
-						}
-						if (seriesItem == null || seriesItemId != itemId || seriesPropertyId != propertyId) {
-							seriesItemId = itemId;
-							seriesPropertyId = propertyId;
-							seriesCount = 0;
-							seriesItem = itemUris.get(itemId);
-							seriesProperty = requestedPropertyUris.get(propertyId);
-							if (seriesProperty == null) {
-								seriesProperty = ids[2].reverse.getIfPresent(propertyId);
-							}
-							if (seriesProperty == null) {
-								Set<Long> headProperties = new HashSet<>();
-								headProperties.add(propertyId);
-								for (RowCursor cursor : cursors) {
-									KvinRow head = cursor.row;
-									if (itemIds.contains(head.itemId()) && head.contextId() == contextId
-											&& (begin == null || head.time() >= begin) && (end == null || head.time() <= end)) {
-										headProperties.add(head.propertyId());
-									}
-								}
-								seriesProperty = ids[2].resolveUris(headProperties).get(propertyId);
-							}
-						}
-						if (limit > 0 && seriesCount >= limit) {
-							continue;
-						}
-
-						previous = row;
-						if (limit > 0 && ++seriesCount == limit) {
-							completedSeries++;
-							pending.skipThrough(itemId, contextId, propertyId);
-							for (RowCursor cursor : cursors) {
-								cursor.skipThrough(itemId, contextId, propertyId);
-							}
-						}
-
-						Object value = row.value();
-
-						if (value instanceof ByteBuffer bytes) {
-							value = Records.decodeRecord(bytes.duplicate());
-						}
-
-						next = new KvinTuple(seriesItem, seriesProperty, requestedContext, time, seqNr, value);
-						if (limit > 0 && requestedSeries > 0 && completedSeries == requestedSeries) {
-							close();
-						}
-
-						return true;
+					if (!base.hasNext()) {
+						close();
+						return false;
 					}
-
-					close();
-					return false;
-				} catch (IOException | RuntimeException e) {
-					next = null;
+					KvinRecord row = base.next();
+					URI property = propertyUris.get(row.propertyId());
+					if (property == null && idStore instanceof IcebergIdStore iceberg) {
+						property = iceberg.cachedUri(row.propertyId(), IdKind.PROPERTY);
+						if (property == null) {
+							Set<Long> heads = base instanceof IcebergRecordStore.RecordIterator reader
+									? reader.headProperties() : new HashSet<>();
+							heads.add(row.propertyId());
+							property = iceberg.resolveUris(heads, IdKind.PROPERTY).get(row.propertyId());
+						}
+					}
+					if (property == null) {
+						property = idStore.getUri(row.propertyId(), IdKind.PROPERTY);
+					}
+					next = new KvinTuple(itemUris.get(row.itemId()), property, requestedContext,
+							row.time(), row.seqNr(), row.value());
+					return true;
+				} catch (RuntimeException e) {
 					try {
 						close();
-					} catch (RuntimeException closeFailure) {
-						if (e != closeFailure) {
-							e.addSuppressed(closeFailure);
+					} catch (RuntimeException failure) {
+						if (e != failure) {
+							e.addSuppressed(failure);
 						}
 					}
-					if (e instanceof IOException ioException) {
-						throw new UncheckedIOException(ioException);
-					}
-					throw (RuntimeException) e;
+					throw e;
 				}
 			}
 
 			@Override
 			public KvinTuple next() {
 				if (!hasNext()) {
-					throw new NoSuchElementException();
+					throw new java.util.NoSuchElementException();
 				}
-
 				KvinTuple result = next;
 				next = null;
 				return result;
@@ -923,271 +217,60 @@ public class KvinIceberg implements Kvin {
 			public void close() {
 				if (!closed) {
 					closed = true;
-					if (pending != null) {
-						cursors.add(pending);
-						pending = null;
-					}
-					closeCursors(cursors);
+					base.close();
 				}
 			}
 		};
 	}
 
-	private static void closeCursors(PriorityQueue<RowCursor> cursors) {
-		RuntimeException failure = null;
-
-		while (!cursors.isEmpty()) {
-			try {
-				cursors.poll().close();
-			} catch (RuntimeException e) {
-				if (failure == null) {
-					failure = e;
-				} else if (failure != e) {
-					failure.addSuppressed(e);
-				}
-			}
-		}
-
-		if (failure != null) {
-			throw failure;
-		}
+	private static Map<Long, URI> reverse(Map<URI, Long> mappings) {
+		Map<Long, URI> result = new HashMap<>();
+		mappings.forEach((uri, id) -> result.put(id, uri));
+		return result;
 	}
 
 	@Override
-	public synchronized long delete(URI item, URI property, URI context, long end, long begin) {
-		if (property == null) {
+	public long delete(URI item, URI property, URI context, long end, long begin) {
+		long itemId = idStore.getId(item, IdKind.ITEM, false);
+		long contextId = idStore.getId(context(context), IdKind.CONTEXT, false);
+		Long propertyId = property == null ? null : idStore.getId(property, IdKind.PROPERTY, false);
+		if (itemId == 0 || contextId == 0 || (propertyId != null && propertyId == 0)) {
 			return 0;
 		}
-
-		long itemId = id(0, item);
-		long propertyId = id(2, property);
-		long contextId = id(1, context == null ? DEFAULT_CONTEXT : context);
-
-		if (itemId == 0 || propertyId == 0 || contextId == 0) {
-			return 0;
-		}
-
-		long lower = Math.min(begin, end);
-		long upper = Math.max(begin, end);
-
-		Expression filter = Expressions.and(Expressions.and(Expressions.equal("itemId", itemId), Expressions.equal("contextId", contextId)), Expressions.and(Expressions.equal("propertyId", propertyId), Expressions.and(Expressions.greaterThanOrEqual("time", lower), Expressions.lessThanOrEqual("time", upper))));
-
-		table.refresh();
-
-		Map<String, DataFile> affectedFiles = new LinkedHashMap<>();
-
-		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter).planFiles()) {
-			for (FileScanTask task : tasks) {
-				if (!task.deletes().isEmpty()) {
-					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg deletes");
-				}
-
-				/*
-				 * A file can occur in multiple split tasks. A copy-on-write rewrite
-				 * must rewrite each complete data file exactly once.
-				 */
-				affectedFiles.putIfAbsent(task.file().location(), task.file());
-			}
-		} catch (IOException e) {
-			throw new UncheckedIOException("Unable to plan Iceberg delete", e);
-		}
-
-		if (affectedFiles.isEmpty()) {
-			return 0;
-		}
-
-		Set<DataFile> deleteFiles = new LinkedHashSet<>();
-		Set<DataFile> addFiles = new LinkedHashSet<>();
-		List<String> temporaryPaths = new ArrayList<>();
-		long deleted = 0;
-		boolean committed = false;
-
-		try {
-			for (DataFile file : affectedFiles.values()) {
-				List<GenericRecord> retained = new ArrayList<>();
-				long removedFromFile = 0;
-
-				try (CloseableIterable<org.apache.iceberg.data.Record> rows = Parquet.read(table.io().newInputFile(file.location())).project(SCHEMA).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build()) {
-					for (org.apache.iceberg.data.Record record : rows) {
-						KvinRow row = toKvinRow(record);
-
-						if (matchesDelete(row, itemId, propertyId, contextId, lower, upper)) {
-							removedFromFile++;
-						} else {
-							retained.add(toGenericRecord(row));
-						}
-					}
-				}
-
-				if (removedFromFile == 0) {
-					continue;
-				}
-
-				deleted += removedFromFile;
-				deleteFiles.add(file);
-
-				if (!retained.isEmpty()) {
-					List<DataFile> writtenFiles = new ArrayList<>();
-					writeBatch(retained, writtenFiles, temporaryPaths);
-					addFiles.addAll(writtenFiles);
-				}
-			}
-
-			if (deleteFiles.isEmpty()) {
-				return 0;
-			}
-
-			commitRewrite(deleteFiles, addFiles);
-			committed = true;
-
-			return deleted;
-		} catch (IOException e) {
-			cleanup(temporaryPaths);
-			throw new UncheckedIOException("Unable to delete Iceberg tuples", e);
-		} catch (RuntimeException e) {
-			cleanup(temporaryPaths);
-			throw e;
-		}
-	}
-
-	private void commitRewrite(Set<DataFile> deleteFiles, Set<DataFile> addFiles) {
-		for (int attempt = 1; attempt <= MAX_COMMIT_RETRIES; attempt++) {
-			try {
-				table.refresh();
-
-				table.newRewrite().rewriteFiles(deleteFiles, addFiles).commit();
-
-				return;
-			} catch (CommitFailedException e) {
-				if (attempt == MAX_COMMIT_RETRIES) {
-					throw e;
-				}
-
-				log.warn("Iceberg rewrite conflicted; retrying ({}/{})", attempt, MAX_COMMIT_RETRIES);
-			}
-		}
-	}
-
-	private static boolean matchesDelete(KvinRow row, long itemId, long propertyId, long contextId, long begin, long end) {
-		return row.itemId() == itemId && row.propertyId() == propertyId && row.contextId() == contextId && row.time() >= begin && row.time() <= end;
-	}
-
-	private static GenericRecord toGenericRecord(KvinRow row) throws IOException {
-		GenericRecord record = GenericRecord.create(SCHEMA);
-
-		record.set(0, row.itemId());
-		record.set(1, row.contextId());
-		record.set(2, row.propertyId());
-		record.set(3, row.time());
-		record.set(4, row.seqNr());
-		record.set(5, false);
-
-		setValue(record, row.value());
-
-		return record;
-	}
-
-	private static KvinRow toKvinRow(org.apache.iceberg.data.Record record) {
-		Object value = null;
-
-		for (int i = 6; i < SCHEMA.columns().size(); i++) {
-			value = record.get(i);
-
-			if (value != null) {
-				break;
-			}
-		}
-
-		return new KvinRow((Long) record.get(0), (Long) record.get(1), (Long) record.get(2), (Long) record.get(3), (Integer) record.get(4), value);
-	}
-
-	private record KvinRow(long itemId, long contextId, long propertyId, long time, int seqNr, Object value) {
-	}
-
-	private static final class RowCursor implements AutoCloseable {
-		final CloseableIterable<org.apache.iceberg.data.Record> rows;
-		final CloseableIterator<org.apache.iceberg.data.Record> iterator;
-		KvinRow row;
-
-		RowCursor(Table table, FileScanTask task, Expression filter, boolean limited) {
-			if (!task.deletes().isEmpty()) {
-				throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
-			}
-
-			try {
-				this.rows = limited ? new SeriesSkippingReader(SCHEMA, task, filter)
-						: Parquet.read(table.io().newInputFile(task.file().location())).split(task.start(), task.length()).project(SCHEMA).filter(filter).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build();
-			} catch (IOException e) {
-				throw new UncheckedIOException("Unable to open Iceberg series reader", e);
-			}
-
-			this.iterator = rows.iterator();
-		}
-
-		void skipThrough(long item, long context, long property) {
-			if (rows instanceof SeriesSkippingReader reader) {
-				reader.skipThrough(item, context, property);
-			}
-		}
-
-		boolean advance() {
-			if (!iterator.hasNext()) {
-				return false;
-			}
-
-			row = toKvinRow(iterator.next());
-			return true;
-		}
-
-		@Override
-		public void close() {
-			try {
-				rows.close();
-			} catch (IOException e) {
-				throw new UncheckedIOException(e);
-			}
-		}
-	}
-
-	@Override
-	public synchronized IExtendedIterator<URI> properties(URI item, URI context) {
-		long itemId = ids[0].resolveIds(List.of(item)).getOrDefault(item, 0L);
-		URI requestedContext = context == null ? DEFAULT_CONTEXT : context;
-		long contextId = ids[1].resolveIds(List.of(requestedContext)).getOrDefault(requestedContext, 0L);
-		if (itemId == 0 || contextId == 0) {
-			return NiceIterator.emptyIterator();
-		}
-		Expression filter = Expressions.and(Expressions.equal("itemId", itemId),
-				Expressions.and(Expressions.equal("contextId", contextId), Expressions.equal("first", true)));
-		Schema projection = SCHEMA.select("itemId", "contextId", "propertyId", "first");
-		Set<Long> propertyIds = new TreeSet<>();
-		table.refresh();
-		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter).planFiles()) {
-			for (FileScanTask task : tasks) {
-				if (!task.deletes().isEmpty()) {
-					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
-				}
-				try (CloseableIterable<org.apache.iceberg.data.Record> rows = Parquet.read(
-						table.io().newInputFile(task.file().location())).split(task.start(), task.length())
-						.project(projection).filter(filter)
-						.createReaderFunc(schema -> GenericParquetReaders.buildReader(projection, schema)).build()) {
-					for (org.apache.iceberg.data.Record row : rows) {
-						if ((Long) row.get(0) == itemId && (Long) row.get(1) == contextId && (Boolean) row.get(3)) {
-							propertyIds.add((Long) row.get(2));
-						}
-					}
-				}
-			}
-		} catch (IOException e) {
-			throw new UncheckedIOException("Unable to read Iceberg properties", e);
-		}
-		Map<Long, URI> uris = ids[2].resolveUris(propertyIds);
-		return WrappedIterator.create(propertyIds.stream().map(uris::get).iterator());
+		return recordStore.delete(itemId, propertyId, contextId, end, begin);
 	}
 
 	@Override
 	public boolean delete(URI item, URI context) {
-		return false;
+		long itemId = idStore.getId(item, IdKind.ITEM, false);
+		long contextId = idStore.getId(context(context), IdKind.CONTEXT, false);
+		return itemId != 0 && contextId != 0 && recordStore.delete(itemId, contextId);
+	}
+
+	@Override
+	public IExtendedIterator<URI> properties(URI item, URI context) {
+		long itemId = idStore.getId(item, IdKind.ITEM, false);
+		long contextId = idStore.getId(context(context), IdKind.CONTEXT, false);
+		if (itemId == 0 || contextId == 0) {
+			return NiceIterator.emptyIterator();
+		}
+		try (IExtendedIterator<Long> properties = recordStore.properties(itemId, contextId)) {
+			List<Long> ids = properties.toList();
+			if (idStore instanceof IcebergIdStore iceberg) {
+				Map<Long, URI> uris = iceberg.resolveUris(new HashSet<>(ids), IdKind.PROPERTY);
+				return net.enilink.commons.iterator.WrappedIterator.create(ids.stream().map(uris::get).iterator());
+			}
+			return net.enilink.commons.iterator.WrappedIterator.create(ids.stream()
+					.map(id -> idStore.getUri(id, IdKind.PROPERTY)).iterator());
+		}
+	}
+
+	public void createBranch(String branchName) {
+		if (recordStore instanceof IcebergRecordStore iceberg) {
+			iceberg.createBranch(branchName);
+		} else {
+			throw new UnsupportedOperationException("Branches require an Iceberg record store");
+		}
 	}
 
 	@Override
@@ -1212,10 +295,12 @@ public class KvinIceberg implements Kvin {
 
 	@Override
 	public void close() {
-		ManifestFiles.dropCache(table.io());
-
-		for (IdTable idTable : ids) {
-			ManifestFiles.dropCache(idTable.table.io());
+		if (owned) {
+			try {
+				((IcebergIdStore) idStore).close();
+			} finally {
+				recordStore.close();
+			}
 		}
 	}
 }
