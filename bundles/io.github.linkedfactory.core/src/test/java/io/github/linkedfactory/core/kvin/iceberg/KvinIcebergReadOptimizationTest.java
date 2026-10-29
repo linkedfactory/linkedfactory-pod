@@ -32,7 +32,8 @@ public class KvinIcebergReadOptimizationTest {
 
 	@Before
 	public void setUp() throws Exception {
-		directory = Files.createTempDirectory("kvin-iceberg-read").toFile();
+		directory = java.nio.file.Path.of("target", "iceberg-read-tests", java.util.UUID.randomUUID().toString()).toFile();
+		Files.createDirectories(directory.toPath());
 		store = new KvinIceberg(directory.toString());
 	}
 

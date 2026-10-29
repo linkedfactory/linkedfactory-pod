@@ -43,7 +43,8 @@ public class KvinIcebergTest {
 
 	@Before
 	public void setUp() throws Exception {
-		directory = Files.createTempDirectory("kvin-iceberg").toFile();
+		directory = java.nio.file.Path.of("target", "iceberg-tests", java.util.UUID.randomUUID().toString()).toFile();
+		Files.createDirectories(directory.toPath());
 		store = new KvinIceberg(directory.toString());
 	}
 
@@ -67,13 +68,13 @@ public class KvinIcebergTest {
 	}
 
 	private List<Table> storeTables() throws ReflectiveOperationException {
-		var tableField = KvinIceberg.class.getDeclaredField("table");
+		var tableField = IcebergRecordStore.class.getDeclaredField("table");
 		tableField.setAccessible(true);
 		List<Table> tables = new ArrayList<>();
-		tables.add((Table) tableField.get(store));
-		var idsField = KvinIceberg.class.getDeclaredField("ids");
+		tables.add((Table) tableField.get(store.getRecordStore()));
+		var idsField = IcebergIdStore.class.getDeclaredField("ids");
 		idsField.setAccessible(true);
-		for (Object ids : (Object[]) idsField.get(store)) {
+		for (Object ids : (Object[]) idsField.get(store.getIdStore())) {
 			var idTableField = ids.getClass().getDeclaredField("table");
 			idTableField.setAccessible(true);
 			tables.add((Table) idTableField.get(ids));
@@ -82,9 +83,9 @@ public class KvinIcebergTest {
 	}
 
 	private Object idTable(int kind) throws ReflectiveOperationException {
-		var field = KvinIceberg.class.getDeclaredField("ids");
+		var field = IcebergIdStore.class.getDeclaredField("ids");
 		field.setAccessible(true);
-		return ((Object[]) field.get(store))[kind];
+		return ((Object[]) field.get(store.getIdStore()))[kind];
 	}
 
 	private Table spyIdTable(int kind) throws ReflectiveOperationException {
@@ -97,10 +98,13 @@ public class KvinIcebergTest {
 	}
 
 	private PriorityQueue<?> cursors(IExtendedIterator<KvinTuple> values) throws ReflectiveOperationException {
-		for (var field : values.getClass().getDeclaredFields()) {
+		var base = values.getClass().getDeclaredField("base");
+		base.setAccessible(true);
+		Object records = base.get(values);
+		for (var field : records.getClass().getDeclaredFields()) {
 			if (field.getType() == PriorityQueue.class) {
 				field.setAccessible(true);
-				return (PriorityQueue<?>) field.get(values);
+				return (PriorityQueue<?>) field.get(records);
 			}
 		}
 		throw new AssertionError("Missing merge queue");

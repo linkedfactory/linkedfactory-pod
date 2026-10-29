@@ -500,8 +500,7 @@ public class TableFile implements KvinRecordStore {
 		@Override
 		public boolean equals(Object o) {
 			if (this == o) return true;
-			if (!(o instanceof ItemWithContext)) return false;
-			ItemWithContext iwc = (ItemWithContext) o;
+			if (!(o instanceof ItemWithContext iwc)) return false;
 			return itemId == iwc.itemId && contextId == iwc.contextId;
 		}
 
