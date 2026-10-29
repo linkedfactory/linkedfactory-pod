@@ -21,6 +21,7 @@ import java.util.*;
  */
 public class KvinIceberg implements Kvin {
 	private static final int BATCH_SIZE = 8192;
+	private static final int READ_BATCH_SIZE = 1024;
 	private final KvinRecordStore recordStore;
 	private final IdStore idStore;
 	private final boolean owned;
@@ -61,22 +62,6 @@ public class KvinIceberg implements Kvin {
 		return idStore;
 	}
 
-	private Map<URI, Long> ids(List<URI> uris, IdKind kind, boolean create) {
-		if (idStore instanceof IcebergIdStore iceberg) {
-			return iceberg.resolveIds(uris, kind, create);
-		}
-		Map<URI, Long> result = new HashMap<>();
-		for (URI uri : uris) {
-			if (!result.containsKey(uri)) {
-				long id = idStore.getId(uri, kind, create);
-				if (id != 0) {
-					result.put(uri, id);
-				}
-			}
-		}
-		return result;
-	}
-
 	@Override
 	public void put(KvinTuple... tuples) {
 		put(Arrays.asList(tuples));
@@ -95,9 +80,9 @@ public class KvinIceberg implements Kvin {
 					while (input.size() < BATCH_SIZE && source.hasNext()) {
 						input.add(source.next());
 					}
-					Map<URI, Long> items = ids(input.stream().map(t -> t.item).distinct().toList(), IdKind.ITEM, true);
-					Map<URI, Long> contexts = ids(input.stream().map(t -> context(t.context)).distinct().toList(), IdKind.CONTEXT, true);
-					Map<URI, Long> properties = ids(input.stream().map(t -> t.property).distinct().toList(), IdKind.PROPERTY, true);
+					Map<URI, Long> items = idStore.getIds(input.stream().map(t -> t.item).distinct().toList(), IdKind.ITEM, true);
+					Map<URI, Long> contexts = idStore.getIds(input.stream().map(t -> context(t.context)).distinct().toList(), IdKind.CONTEXT, true);
+					Map<URI, Long> properties = idStore.getIds(input.stream().map(t -> t.property).distinct().toList(), IdKind.PROPERTY, true);
 					idStore.flush();
 					batch = input.stream().map(t -> new KvinRecord(items.get(t.item), contexts.get(context(t.context)),
 							properties.get(t.property), t.time, t.seqNr, t.value)).iterator();
@@ -141,13 +126,13 @@ public class KvinIceberg implements Kvin {
 		if (items.isEmpty()) {
 			return NiceIterator.emptyIterator();
 		}
-		Map<Long, URI> itemUris = reverse(ids(items, IdKind.ITEM, false));
+		Map<Long, URI> itemUris = reverse(idStore.getIds(items, IdKind.ITEM, false));
 		URI requestedContext = context(context);
 		long contextId = idStore.getId(requestedContext, IdKind.CONTEXT, false);
 		if (itemUris.isEmpty() || contextId == 0) {
 			return NiceIterator.emptyIterator();
 		}
-		Map<Long, URI> propertyUris = reverse(ids(properties, IdKind.PROPERTY, false));
+		Map<Long, URI> propertyUris = reverse(idStore.getIds(properties, IdKind.PROPERTY, false));
 		if (!properties.isEmpty() && propertyUris.isEmpty()) {
 			return NiceIterator.emptyIterator();
 		}
@@ -158,6 +143,13 @@ public class KvinIceberg implements Kvin {
 				: recordStore.fetch(itemIds, propertyIds, contextId, end, begin, limit, interval, op);
 		return new NiceIterator<>() {
 			final IExtendedIterator<KvinRecord> base = records;
+			final int batchSize = properties.isEmpty()
+					? (limit > 0 ? (int) Math.min(limit, READ_BATCH_SIZE) : READ_BATCH_SIZE) : 1;
+			final Deque<KvinRecord> batch = new ArrayDeque<>();
+			long lastItemId;
+			long lastPropertyId;
+			URI lastItemUri;
+			URI lastPropertyUri;
 			KvinTuple next;
 			boolean closed;
 
@@ -170,25 +162,36 @@ public class KvinIceberg implements Kvin {
 					return false;
 				}
 				try {
-					if (!base.hasNext()) {
-						close();
-						return false;
-					}
-					KvinRecord row = base.next();
-					URI property = propertyUris.get(row.propertyId());
-					if (property == null && idStore instanceof IcebergIdStore iceberg) {
-						property = iceberg.cachedUri(row.propertyId(), IdKind.PROPERTY);
-						if (property == null) {
-							Set<Long> heads = base instanceof IcebergRecordStore.RecordIterator reader
-									? reader.headProperties() : new HashSet<>();
-							heads.add(row.propertyId());
-							property = iceberg.resolveUris(heads, IdKind.PROPERTY).get(row.propertyId());
+					if (batch.isEmpty()) {
+						Set<Long> missing = new HashSet<>();
+						while (batch.size() < batchSize && base.hasNext()) {
+							KvinRecord row = base.next();
+							batch.addLast(row);
+							if (!propertyUris.containsKey(row.propertyId())) {
+								missing.add(row.propertyId());
+							}
+						}
+						if (batch.isEmpty()) {
+							close();
+							return false;
+						}
+						if (!missing.isEmpty()) {
+							propertyUris.putAll(idStore.getUris(missing, IdKind.PROPERTY));
 						}
 					}
-					if (property == null) {
-						property = idStore.getUri(row.propertyId(), IdKind.PROPERTY);
+					KvinRecord row = batch.removeFirst();
+					if (lastPropertyUri == null || lastPropertyId != row.propertyId()) {
+						lastPropertyUri = propertyUris.get(row.propertyId());
+						if (lastPropertyUri == null) {
+							throw new IllegalStateException("Unknown URI ID: " + row.propertyId());
+						}
+						lastPropertyId = row.propertyId();
 					}
-					next = new KvinTuple(itemUris.get(row.itemId()), property, requestedContext,
+					if (lastItemUri == null || lastItemId != row.itemId()) {
+						lastItemUri = itemUris.get(row.itemId());
+						lastItemId = row.itemId();
+					}
+					next = new KvinTuple(lastItemUri, lastPropertyUri, requestedContext,
 							row.time(), row.seqNr(), row.value());
 					return true;
 				} catch (RuntimeException e) {
@@ -217,6 +220,7 @@ public class KvinIceberg implements Kvin {
 			public void close() {
 				if (!closed) {
 					closed = true;
+					batch.clear();
 					base.close();
 				}
 			}
@@ -256,12 +260,8 @@ public class KvinIceberg implements Kvin {
 		}
 		try (IExtendedIterator<Long> properties = recordStore.properties(itemId, contextId)) {
 			List<Long> ids = properties.toList();
-			if (idStore instanceof IcebergIdStore iceberg) {
-				Map<Long, URI> uris = iceberg.resolveUris(new HashSet<>(ids), IdKind.PROPERTY);
-				return net.enilink.commons.iterator.WrappedIterator.create(ids.stream().map(uris::get).iterator());
-			}
-			return net.enilink.commons.iterator.WrappedIterator.create(ids.stream()
-					.map(id -> idStore.getUri(id, IdKind.PROPERTY)).iterator());
+			Map<Long, URI> uris = idStore.getUris(ids, IdKind.PROPERTY);
+			return net.enilink.commons.iterator.WrappedIterator.create(ids.stream().map(uris::get).iterator());
 		}
 	}
 

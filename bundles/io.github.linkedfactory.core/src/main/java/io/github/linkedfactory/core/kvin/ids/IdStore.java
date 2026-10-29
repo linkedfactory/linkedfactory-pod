@@ -2,6 +2,12 @@ package io.github.linkedfactory.core.kvin.ids;
 
 import net.enilink.komma.core.URI;
 
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Map;
+
 /**
  * A store for mapping between URIs and IDs.
  */
@@ -20,6 +26,22 @@ public interface IdStore {
 	long getId(URI uri, IdKind kind, boolean createIfNotExists);
 
 	/**
+	 * Resolves distinct URIs of one kind. Unknown URIs are omitted when creation
+	 * is disabled. Result order is unspecified; duplicate inputs share one mapping.
+	 * Implementations should override this method to perform bulk storage reads.
+	 */
+	default Map<URI, Long> getIds(Collection<URI> uris, IdKind kind, boolean createIfNotExists) {
+		Map<URI, Long> result = new HashMap<>();
+		for (URI uri : new LinkedHashSet<>(uris)) {
+			long id = getId(uri, kind, createIfNotExists);
+			if (id != 0) {
+				result.put(uri, id);
+			}
+		}
+		return result;
+	}
+
+	/**
 	 * Returns the URI for a given ID and kind.
 	 *
 	 * @param id   The ID.
@@ -27,7 +49,25 @@ public interface IdStore {
 	 * @return The URI for the given ID and kind.
 	 */
 	URI getUri(long id, IdKind kind);
-	
+
+	/**
+	 * Resolves distinct IDs of one kind. Result order is unspecified.
+	 * Implementations should override this method to perform bulk storage reads.
+	 *
+	 * @throws IllegalStateException if an ID has no URI mapping
+	 */
+	default Map<Long, URI> getUris(Collection<Long> ids, IdKind kind) {
+		Map<Long, URI> result = new HashMap<>();
+		for (long id : new HashSet<>(ids)) {
+			URI uri = getUri(id, kind);
+			if (uri == null) {
+				throw new IllegalStateException("Unknown URI ID: " + id);
+			}
+			result.put(id, uri);
+		}
+		return result;
+	}
+
 	/**
 	 * Flushes any pending changes to the store.
 	 */

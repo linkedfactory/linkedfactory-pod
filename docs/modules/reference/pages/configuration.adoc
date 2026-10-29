@@ -175,6 +175,12 @@ Instances within the same JVM coordinate automatically, flushing the previous wr
 The facade resolves IDs in batches and flushes mappings before passing records to the record store, keeping pending mappings and record buffers bounded.
 A flush failure retains the allocation lock and pending mappings for retry, preventing reassignment of IDs already handed to callers.
 
+`IdStore.getIds(uris, kind, createIfNotExists)` and `getUris(ids, kind)` return maps keyed by distinct inputs, without a result-order guarantee.
+Unknown URIs are omitted when creation is disabled; unknown reverse IDs raise an error.
+Default implementations support single-lookup stores, while `IcebergIdStore` resolves cache misses with one filtered scan per batch.
+Fetches without explicit properties buffer up to 1024 records (or the requested per-series limit, if smaller) to batch reverse property lookups, preserving record order and reusing mappings throughout the query.
+Explicit-property fetches do not read ahead.
+
 The value table declares the sort order `itemId ASC, contextId ASC, propertyId ASC, time DESC, seqNr DESC` in Iceberg metadata.
 Each batch is physically sorted in that order, and new data files record its sort-order ID.
 Opening an existing store updates the table's default sort order if needed, without rewriting or relabeling old files.
