@@ -72,9 +72,7 @@ public class Values {
 				return buffer.get() != 0;
 			// string
 			case '"':
-				long length = Varint.readUnsigned(buffer);
-				if (length < 0 || length > buffer.remaining()) throw new IOException("Invalid encoded string length");
-				var b = new byte[(int) length];
+				var b = new byte[(int) Varint.readUnsigned(buffer)];
 				buffer.get(b);
 				return new String(b, StandardCharsets.UTF_8);
 			default:

@@ -69,13 +69,28 @@ If data with the same timestamps should be inserted then the CSV format is more 
 curl -H "Content-Type:text/csv" http://localhost:8080/linkedfactory/values -d 'time,<https://example.org/Press/Frame/StrainGauge>@<p:force>
 1541521440000, 7.10096884'
 ```
+Large amounts of data can be uploaded as [Parquet](https://parquet.apache.org/) file with one value per row.
+The columns `item`, `property` and `time` (epoch milliseconds or a timestamp) are required and `seqNr` (int32) is optional.
+Like in the Parquet archive, values are stored in typed columns (`valueInt`, `valueLong`, `valueFloat`, `valueDouble`, `valueString` or `valueBool`)
+and exactly one of them must be set per row. For example, with pyarrow:
+```python
+import pyarrow as pa, pyarrow.parquet as pq
+pq.write_table(pa.table({
+    'item': ['https://example.org/Press/Frame/StrainGauge'] * 2,
+    'property': ['p:force', 'p:status'],
+    'time': [1541521440000] * 2,
+    'valueDouble': [7.10096884, None],
+    'valueString': [None, 'ok'],
+}), 'values.parquet')
+```
+```sh
+curl -H "Content-Type:application/vnd.apache.parquet" http://localhost:8080/linkedfactory/values --data-binary @values.parquet
+```
 
 Retrieving the data in JSON format is possible through a simple GET request:
 ```sh
 curl -G -d "item=https://example.org/Press/Frame/StrainGauge" -d "property=p:force" http://localhost:8080/linkedfactory/values
 ```
-
-For typed binary upload and download, see the [KVIN Parquet format](docs/kvin-parquet.md).
 
 Just specify an accept header to retrieve data in CSV format:
 ```sh

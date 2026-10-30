@@ -2,15 +2,25 @@ package io.github.linkedfactory.service.benchmark;
 
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.util.JsonFormatWriter;
-import io.github.linkedfactory.core.kvin.util.ParquetFormatWriter;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import org.apache.parquet.conf.PlainParquetConfiguration;
+import org.apache.parquet.example.data.Group;
+import org.apache.parquet.example.data.simple.SimpleGroupFactory;
+import org.apache.parquet.hadoop.ParquetFileWriter;
+import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.example.ExampleParquetWriter;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
+import org.apache.parquet.io.LocalOutputFile;
+import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.MessageTypeParser;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -39,8 +49,6 @@ public final class KvinIngestionWorkload {
 	private static final List<URI> SHUFFLED_CHANNELS = shuffledChannels();
 
 	private final int variantIndex;
-	private final int rowCount;
-	private final boolean mixedTypes;
 	private final List<URI> items;
 	private final URI property;
 	private final long startTime;
@@ -55,20 +63,10 @@ public final class KvinIngestionWorkload {
 	}
 
 	KvinIngestionWorkload(int variantIndex) {
-		this(variantIndex, ROW_COUNT);
-	}
-
-	KvinIngestionWorkload(int variantIndex, int rowCount) {
-		this(variantIndex, rowCount, false);
-	}
-
-	KvinIngestionWorkload(int variantIndex, int rowCount, boolean mixedTypes) {
-		this.mixedTypes = mixedTypes;
 		if (variantIndex < 0 || variantIndex >= VARIANT_COUNT) {
 			throw new IllegalArgumentException("variantIndex must be in [0, " + VARIANT_COUNT + "): " + variantIndex);
 		}
 		this.variantIndex = variantIndex;
-		this.rowCount = rowCount;
 		int firstChannel = variantIndex * CHANNEL_COUNT;
 		this.items = List.copyOf(SHUFFLED_CHANNELS.subList(firstChannel, firstChannel + CHANNEL_COUNT));
 		this.property = PROPERTY_POOL.get(variantIndex);
@@ -76,7 +74,7 @@ public final class KvinIngestionWorkload {
 		this.tuples = createTuples();
 		this.preseedTuples = createPreseedTuples();
 		this.jsonPayload = createJsonPayload(tuples);
-		this.csvPayload = createCsvPayload(0, rowCount);
+		this.csvPayload = createCsvPayload(0, ROW_COUNT);
 		this.parquetPayload = createParquetPayload(tuples);
 	}
 
@@ -121,10 +119,10 @@ public final class KvinIngestionWorkload {
 	}
 
 	public List<byte[]> csvPayloads(int fileCount) {
-		if (fileCount <= 0 || rowCount % fileCount != 0) {
-			throw new IllegalArgumentException("fileCount must divide " + rowCount + ": " + fileCount);
+		if (fileCount <= 0 || ROW_COUNT % fileCount != 0) {
+			throw new IllegalArgumentException("fileCount must divide " + ROW_COUNT + ": " + fileCount);
 		}
-		int rowsPerFile = rowCount / fileCount;
+		int rowsPerFile = ROW_COUNT / fileCount;
 		List<byte[]> payloads = new ArrayList<>(fileCount);
 		for (int file = 0; file < fileCount; file++) {
 			int startRow = file * rowsPerFile;
@@ -134,8 +132,8 @@ public final class KvinIngestionWorkload {
 	}
 
 	private List<KvinTuple> createTuples() {
-		List<KvinTuple> result = new ArrayList<>(rowCount * CHANNEL_COUNT);
-		for (int row = 0; row < rowCount; row++) {
+		List<KvinTuple> result = new ArrayList<>(TUPLE_COUNT);
+		for (int row = 0; row < ROW_COUNT; row++) {
 			for (int channel = 0; channel < CHANNEL_COUNT; channel++) {
 				long time = startTime + (row / SEQUENCES_PER_TIMESTAMP) * TIMESTAMP_STEP;
 				int seqNr = row % SEQUENCES_PER_TIMESTAMP + 1;
@@ -168,15 +166,31 @@ public final class KvinIngestionWorkload {
 		}
 	}
 
+	/**
+	 * Writes the tuples like pyarrow with its default settings.
+	 */
 	private static byte[] createParquetPayload(List<KvinTuple> tuples) {
+		MessageType schema = MessageTypeParser.parseMessageType("message schema { optional binary item (STRING); " +
+				"optional binary property (STRING); optional int64 time; optional int32 seqNr; optional double valueDouble; }");
 		try {
-			ByteArrayOutputStream output = new ByteArrayOutputStream();
-			try (ParquetFormatWriter writer = new ParquetFormatWriter(output)) {
-				for (KvinTuple tuple : tuples) writer.writeTuple(tuple);
+			Path file = Files.createTempFile("kvin-ingestion-", ".parquet");
+			try {
+				SimpleGroupFactory groups = new SimpleGroupFactory(schema);
+				try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(schema)
+						.withConf(new PlainParquetConfiguration()).withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+						.withCompressionCodec(CompressionCodecName.SNAPPY).build()) {
+					for (KvinTuple tuple : tuples) {
+						writer.write(groups.newGroup().append("item", tuple.item.toString())
+								.append("property", tuple.property.toString()).append("time", tuple.time)
+								.append("seqNr", tuple.seqNr).append("valueDouble", (Double) tuple.value));
+					}
+				}
+				return Files.readAllBytes(file);
+			} finally {
+				Files.delete(file);
 			}
-			return output.toByteArray();
-		} catch (Exception e) {
-			throw new IllegalStateException("Unable to create Parquet benchmark payload", e);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
 		}
 	}
 
@@ -213,16 +227,7 @@ public final class KvinIngestionWorkload {
 		return List.copyOf(channels);
 	}
 
-	private Object value(int channel, int row) {
-		if (!mixedTypes) return channel * 100_000.0 + row + 0.25;
-		// Change types both across channels and within the same series over time.
-		return switch (Math.floorMod(channel + row, 6)) {
-			case 0 -> row;
-			case 1 -> 9_007_199_254_740_993L + row;
-			case 2 -> row + 0.5f;
-			case 3 -> row + 0.25d;
-			case 4 -> row % 2 == 0;
-			default -> "state-" + row;
-		};
+	private static double value(int channel, int row) {
+		return channel * 100_000.0 + row + 0.25;
 	}
 }

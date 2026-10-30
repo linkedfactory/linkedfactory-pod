@@ -90,7 +90,7 @@ public class KvinIngestionBenchmark {
 
 		@Setup(Level.Trial)
 		public void setupTrial() {
-			workloads = createWorkloads();
+			workloads = KvinIngestionWorkload.variants();
 			jsonPayloadVariants = workloads.stream().map(KvinIngestionWorkload::jsonPayload).toList();
 			csvPayloadVariants = workloads.stream().map(KvinIngestionWorkload::csvPayload).toList();
 			parquetPayloadVariants = workloads.stream().map(KvinIngestionWorkload::parquetPayload).toList();
@@ -107,7 +107,7 @@ public class KvinIngestionBenchmark {
 		@Setup(Level.Invocation)
 		public void setupInvocation() throws IOException {
 			int variantIndex = nextVariantIndex;
-			nextVariantIndex = (nextVariantIndex + 1) % workloads.size();
+			nextVariantIndex = (nextVariantIndex + 1) % KvinIngestionWorkload.VARIANT_COUNT;
 			workload = workloads.get(variantIndex);
 			jsonPayload = jsonPayloadVariants.get(variantIndex);
 			csvPayload = csvPayloadVariants.get(variantIndex);
@@ -123,10 +123,6 @@ public class KvinIngestionBenchmark {
 			service = new BenchmarkService(false);
 			parseOnlyService = new BenchmarkService(true);
 			measuredWrites = false;
-		}
-
-		protected List<KvinIngestionWorkload> createWorkloads() {
-			return KvinIngestionWorkload.variants();
 		}
 
 		@TearDown(Level.Invocation)
@@ -268,7 +264,7 @@ public class KvinIngestionBenchmark {
 				}
 			}
 			Assert.assertEquals("Unexpected persisted KVIN tuples", expected, actual);
-			Assert.assertEquals((measuredWrites ? workload.tuples().size() : 0)
+			Assert.assertEquals((measuredWrites ? KvinIngestionWorkload.TUPLE_COUNT : 0)
 					+ KvinIngestionWorkload.CHANNEL_COUNT, actual.size());
 		}
 
@@ -290,19 +286,6 @@ public class KvinIngestionBenchmark {
 				}
 			});
 		}
-	}
-
-	@State(Scope.Thread)
-	public static class MixedParquetState extends BenchmarkState {
-		@Override protected List<KvinIngestionWorkload> createWorkloads() {
-			return List.of(new KvinIngestionWorkload(0, KvinIngestionWorkload.ROW_COUNT, true));
-		}
-	}
-
-	@Benchmark
-	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
-	public void postParquetMixed(MixedParquetState state) throws IOException {
-		state.postParquet();
 	}
 
 	@Benchmark
