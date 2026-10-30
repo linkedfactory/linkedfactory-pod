@@ -18,10 +18,10 @@ public class Records {
 	public static Object decodeRecord(ByteBuffer bb) throws IOException {
 		byte type = bb.get();
 		if (type == 'O') {
-			int length = (int) Varint.readUnsigned(bb);
+			int length = readLength(bb);
 			Record dataObj = Record.NULL;
 			while (length-- > 0) {
-				int contentLength = (int) Varint.readUnsigned(bb);
+				int contentLength = readLength(bb);
 				byte[] content = new byte[contentLength];
 				bb.get(content);
 				URI property = URIs.createURI(new String(content, StandardCharsets.UTF_8));
@@ -30,14 +30,14 @@ public class Records {
 			}
 			return dataObj;
 		} else if (type == '[') {
-			int length = (int) Varint.readUnsigned(bb);
+			int length = readLength(bb);
 			Object[] values = new Object[length];
 			for (int i = 0; i < length; i++) {
 				values[i] = decodeRecord(bb);
 			}
 			return values;
 		} else if (type == 'R') {
-			int uriLength = (int) Varint.readUnsigned(bb);
+			int uriLength = readLength(bb);
 			byte[] content = new byte[uriLength];
 			bb.get(content);
 			return URIs.createURI(new String(content, StandardCharsets.UTF_8));
@@ -45,6 +45,13 @@ public class Records {
 			bb.position(bb.position() - 1);
 			return Values.decode(bb);
 		}
+	}
+
+	private static int readLength(ByteBuffer bb) throws IOException {
+		long length = Varint.readUnsigned(bb);
+		// Every array/record entry consumes at least one byte as well.
+		if (length < 0 || length > bb.remaining()) throw new IOException("Invalid encoded object length");
+		return (int) length;
 	}
 
 	public static byte[] encodeRecord(Object record) throws IOException {
@@ -63,7 +70,7 @@ public class Records {
 				int lengthBytes = Varint.calcLengthUnsigned(content.length);
 				byte[] uriBytes = new byte[lengthBytes + content.length];
 				Varint.writeUnsigned(uriBytes, 0, content.length);
-				System.arraycopy(content, 0, uriBytes, 1, content.length);
+				System.arraycopy(content, 0, uriBytes, lengthBytes, content.length);
 				baos.write(uriBytes);
 
 				// write the value

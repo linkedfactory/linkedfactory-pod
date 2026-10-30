@@ -1,6 +1,6 @@
 # KVIN Ingestion Benchmarks
 
-This JMH suite measures **KVIN ingestion throughput** through the direct LevelDB API and the in-process JSON and CSV service routes.
+This JMH suite measures **KVIN ingestion throughput** through the direct LevelDB API and the in-process JSON, CSV, and Parquet service routes.
 
 Each primary benchmark processes **30,000 `KvinTuple`s per invocation**. JMH reports throughput as `ops/s`; `@OperationsPerInvocation(30000)` normalizes the result so that:
 
@@ -18,6 +18,7 @@ flowchart LR
     CD["putCsvDirect"] --> CP["CSV parser"] --> W
     PC["postCsv"] --> L["Lift route"] --> CP
     PJ["postJson"] --> L --> JP["JSON parser"] --> W
+    PP["postParquet"] --> L --> PF["in-memory buffer"] --> PR["Parquet parser"] --> W
     PS["postCsvSequentialFiles<br/>10 requests"] --> L
     W --> DB[("LevelDB")]
 ```
@@ -28,9 +29,21 @@ flowchart LR
 | `putCsvDirect`           | CSV parsing + tuple creation + persistence, without Lift routing        |
 | `postCsv`                | In-process CSV request → route → parsing → persistence                  |
 | `postJson`               | In-process JSON request → route → parsing → persistence                 |
+| `postParquet`            | In-process Parquet request → buffer → parsing → persistence             |
+| `postParquetMixed`       | Typed-column Parquet upload with changing scalar datatypes             |
 | `postCsvSequentialFiles` | Ten sequential CSV requests to the same service and store               |
 
-`putBatch` is the persistence baseline. `putCsvDirect` adds CSV parsing. `postCsv` and `postJson` represent the main in-process service ingestion paths.
+`putBatch` is the persistence baseline. `putCsvDirect` adds CSV parsing. The `post*` benchmarks represent the main in-process service ingestion paths.
+
+### Parquet format
+
+Parquet payloads are generated before measurement with the same `ParquetFormatWriter`
+used by `/values` downloads. They use the [archive-aligned exchange schema](../kvin-parquet.md),
+including all seven optional typed value columns. The primary `postParquet` benchmark
+uses doubles for a like-for-like comparison with CSV. `postParquetMixed` uses one fixed
+30,000-tuple variant with integer, long, float, double, boolean and string values,
+changing types across channels and within a series. Persistence is verified after
+all measured ingestion invocations.
 
 ### Test data
 
@@ -63,7 +76,7 @@ From the repository root, build once:
 mvn clean install -DskipTests
 ```
 
-Run the five primary benchmarks:
+Run the primary benchmarks:
 
 ```sh
 mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
@@ -77,18 +90,23 @@ When comparing a change, repeat the full run with a separate result file.
 
 ## Results
 
+**Historical baseline:** the following primary and scaling examples used the former
+single-`value` Parquet format. They are retained for reference and do not measure the
+current typed-column format.
+
 A full run produces standard JMH throughput output like:
 
 ```text
 Benchmark                                       Mode  Cnt        Score        Error  Units
-KvinIngestionBenchmark.postCsv                 thrpt   10   712702.231 ± 234440.177  ops/s
-KvinIngestionBenchmark.postCsvSequentialFiles  thrpt   10   692147.445 ± 279633.790  ops/s
-KvinIngestionBenchmark.postJson                thrpt   10   504792.294 ±  42078.535  ops/s
-KvinIngestionBenchmark.putBatch                thrpt   10  1673947.197 ± 132642.643  ops/s
-KvinIngestionBenchmark.putCsvDirect            thrpt   10   880491.470 ± 126678.908  ops/s
+KvinIngestionBenchmark.postCsv                 thrpt   10  2297618.067 ±  18537.467  ops/s
+KvinIngestionBenchmark.postCsvSequentialFiles  thrpt   10  2294915.244 ±  43755.561  ops/s
+KvinIngestionBenchmark.postJson                thrpt   10  1699080.635 ±  17844.093  ops/s
+KvinIngestionBenchmark.postParquet             thrpt   10  2490427.032 ± 166366.814  ops/s
+KvinIngestionBenchmark.putBatch                thrpt   10  3352937.063 ±  44116.468  ops/s
+KvinIngestionBenchmark.putCsvDirect            thrpt   10  2777947.530 ±  83597.719  ops/s
 ```
 
-For the primary benchmarks, these values are already normalized to `KvinTuple`s per second. For example, `880491 ops/s` means approximately **880,491 tuples/s**.
+For the primary benchmarks, these values are already normalized to `KvinTuple`s per second. For example, `2777947 ops/s` means approximately **2,777,947 tuples/s**.
 
 Results are also written as JSON. Print a compact summary with:
 
@@ -103,6 +121,32 @@ jq -r '.[] |
 ```
 
 Use the score together with its error interval when comparing runs. The values above are example measurements, not performance thresholds.
+
+## Scaling
+
+`KvinIngestionScalingBenchmark` compares `postCsv` and `postParquet` for larger requests. Each request contains `rows × 6` tuples; set the row counts with `jmh.rows`:
+
+```sh
+mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
+  -Djmh.includes=KvinIngestionScalingBenchmark \
+  -Djmh.rows=5000,100000,500000 \
+  -Djmh.result.file=target/jmh-scaling.json \
+  test-compile exec:exec
+```
+
+The results are reported in `ms/op` per request:
+
+```text
+Benchmark                                  (rows)  Mode  Cnt     Score     Error  Units
+KvinIngestionScalingBenchmark.postCsv        5000  avgt   10    12.884 ±   0.295  ms/op
+KvinIngestionScalingBenchmark.postCsv      100000  avgt   10   306.001 ±  12.175  ms/op
+KvinIngestionScalingBenchmark.postCsv      500000  avgt   10  1617.857 ± 219.074  ms/op
+KvinIngestionScalingBenchmark.postParquet    5000  avgt   10    12.560 ±   0.971  ms/op
+KvinIngestionScalingBenchmark.postParquet  100000  avgt   10   284.855 ±  11.708  ms/op
+KvinIngestionScalingBenchmark.postParquet  500000  avgt   10  1478.487 ± 140.197  ms/op
+```
+
+For example, `1478 ms/op` for 500,000 rows (3,000,000 tuples) means approximately **2,030,000 tuples/s**. Parquet payloads of this size span multiple row groups. Parquet uploads of up to 32 MB are parsed in memory; larger ones are spooled to a temporary file.
 
 ## Diagnostics
 
@@ -182,3 +226,50 @@ full JSON ingestion (postJson)       ~59.4 ms
 ```
 
 The values come from separate benchmark boundaries and are useful for locating overhead, but they should not be treated as exactly additive stage timings.
+
+### Parquet read/write diagnostics
+
+`KvinParquetFormatBenchmark` measures parsing and writing separately from HTTP and
+LevelDB. It tests homogeneous and mixed scalar values, validates the round trip
+at setup, and reports tuples/second (30,000 tuples per invocation). Writing includes
+encoding, compression and footer finalization, with output sent to a null stream;
+it does not measure network transfer. Payload generation is outside measurement.
+
+```sh
+mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
+  -Djmh.includes=KvinParquetFormatBenchmark \
+  -Djmh.result.file=target/jmh-parquet-codec.json \
+  test-compile exec:exec
+```
+
+### Typed-column ingestion check (2026-10-30)
+
+A short local run on JDK 21.0.12.1 used two forks, two 1-second warmups and three
+1-second measurements per fork. These are diagnostic results, not a claim of a
+speedup or a replacement for the default longer benchmark configuration.
+
+| Benchmark | Tuples/second | JMH error (99.9%) |
+| --- | ---: | ---: |
+| `postCsv` | 2,282,435 | ±137,417 |
+| `postParquet` | 2,011,048 | ±385,181 |
+| `postParquetMixed` | 2,029,068 | ±60,634 |
+
+```sh
+mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
+  '-Djmh.includes=KvinIngestionBenchmark.post(Csv|Parquet|ParquetMixed)$' \
+  -Djmh.warmups=2 -Djmh.warmup.time=1s \
+  -Djmh.measurements=3 -Djmh.measurement.time=1s -Djmh.forks=2 \
+  -Djmh.result.file=target/jmh-parquet-typed.json test-compile exec:exec
+```
+
+The codec benchmark with the same short-run settings measured:
+
+| Operation | Mixed types | Tuples/second | JMH error (99.9%) |
+| --- | --- | ---: | ---: |
+| Parse | No | 7,577,231 | ±327,934 |
+| Parse | Yes | 6,583,596 | ±101,071 |
+| Write | No | 2,736,269 | ±159,653 |
+| Write | Yes | 2,336,517 | ±130,015 |
+
+These codec results exclude storage and HTTP; they should not be compared directly
+with ingestion throughput as if they measured the same operation.

@@ -149,6 +149,13 @@
 			<scope>test</scope>
 		</dependency>
 		<dependency>
+			<!-- required by the Parquet writer used to create test payloads -->
+			<groupId>org.locationtech.jts</groupId>
+			<artifactId>jts-core</artifactId>
+			<version>1.20.0</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
 			<groupId>jakarta.servlet</groupId>
 			<artifactId>jakarta.servlet-api</artifactId>
 			<version>6.1.0</version>
@@ -224,6 +231,8 @@
 				<jmh.measurement.time>3s</jmh.measurement.time>
 				<jmh.forks>2</jmh.forks>
 				<jmh.temp.root></jmh.temp.root>
+				<!-- rows per request for KvinIngestionScalingBenchmark -->
+				<jmh.rows>5000,100000</jmh.rows>
 			</properties>
 			<build>
 				<plugins>
@@ -254,6 +263,7 @@
 								<argument>${jmh.result.format}</argument>
 								<argument>-rff</argument>
 								<argument>${jmh.result.file}</argument>
+								<argument>-prows=${jmh.rows}</argument>
 							</arguments>
 						</configuration>
 					</plugin>

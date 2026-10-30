@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator}
+import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator, ParquetFormatParser, ParquetFormatWriter}
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
 import io.github.linkedfactory.service.util.LineProtocolParser
@@ -32,7 +32,8 @@ import org.json4s.JsonDSL.*
 import net.liftweb.util.Helpers.*
 import org.apache.commons.csv.{CSVFormat, CSVPrinter}
 
-import java.io.{InputStream, OutputStream, OutputStreamWriter}
+import java.io.{IOException, InputStream, OutputStream, OutputStreamWriter}
+import java.nio.file.Files
 import java.text.SimpleDateFormat
 import java.util
 import java.util.Date
@@ -40,7 +41,9 @@ import scala.jdk.CollectionConverters.*
 
 class KvinService(path: List[String], store: Kvin) extends RestHelper with Loggable {
   val MAX_LIMIT = 500000
-  private val CSV_GROUPING_WINDOW_SIZE = 6000
+  private val INGESTION_GROUPING_WINDOW_SIZE = 6000
+  /** Parquet uploads up to this size are parsed in memory, larger ones are spooled to a temporary file. */
+  protected val maxInMemoryParquetSize: Int = 32 * 1024 * 1024
   val valueProperty: URI = URIs.createURI("value")
 
   val CORS_HEADERS: List[(String, String)] = ("Access-Control-Allow-Origin", "*") :: ("Access-Control-Allow-Credentials", "true") :: //
@@ -89,7 +92,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
   protected def responseType(r: Req): Box[String] = {
     S.param("type") or {
-      if (jsonResponse_?(r)) Full("application/json")
+      if (r.weightedAccept.exists(_.matches("application" -> "vnd.apache.parquet")) && !r.acceptsStarStar)
+        Full(ParquetFormatWriter.MIME_TYPE)
+      else if (jsonResponse_?(r)) Full("application/json")
       else if (csvResponse_?(r)) Full("text/csv")
       else Empty
     }
@@ -115,6 +120,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           req.rawInputStream.flatMap(saveLineValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
         case Full("text/csv") =>
           req.rawInputStream.flatMap(saveCsvValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
+        case Full("application/vnd.apache.parquet") =>
+          req.rawInputStream.flatMap(saveParquetValues(_, path ++ list.dropRight(1)))
         case _ =>
           req.rawInputStream.flatMap(saveJsonValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
       }
@@ -205,6 +212,18 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           }
           OutputStreamResponse(streamer, -1, ("Content-Type", "application/json; charset=utf-8") ::
             ("Content-Disposition", s"""inline; filename=${filename("json")}""") :: responseHeaders, S.responseCookies, 200)
+        case ParquetFormatWriter.MIME_TYPE =>
+          val values = getValues(path ++ path.dropRight(1), limit)
+          val streamer = (os: OutputStream) => {
+            try {
+              val writer = new ParquetFormatWriter(os)
+              try {
+                while (values.hasNext) writer.writeTuple(values.next())
+              } finally writer.close()
+            } finally values.close()
+          }
+          OutputStreamResponse(streamer, -1, ("Content-Type", ParquetFormatWriter.MIME_TYPE) ::
+            ("Content-Disposition", s"""inline; filename=${filename("parquet")}""") :: responseHeaders, S.responseCookies, 200)
         case "text/csv" =>
           // { "item" : { "property1" : [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "seqNr" : 5, "value" : 3.2 } ] } }
           // TODO find solution to not materialize everything as map
@@ -264,8 +283,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           }
           OutputStreamResponse(streamer, -1, ("Content-Type", "text/csv; charset=utf-8") ::
             ("Content-Disposition", s"""inline; filename=${filename("csv")}""") :: responseHeaders, S.responseCookies, 200)
-        case _ => createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json or text/csv.")
-      } openOr createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json or text/csv.")
+        case _ => createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json, text/csv or application/vnd.apache.parquet.")
+      } openOr createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json, text/csv or application/vnd.apache.parquet.")
       response
     }
   }
@@ -296,12 +315,55 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       val parser = new CsvFormatParser(parentUri, separator, in)
       parser.setContext(contextModelUri)
       val tuples: IExtendedIterator[KvinTuple] =
-        new KvinTupleGroupingIterator(parser.parse(), CSV_GROUPING_WINDOW_SIZE)
+        new KvinTupleGroupingIterator(parser.parse(), INGESTION_GROUPING_WINDOW_SIZE)
       try store.put(tuples) finally tuples.close()
       Empty
     } catch {
       case e: Exception => new Failure(e.getMessage, Full(e), Empty)
     }
+  }
+
+  // handle Parquet post content
+  protected def saveParquetValues(in: InputStream, path: List[String]): Box[?] = {
+    var parentUri = Data.pathToURI(path)
+    if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
+
+    try {
+      // Parquet requires random access, hence the content is buffered in memory or, if large, in a temporary file
+      val head = in.readNBytes(maxInMemoryParquetSize + 1)
+      if (head.length <= maxInMemoryParquetSize) {
+        putParquetValues(new ParquetFormatParser(parentUri, head))
+      } else {
+        val tempFile = Files.createTempFile("kvin-upload-", ".parquet")
+        try {
+          val out = Files.newOutputStream(tempFile)
+          try {
+            out.write(head)
+            in.transferTo(out)
+          } finally out.close()
+          putParquetValues(new ParquetFormatParser(parentUri, tempFile))
+        } finally {
+          try Files.deleteIfExists(tempFile)
+          catch {
+            case e: IOException => logger.warn("Unable to delete temporary file " + tempFile, e)
+          }
+        }
+      }
+      Empty
+    } catch {
+      // validation errors describe the content, other messages may expose internals like file paths
+      case e: IllegalArgumentException => new Failure(e.getMessage, Full(e), Empty)
+      case e: Exception =>
+        logger.warn("Unable to process Parquet upload", e)
+        new Failure("Invalid Parquet payload", Full(e), Empty)
+    }
+  }
+
+  private def putParquetValues(parser: ParquetFormatParser): Unit = {
+    parser.setContext(contextModelUri)
+    val tuples: IExtendedIterator[KvinTuple] =
+      new KvinTupleGroupingIterator(parser.parse(), INGESTION_GROUPING_WINDOW_SIZE)
+    try store.put(tuples) finally tuples.close()
   }
 
   // handle InfluxDB line protocol content

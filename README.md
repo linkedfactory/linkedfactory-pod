@@ -75,6 +75,8 @@ Retrieving the data in JSON format is possible through a simple GET request:
 curl -G -d "item=https://example.org/Press/Frame/StrainGauge" -d "property=p:force" http://localhost:8080/linkedfactory/values
 ```
 
+For typed binary upload and download, see the [KVIN Parquet format](docs/kvin-parquet.md).
+
 Just specify an accept header to retrieve data in CSV format:
 ```sh
 curl -G -H "Accept:text/csv" -d "item=https://example.org/Press/Frame/StrainGauge" -d "property=p:force" http://localhost:8080/linkedfactory/values
