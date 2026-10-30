@@ -30,9 +30,20 @@ flowchart LR
 | `postCsv`                | In-process CSV request → route → parsing → persistence                  |
 | `postJson`               | In-process JSON request → route → parsing → persistence                 |
 | `postParquet`            | In-process Parquet request → buffer → parsing → persistence             |
+| `postParquetMixed`       | Typed-column Parquet upload with changing scalar datatypes             |
 | `postCsvSequentialFiles` | Ten sequential CSV requests to the same service and store               |
 
 `putBatch` is the persistence baseline. `putCsvDirect` adds CSV parsing. The `post*` benchmarks represent the main in-process service ingestion paths.
+
+### Parquet format
+
+Parquet payloads are generated before measurement with the same `ParquetFormatWriter`
+used by `/values` downloads. They use the [archive-aligned exchange schema](../kvin-parquet.md),
+including all seven optional typed value columns. The primary `postParquet` benchmark
+uses doubles for a like-for-like comparison with CSV. `postParquetMixed` uses one fixed
+30,000-tuple variant with integer, long, float, double, boolean and string values,
+changing types across channels and within a series. Persistence is verified after
+all measured ingestion invocations.
 
 ### Test data
 
@@ -65,7 +76,7 @@ From the repository root, build once:
 mvn clean install -DskipTests
 ```
 
-Run the six primary benchmarks:
+Run the primary benchmarks:
 
 ```sh
 mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
@@ -78,6 +89,10 @@ The default run uses 3 × 3 s warmups, 5 × 3 s measurements, 2 forks, and 1 thr
 When comparing a change, repeat the full run with a separate result file.
 
 ## Results
+
+**Historical baseline:** the following primary and scaling examples used the former
+single-`value` Parquet format. They are retained for reference and do not measure the
+current typed-column format.
 
 A full run produces standard JMH throughput output like:
 
@@ -211,3 +226,50 @@ full JSON ingestion (postJson)       ~59.4 ms
 ```
 
 The values come from separate benchmark boundaries and are useful for locating overhead, but they should not be treated as exactly additive stage timings.
+
+### Parquet read/write diagnostics
+
+`KvinParquetFormatBenchmark` measures parsing and writing separately from HTTP and
+LevelDB. It tests homogeneous and mixed scalar values, validates the round trip
+at setup, and reports tuples/second (30,000 tuples per invocation). Writing includes
+encoding, compression and footer finalization, with output sent to a null stream;
+it does not measure network transfer. Payload generation is outside measurement.
+
+```sh
+mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
+  -Djmh.includes=KvinParquetFormatBenchmark \
+  -Djmh.result.file=target/jmh-parquet-codec.json \
+  test-compile exec:exec
+```
+
+### Typed-column ingestion check (2026-10-30)
+
+A short local run on JDK 21.0.12.1 used two forks, two 1-second warmups and three
+1-second measurements per fork. These are diagnostic results, not a claim of a
+speedup or a replacement for the default longer benchmark configuration.
+
+| Benchmark | Tuples/second | JMH error (99.9%) |
+| --- | ---: | ---: |
+| `postCsv` | 2,282,435 | ±137,417 |
+| `postParquet` | 2,011,048 | ±385,181 |
+| `postParquetMixed` | 2,029,068 | ±60,634 |
+
+```sh
+mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
+  '-Djmh.includes=KvinIngestionBenchmark.post(Csv|Parquet|ParquetMixed)$' \
+  -Djmh.warmups=2 -Djmh.warmup.time=1s \
+  -Djmh.measurements=3 -Djmh.measurement.time=1s -Djmh.forks=2 \
+  -Djmh.result.file=target/jmh-parquet-typed.json test-compile exec:exec
+```
+
+The codec benchmark with the same short-run settings measured:
+
+| Operation | Mixed types | Tuples/second | JMH error (99.9%) |
+| --- | --- | ---: | ---: |
+| Parse | No | 7,577,231 | ±327,934 |
+| Parse | Yes | 6,583,596 | ±101,071 |
+| Write | No | 2,736,269 | ±159,653 |
+| Write | Yes | 2,336,517 | ±130,015 |
+
+These codec results exclude storage and HTTP; they should not be compared directly
+with ingestion throughput as if they measured the same operation.

@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator, ParquetFormatParser}
+import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator, ParquetFormatParser, ParquetFormatWriter}
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
 import io.github.linkedfactory.service.util.LineProtocolParser
@@ -92,7 +92,9 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
 
   protected def responseType(r: Req): Box[String] = {
     S.param("type") or {
-      if (jsonResponse_?(r)) Full("application/json")
+      if (r.weightedAccept.exists(_.matches("application" -> "vnd.apache.parquet")) && !r.acceptsStarStar)
+        Full(ParquetFormatWriter.MIME_TYPE)
+      else if (jsonResponse_?(r)) Full("application/json")
       else if (csvResponse_?(r)) Full("text/csv")
       else Empty
     }
@@ -210,6 +212,18 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           }
           OutputStreamResponse(streamer, -1, ("Content-Type", "application/json; charset=utf-8") ::
             ("Content-Disposition", s"""inline; filename=${filename("json")}""") :: responseHeaders, S.responseCookies, 200)
+        case ParquetFormatWriter.MIME_TYPE =>
+          val values = getValues(path ++ path.dropRight(1), limit)
+          val streamer = (os: OutputStream) => {
+            try {
+              val writer = new ParquetFormatWriter(os)
+              try {
+                while (values.hasNext) writer.writeTuple(values.next())
+              } finally writer.close()
+            } finally values.close()
+          }
+          OutputStreamResponse(streamer, -1, ("Content-Type", ParquetFormatWriter.MIME_TYPE) ::
+            ("Content-Disposition", s"""inline; filename=${filename("parquet")}""") :: responseHeaders, S.responseCookies, 200)
         case "text/csv" =>
           // { "item" : { "property1" : [ { "time" : 123, "seqNr" : 2, "value" : 1.3 } ], "property2" : [ { "time" : 123, "seqNr" : 5, "value" : 3.2 } ] } }
           // TODO find solution to not materialize everything as map
@@ -269,8 +283,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           }
           OutputStreamResponse(streamer, -1, ("Content-Type", "text/csv; charset=utf-8") ::
             ("Content-Disposition", s"""inline; filename=${filename("csv")}""") :: responseHeaders, S.responseCookies, 200)
-        case _ => createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json or text/csv.")
-      } openOr createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json or text/csv.")
+        case _ => createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json, text/csv or application/vnd.apache.parquet.")
+      } openOr createErrorResponse(400, "UNSUPPORTED_RESPONSE_TYPE", "Unsupported response type. Use application/json, text/csv or application/vnd.apache.parquet.")
       response
     }
   }

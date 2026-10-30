@@ -7,6 +7,8 @@ package io.github.linkedfactory.core.kvin.util;
 
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.parquet.ParquetValues;
+import io.github.linkedfactory.core.kvin.parquet.Records;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -31,7 +33,6 @@ import org.apache.parquet.io.api.GroupConverter;
 import org.apache.parquet.io.api.PrimitiveConverter;
 import org.apache.parquet.io.api.RecordMaterializer;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
-import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.IntLogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.TimestampLogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
@@ -46,31 +47,16 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
- * Parses KVIN tuples from Parquet files with one row per tuple and the columns
- * item, property, time, value and the optional columns context and seqNr,
- * as written by the SPARQL Parquet exporter. Relative item and property URIs
- * are resolved against the base URI. Times are epoch milliseconds unless the
- * column is annotated as timestamp with another unit.
- * <p>
- * Binary values are always read as strings, as Parquet files do not distinguish
- * URIs from string literals.
+ * Reads the archive-aligned KVIN exchange format, one tuple per row with exactly
+ * one typed value column. Relative item/property URIs resolve against the request
+ * URI. Context and seqNr default to the request context and zero.
  */
 public class ParquetFormatParser {
 	protected final static Logger logger = LoggerFactory.getLogger(ParquetFormatParser.class);
-	/** Supported physical types of each column; all other columns are ignored. */
-	protected final static Map<String, Set<PrimitiveTypeName>> COLUMN_TYPES = Map.of(
-			"item", Set.of(PrimitiveTypeName.BINARY),
-			"property", Set.of(PrimitiveTypeName.BINARY),
-			"context", Set.of(PrimitiveTypeName.BINARY),
-			"time", Set.of(PrimitiveTypeName.INT64),
-			"seqNr", Set.of(PrimitiveTypeName.INT32, PrimitiveTypeName.INT64),
-			"value", Set.of(PrimitiveTypeName.BOOLEAN, PrimitiveTypeName.INT32, PrimitiveTypeName.INT64,
-					PrimitiveTypeName.FLOAT, PrimitiveTypeName.DOUBLE, PrimitiveTypeName.BINARY));
-	protected final static Set<String> REQUIRED_COLUMNS = Set.of("item", "property", "time", "value");
+	private static final Set<String> REQUIRED_COLUMNS = Set.of("item", "property", "time");
 
 	protected final URI base;
 	protected final InputFile file;
@@ -191,11 +177,13 @@ public class ParquetFormatParser {
 	}
 
 	protected MessageType projectSchema(MessageType fileSchema) {
+		if (fileSchema.containsField("value")) {
+			throw new IllegalArgumentException("Use typed value columns (valueInt, valueDouble, etc.), not 'value'");
+		}
 		List<Type> fields = new ArrayList<>();
 		for (Type field : fileSchema.getFields()) {
 			String name = field.getName();
-			Set<PrimitiveTypeName> types = COLUMN_TYPES.get(name);
-			if (types == null) {
+			if (!ParquetFormatWriter.SCHEMA.containsField(name)) {
 				// ignore unrelated columns
 				continue;
 			}
@@ -204,9 +192,14 @@ public class ParquetFormatParser {
 			}
 			PrimitiveTypeName type = field.asPrimitiveType().getPrimitiveTypeName();
 			LogicalTypeAnnotation annotation = field.getLogicalTypeAnnotation();
-			// decimals and large unsigned integers would be misread as plain signed numbers
-			if (!types.contains(type) || annotation instanceof DecimalLogicalTypeAnnotation ||
-					annotation instanceof IntLogicalTypeAnnotation intType && !intType.isSigned() && intType.getBitWidth() >= 32) {
+			// Only annotations whose meaning is preserved by the tuple conversion are accepted.
+			boolean supportedAnnotation = annotation == null ||
+					annotation instanceof LogicalTypeAnnotation.StringLogicalTypeAnnotation && !name.equals("valueObject") ||
+					annotation instanceof TimestampLogicalTypeAnnotation && name.equals("time") ||
+					annotation instanceof IntLogicalTypeAnnotation intType && intType.isSigned();
+			boolean supportedType = type == ParquetFormatWriter.SCHEMA.getType(name).asPrimitiveType().getPrimitiveTypeName() ||
+					name.equals("seqNr") && type == PrimitiveTypeName.INT64;
+			if (!supportedType || !supportedAnnotation) {
 				throw new IllegalArgumentException("Unsupported type " + type + (annotation == null ? "" : " (" + annotation + ")")
 						+ " of Parquet column '" + name + "'");
 			}
@@ -217,12 +210,15 @@ public class ParquetFormatParser {
 				throw new IllegalArgumentException("Missing required Parquet column '" + name + "'");
 			}
 		}
+		if (ParquetValues.FIELDS.stream().noneMatch(field -> fileSchema.containsField(field.getName()))) {
+			throw new IllegalArgumentException("Missing typed Parquet value column");
+		}
 		return new MessageType(fileSchema.getName(), fields);
 	}
 
 	/**
-	 * Rejects missing required values based on the column statistics before any tuple is stored
-	 * instead of failing in the middle of the upload.
+	 * Rejects known missing identity values early when footer statistics are available.
+	 * Row validation remains necessary; streaming ingestion is not transactional.
 	 */
 	protected void checkRequiredValues(List<BlockMetaData> rowGroups) {
 		for (BlockMetaData rowGroup : rowGroups) {
@@ -322,6 +318,18 @@ public class ParquetFormatParser {
 							seqNr = (int) value;
 						}
 					};
+					case "valueObject" -> new ValueConverter() {
+						@Override public void addBinary(Binary binary) {
+							try {
+								var buffer = binary.toByteBuffer();
+								Object decoded = Records.decodeRecord(buffer);
+								if (buffer.hasRemaining()) throw new IOException("Trailing object bytes");
+								setValue(decoded);
+							} catch (IOException | RuntimeException e) {
+								throw new IllegalArgumentException("Invalid Parquet valueObject", e);
+							}
+						}
+					};
 					default -> new ValueConverter();
 				};
 			}
@@ -384,35 +392,42 @@ public class ParquetFormatParser {
 			}
 		}
 
+		void setValue(Object value) {
+			if (this.value != null) {
+				throw new IllegalArgumentException("Parquet row must contain exactly one typed value");
+			}
+			this.value = value;
+		}
+
 		class ValueConverter extends PrimitiveConverter {
 			@Override
 			public void addBinary(Binary value) {
-				TupleConverter.this.value = value.toStringUsingUTF8();
+				setValue(value.toStringUsingUTF8());
 			}
 
 			@Override
 			public void addBoolean(boolean value) {
-				TupleConverter.this.value = value;
+				setValue(value);
 			}
 
 			@Override
 			public void addDouble(double value) {
-				TupleConverter.this.value = value;
+				setValue(value);
 			}
 
 			@Override
 			public void addFloat(float value) {
-				TupleConverter.this.value = value;
+				setValue(value);
 			}
 
 			@Override
 			public void addInt(int value) {
-				TupleConverter.this.value = value;
+				setValue(value);
 			}
 
 			@Override
 			public void addLong(long value) {
-				TupleConverter.this.value = value;
+				setValue(value);
 			}
 		}
 	}

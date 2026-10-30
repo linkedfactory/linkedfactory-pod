@@ -2,14 +2,10 @@ package io.github.linkedfactory.service.benchmark;
 
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.util.JsonFormatWriter;
-import io.github.linkedfactory.core.rdf4j.io.SPARQLResultsParquetWriterFactory;
+import io.github.linkedfactory.core.kvin.util.ParquetFormatWriter;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
-import org.eclipse.rdf4j.model.ValueFactory;
-import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
-import org.eclipse.rdf4j.query.impl.MapBindingSet;
-import org.eclipse.rdf4j.query.resultio.TupleQueryResultWriter;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -44,6 +40,7 @@ public final class KvinIngestionWorkload {
 
 	private final int variantIndex;
 	private final int rowCount;
+	private final boolean mixedTypes;
 	private final List<URI> items;
 	private final URI property;
 	private final long startTime;
@@ -62,6 +59,11 @@ public final class KvinIngestionWorkload {
 	}
 
 	KvinIngestionWorkload(int variantIndex, int rowCount) {
+		this(variantIndex, rowCount, false);
+	}
+
+	KvinIngestionWorkload(int variantIndex, int rowCount, boolean mixedTypes) {
+		this.mixedTypes = mixedTypes;
 		if (variantIndex < 0 || variantIndex >= VARIANT_COUNT) {
 			throw new IllegalArgumentException("variantIndex must be in [0, " + VARIANT_COUNT + "): " + variantIndex);
 		}
@@ -169,20 +171,9 @@ public final class KvinIngestionWorkload {
 	private static byte[] createParquetPayload(List<KvinTuple> tuples) {
 		try {
 			ByteArrayOutputStream output = new ByteArrayOutputStream();
-			TupleQueryResultWriter writer = new SPARQLResultsParquetWriterFactory().getWriter(output);
-			writer.startQueryResult(List.of("item", "property", "context", "time", "seqNr", "value"));
-			ValueFactory vf = SimpleValueFactory.getInstance();
-			for (KvinTuple tuple : tuples) {
-				MapBindingSet bindings = new MapBindingSet(6);
-				bindings.addBinding("item", vf.createIRI(tuple.item.toString()));
-				bindings.addBinding("property", vf.createIRI(tuple.property.toString()));
-				bindings.addBinding("context", vf.createIRI(tuple.context.toString()));
-				bindings.addBinding("time", vf.createLiteral(tuple.time));
-				bindings.addBinding("seqNr", vf.createLiteral(tuple.seqNr));
-				bindings.addBinding("value", vf.createLiteral((Double) tuple.value));
-				writer.handleSolution(bindings);
+			try (ParquetFormatWriter writer = new ParquetFormatWriter(output)) {
+				for (KvinTuple tuple : tuples) writer.writeTuple(tuple);
 			}
-			writer.endQueryResult();
 			return output.toByteArray();
 		} catch (Exception e) {
 			throw new IllegalStateException("Unable to create Parquet benchmark payload", e);
@@ -222,7 +213,16 @@ public final class KvinIngestionWorkload {
 		return List.copyOf(channels);
 	}
 
-	private static double value(int channel, int row) {
-		return channel * 100_000.0 + row + 0.25;
+	private Object value(int channel, int row) {
+		if (!mixedTypes) return channel * 100_000.0 + row + 0.25;
+		// Change types both across channels and within the same series over time.
+		return switch (Math.floorMod(channel + row, 6)) {
+			case 0 -> row;
+			case 1 -> 9_007_199_254_740_993L + row;
+			case 2 -> row + 0.5f;
+			case 3 -> row + 0.25d;
+			case 4 -> row % 2 == 0;
+			default -> "state-" + row;
+		};
 	}
 }

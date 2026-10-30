@@ -185,4 +185,24 @@ public class KvinParquetTest {
 		assertEquals(record, list.get(0).value);
 	}
 
+	@Test
+	public void shouldPreserveMixedValueColumns() {
+		URI item = URIs.createURI("urn:archive:mixed");
+		URI property = URIs.createURI("urn:archive:property");
+		List<Object> values = List.of(42, 9007199254740993L, 1.5f, 2.5d, "ready", false,
+				new Record(URIs.createURI("urn:" + "p".repeat(140)), "nested"));
+		for (int i = 0; i < values.size(); i++) {
+			kvinParquet.put(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, startTime + i, values.get(i)));
+		}
+		try (var tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 0)) {
+			var actual = tuples.toList();
+			assertEquals(values.size(), actual.size());
+			for (int i = 0; i < values.size(); i++) {
+				Object value = actual.get(values.size() - i - 1).value;
+				assertEquals(values.get(i).getClass(), value.getClass());
+				assertEquals(values.get(i), value);
+			}
+		}
+	}
+
 }

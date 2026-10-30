@@ -292,6 +292,19 @@ public class KvinIngestionBenchmark {
 		}
 	}
 
+	@State(Scope.Thread)
+	public static class MixedParquetState extends BenchmarkState {
+		@Override protected List<KvinIngestionWorkload> createWorkloads() {
+			return List.of(new KvinIngestionWorkload(0, KvinIngestionWorkload.ROW_COUNT, true));
+		}
+	}
+
+	@Benchmark
+	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
+	public void postParquetMixed(MixedParquetState state) throws IOException {
+		state.postParquet();
+	}
+
 	@Benchmark
 	@OperationsPerInvocation(KvinIngestionWorkload.TUPLE_COUNT)
 	public void putBatch(BenchmarkState state) {

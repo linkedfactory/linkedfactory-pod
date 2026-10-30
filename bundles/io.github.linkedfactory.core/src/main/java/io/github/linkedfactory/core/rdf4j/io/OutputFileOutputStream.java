@@ -9,7 +9,7 @@ import java.io.IOException;
 /**
  * An OutputFile implementation that wraps a BufferedOutputStream.
  */
-class OutputFileOutputStream implements OutputFile {
+public class OutputFileOutputStream implements OutputFile {
 	private final BufferedOutputStream out;
 
 	public OutputFileOutputStream(BufferedOutputStream out) {
@@ -23,7 +23,7 @@ class OutputFileOutputStream implements OutputFile {
 
 	private PositionOutputStream createPositionOutputstream() {
 		return new PositionOutputStream() {
-			int pos = 0;
+			long pos = 0;
 
 			@Override
 			public long getPos() {
