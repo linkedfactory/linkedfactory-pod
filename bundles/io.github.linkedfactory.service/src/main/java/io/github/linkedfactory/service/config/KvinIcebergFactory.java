@@ -16,6 +16,9 @@ public abstract class KvinIcebergFactory extends KvinLevelDbFactory {
 	public Kvin create() {
 		File path = getStorePathOr("linkedfactory-iceberg");
 		log.info("Using path {} for iceberg archive", path);
-		return new KvinIceberg(path.toString());
+		return KvinIceberg.withPartitionSpec(path.toString(), getPartitionSpec());
 	}
+
+	@Iri("plugin://io.github.linkedfactory.service/data/partitionSpec")
+	public abstract String getPartitionSpec();
 }

@@ -275,8 +275,10 @@
 						</goals>
 						<configuration>
 							<includeArtifactIds>
+								caffeine,
 								commons-configuration2,
 								commons-compress,
+								jts-core,
 								zstd-jni
 							</includeArtifactIds>
 						</configuration>

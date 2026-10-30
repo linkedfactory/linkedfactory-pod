@@ -17,7 +17,7 @@ Formally, the triple-based data model of RDF _(S, P, O)_ is extended to a quad-b
 ### Iceberg storage
 To use Iceberg instead of the default value store, configure `<store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ]` in the service configuration. KvinIceberg maintains a value table in `iceberg/` and separate URI-ID tables in `iceberg-ids/items/`, `iceberg-ids/properties/`, and `iceberg-ids/contexts/`, with bounded in-memory lookup caches. Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots, using a value-skipping Parquet reader for limited queries and Iceberg's generic Parquet readers otherwise. Use a new store directory rather than pointing it at an existing KvinParquet archive. Retention-period cleanup is not supported by KvinIceberg.
 
-The standalone `IcebergRecordStore` implements `KvinRecordStore` and operates exclusively on numeric `KvinRecord` identifiers, without creating or reading URI-ID tables. Null contexts select ID `0`; null properties and the interface's `-1` property sentinel select all properties. Latest-value fetches include negative timestamps. `IcebergIdStore` implements `IdStore` for all `IdKind` values and can be used without a record store. Both public constructors take the archive root and preserve the existing directory layout.
+The standalone `IcebergRecordStore` implements `KvinRecordStore` and operates exclusively on numeric `KvinRecord` identifiers, without creating or reading URI-ID tables. Null contexts select ID `0`; null properties and the interface's `-1` property sentinel select all properties. Latest-value fetches include negative timestamps. `IcebergIdStore` implements `IdStore` for all `IdKind` values and can be used without a record store. Location-based constructors take the archive root and preserve the existing directory layout.
 
 ```java
 try (var records = new IcebergRecordStore("archive");
@@ -29,13 +29,42 @@ try (var records = new IcebergRecordStore("archive");
 
 The injected stores remain caller-owned; closing the facade does not close them. The existing location-based `KvinIceberg` constructors own and close both stores. `createBranch` delegates to an injected `IcebergRecordStore` (other record-store implementations need not support branches). A location-based facade refuses to open populated record tables with missing ID tables rather than inventing replacement mappings.
 
+New value tables are unpartitioned by default. Both `IcebergRecordStore` and `KvinIceberg` accept a third constructor argument, a `Function<Schema, PartitionSpec>`:
+
+```java
+try (var kvin = new KvinIceberg("archive", null, schema ->
+        PartitionSpec.builderFor(schema)
+            .bucket("itemId", 32)
+            .identity("contextId")
+            .truncate("time", 86_400_000)
+            .build())) {
+    // Write and query normally; Iceberg prunes partitions using existing filters.
+}
+```
+
+Partition sources may be `itemId`, `contextId`, `propertyId`, `time`, or `seqNr`. Avoid identity partitioning high-cardinality IDs. `time` is a long, not an Iceberg timestamp: for epoch-millisecond data, `truncate("time", 86_400_000)` creates fixed-width day-sized ranges (including correctly floored negative timestamps), not calendar-aware timestamp transforms. Each output file contains only one partition and retains the KVIN sort order and series-start markers. ID tables remain unchanged.
+
+Omitting the partition factory (or passing null) adopts a reopened table's persisted spec. Supplying a factory verifies compatibility and rejects mismatches rather than silently evolving the table. Partition evolution is an explicit Iceberg metadata operation; reads support historical specs, new writes use the current spec, and delete rewrites repartition retained rows using the current spec.
+
+For service configuration, optional `<partitionSpec>` accepts native Iceberg partition-spec JSON. For example, item bucketing with 32 buckets:
+
+```turtle
+<store> [
+    a <KvinIceberg> ;
+    <dirName> "linkedfactory-iceberg" ;
+    <partitionSpec> """{"spec-id":0,"fields":[{"name":"item_bucket","transform":"bucket[32]","source-id":1,"field-id":1000}]}"""
+] .
+```
+
+Source field IDs are 1 (`itemId`), 2 (`contextId`), 3 (`propertyId`), 4 (`time`), and 5 (`seqNr`). Use `PartitionSpecParser.toJson(spec)` to generate configuration from a Java-built spec. `KvinIceberg.withPartitionSpec(location, json)` also accepts this JSON without exposing Iceberg types to callers in other OSGi bundles. Omit `<partitionSpec>` to use the default/adoption behavior; invalid JSON, unsupported sources, and incompatible specs fail initialization.
+
 ID allocation stages mappings, including forward and reverse lookups, until `flush()` or `close()`; batches automatically flush at 8192 new mappings. Allocation is serialized using `iceberg-ids.lock`, held until flushing, so independent processes must flush before waiting for another process to allocate. Instances within the same JVM coordinate automatically, flushing the previous writer when another instance allocates. The facade resolves IDs in batches and flushes mappings before passing records to the record store, keeping pending mappings and record buffers bounded. A flush failure retains the allocation lock and pending mappings for retry, preventing reassignment of IDs already handed to callers.
 
 `IdStore.getIds(uris, kind, createIfNotExists)` and `getUris(ids, kind)` return maps keyed by distinct inputs, without a result-order guarantee. Unknown URIs are omitted when creation is disabled; unknown reverse IDs raise an error. Default implementations support single-lookup stores, while `IcebergIdStore` resolves cache misses with one filtered scan per batch. Fetches without explicit properties buffer up to 1024 records (or the requested per-series limit, if smaller) to batch reverse property lookups, preserving record order and reusing mappings throughout the query. Explicit-property fetches do not read ahead.
 
 The value table declares the sort order `itemId ASC, contextId ASC, propertyId ASC, time DESC, seqNr DESC` in Iceberg metadata. Each batch is physically sorted in that order, and new data files record its sort-order ID. Opening an existing store updates the table's default sort order if needed, without rewriting or relabeling old files. Sorted data and column statistics support scan pruning; sort-order metadata alone does not guarantee faster searches or globally ordered query results.
 
-After successful appends, automatic compaction merge-sorts small value files when their count reaches the Iceberg table property `kvin.compaction.min-files` (default 32, minimum 2). Files smaller than half `write.target-file-size-bytes` are eligible; output files roll at that target (128 MiB if unset). Each pass merges at most 128 files, or the configured minimum if larger. Compaction runs synchronously, adding latency to the triggering write, and preserves duplicates, series-start markers, and files referenced by existing readers and snapshots. Compaction failures are logged and propagated, but the preceding append remains committed; an uncertain compaction commit retains its output files rather than risking data loss.
+After successful appends, automatic compaction merge-sorts small value files when their count within a partition and spec ID reaches the Iceberg table property `kvin.compaction.min-files` (default 32, minimum 2). Files smaller than half `write.target-file-size-bytes` are eligible; output files roll at that target (128 MiB if unset). Each pass merges at most 128 files per partition/spec group, or the configured minimum if larger, without merging different partitions or relabeling historical specs. Compaction runs synchronously, adding latency to the triggering write, and preserves duplicates, series-start markers, and files referenced by existing readers and snapshots. Compaction failures are logged and propagated, but the preceding append remains committed; an uncertain compaction commit retains its output files rather than risking data loss.
 
 Every output file regenerates `first=true` for the first row of each item/context/property series, including a series continued from the preceding output file, so property discovery remains correct after compaction.
 

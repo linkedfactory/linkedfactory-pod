@@ -10,9 +10,13 @@ import io.github.linkedfactory.core.kvin.records.KvinRecordStore;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.PartitionSpecParser;
+import org.apache.iceberg.Schema;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.function.Function;
 
 /**
  * URI-based KVIN facade composing a numeric record store and a URI-ID store.
@@ -26,15 +30,34 @@ public class KvinIceberg implements Kvin {
 	private final IdStore idStore;
 	private final boolean owned;
 
+	/**
+	 * Opens an owned store using native Iceberg partition-spec JSON, or the
+	 * default/adoption behavior when null. Keeps Iceberg types inside this bundle
+	 * for callers such as the OSGi service configuration.
+	 */
+	public static KvinIceberg withPartitionSpec(String archiveLocation, String partitionSpec) {
+		return new KvinIceberg(archiveLocation, null, partitionSpec == null ? null
+				: schema -> PartitionSpecParser.fromJson(schema, partitionSpec));
+	}
+
 	public KvinIceberg(String archiveLocation) {
 		this(archiveLocation, null);
 	}
 
 	public KvinIceberg(String archiveLocation, Duration retentionPeriod) {
+		this(archiveLocation, retentionPeriod, null);
+	}
+
+	/**
+	 * Creates an owned store with configurable record partitioning. A null factory
+	 * adopts an existing table's spec, or creates an unpartitioned table.
+	 */
+	public KvinIceberg(String archiveLocation, Duration retentionPeriod,
+			Function<Schema, PartitionSpec> partitioning) {
 		if (retentionPeriod != null) {
 			throw new UnsupportedOperationException("Iceberg retention cleanup is not implemented");
 		}
-		IcebergRecordStore records = new IcebergRecordStore(archiveLocation);
+		IcebergRecordStore records = new IcebergRecordStore(archiveLocation, retentionPeriod, partitioning);
 		try {
 			idStore = new IcebergIdStore(archiveLocation, records.hasSnapshot());
 		} catch (RuntimeException e) {
