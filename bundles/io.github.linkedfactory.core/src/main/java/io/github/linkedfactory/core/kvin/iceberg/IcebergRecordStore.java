@@ -17,10 +17,12 @@ import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.ManifestFiles;
+import org.apache.iceberg.PartitionKey;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.SortOrderBuilder;
+import org.apache.iceberg.StructLike;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.data.GenericRecord;
@@ -37,6 +39,7 @@ import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.util.StructLikeWrapper;
 import org.apache.parquet.column.ParquetProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,10 +62,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Standalone Iceberg-backed numeric record store, with no URI-ID tables.
@@ -91,8 +96,6 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private static final long DEFAULT_COMPACTION_TARGET_SIZE = 128L * 1024 * 1024;
 	private static final int COMPACTION_MAX_INPUT_FILES = 128;
 
-	private static final PartitionSpec SPEC = PartitionSpec.unpartitioned();
-
 	private static final Schema SCHEMA = new Schema(Types.NestedField.required(1, "itemId", Types.LongType.get()), Types.NestedField.required(2, "contextId", Types.LongType.get()), Types.NestedField.required(3, "propertyId", Types.LongType.get()), Types.NestedField.required(4, "time", Types.LongType.get()), Types.NestedField.required(5, "seqNr", Types.IntegerType.get()), Types.NestedField.required(6, "first", Types.BooleanType.get()), Types.NestedField.optional(7, "valueInt", Types.IntegerType.get()), Types.NestedField.optional(8, "valueLong", Types.LongType.get()), Types.NestedField.optional(9, "valueFloat", Types.FloatType.get()), Types.NestedField.optional(10, "valueDouble", Types.DoubleType.get()), Types.NestedField.optional(11, "valueString", Types.StringType.get()), Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()), Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
 
 	private static final SortOrder SORT_ORDER = configureSortOrder(SortOrder.builderFor(SCHEMA)).build();
@@ -109,10 +112,27 @@ public class IcebergRecordStore implements KvinRecordStore {
 	}
 
 	public IcebergRecordStore(String archiveLocation, Duration retentionPeriod) {
+		this(archiveLocation, retentionPeriod, null);
+	}
+
+	/**
+	 * Configures partitioning for a new table, or verifies an existing table's spec.
+	 * A null factory adopts existing partitioning and creates new tables unpartitioned.
+	 * Only itemId, contextId, propertyId, time, and seqNr may be partition sources.
+	 * Partition evolution must be performed explicitly, outside this constructor.
+	 */
+	public IcebergRecordStore(String archiveLocation, Duration retentionPeriod,
+			Function<Schema, PartitionSpec> partitioning) {
 		this.root = Path.of(archiveLocation).toAbsolutePath().normalize();
 
 		if (retentionPeriod != null) {
 			throw new UnsupportedOperationException("Iceberg retention cleanup is not implemented");
+		}
+
+		PartitionSpec requestedSpec = partitioning == null ? null
+				: Objects.requireNonNull(partitioning.apply(SCHEMA), "Partitioning factory returned null");
+		if (requestedSpec != null) {
+			validatePartitionSpec(requestedSpec);
 		}
 
 		try {
@@ -125,15 +145,20 @@ public class IcebergRecordStore implements KvinRecordStore {
 			if (existing) {
 				table = tables.load(location);
 
-				if (!table.schema().sameSchema(SCHEMA) || !table.spec().isUnpartitioned()) {
+				if (!table.schema().sameSchema(SCHEMA)) {
 					throw new IllegalStateException("Incompatible Iceberg table at " + location);
+				}
+				table.specs().values().forEach(IcebergRecordStore::validatePartitionSpec);
+				if (requestedSpec != null && !table.spec().compatibleWith(requestedSpec)) {
+					throw new IllegalArgumentException("Partition configuration does not match existing Iceberg table at " + location);
 				}
 			} else {
 				if (Files.exists(root.resolve("metadata"))) {
 					throw new IllegalArgumentException("Existing KvinParquet archive cannot be opened as KvinIceberg: " + root);
 				}
 
-				table = tables.create(SCHEMA, SPEC, SORT_ORDER, tableProperties(), location);
+				table = tables.create(SCHEMA, requestedSpec == null ? PartitionSpec.unpartitioned() : requestedSpec,
+						SORT_ORDER, tableProperties(), location);
 			}
 
 			enableManifestCaching(table);
@@ -143,6 +168,16 @@ public class IcebergRecordStore implements KvinRecordStore {
 			}
 		} catch (IOException e) {
 			throw new UncheckedIOException("Unable to initialize Iceberg store at " + root, e);
+		}
+	}
+
+	private static void validatePartitionSpec(PartitionSpec spec) {
+		for (var field : spec.fields()) {
+			var source = SCHEMA.findField(field.sourceId());
+			if (source == null || field.sourceId() > 5
+					|| !source.equals(spec.schema().findField(field.sourceId()))) {
+				throw new IllegalArgumentException("Partition sources must be itemId, contextId, propertyId, time, or seqNr");
+			}
 		}
 	}
 
@@ -172,6 +207,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 	@Override
 	public synchronized void put(Iterable<KvinRecord> records) {
+		table.refresh();
 		List<GenericRecord> batch = new ArrayList<>(BATCH_SIZE);
 		List<DataFile> files = new ArrayList<>();
 		List<String> paths = new ArrayList<>();
@@ -258,35 +294,57 @@ public class IcebergRecordStore implements KvinRecordStore {
 			}
 
 			long snapshotId = table.currentSnapshot().snapshotId();
-			Map<String, DataFile> candidates = new LinkedHashMap<>();
+			Map<PartitionGroup, Map<String, DataFile>> groups = new LinkedHashMap<>();
 			int maximum = Math.max(minimum, COMPACTION_MAX_INPUT_FILES);
 			try (CloseableIterable<FileScanTask> tasks = table.newScan().useSnapshot(snapshotId).planFiles()) {
 				for (FileScanTask task : tasks) {
 					if (!task.deletes().isEmpty()) {
 						throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg compaction");
 					}
-					DataFile file = task.file();
+					DataFile file = task.file().copy();
 					SortOrder order = table.sortOrders().get(file.sortOrderId());
-					if (candidates.size() < maximum && file.format() == FileFormat.PARQUET
-							&& file.specId() == table.spec().specId() && order != null && order.sameOrder(SORT_ORDER)
+					if (file.format() == FileFormat.PARQUET && order != null && order.sameOrder(SORT_ORDER)
 							&& file.fileSizeInBytes() < targetSize / 2) {
-						candidates.putIfAbsent(file.location(), file);
+						PartitionSpec spec = table.specs().get(file.specId());
+						PartitionGroup group = new PartitionGroup(file.specId(),
+								StructLikeWrapper.forType(spec.partitionType()).copyFor(file.partition()));
+						Map<String, DataFile> candidates = groups.computeIfAbsent(group, key -> new LinkedHashMap<>());
+						if (candidates.size() < maximum) {
+							candidates.putIfAbsent(file.location(), file);
+						}
 					}
 				}
 			}
-			if (candidates.size() < minimum) {
-				return;
-			}
 
-			Set<DataFile> replacements = mergeCompactionFiles(candidates.values(), targetSize, paths);
-			if (replacements.size() >= candidates.size()) {
-				cleanup(paths);
+			Set<DataFile> inputs = new LinkedHashSet<>();
+			Set<DataFile> replacements = new LinkedHashSet<>();
+			for (var entry : groups.entrySet()) {
+				Map<String, DataFile> candidates = entry.getValue();
+				if (candidates.size() < minimum) {
+					continue;
+				}
+				List<String> groupPaths = new ArrayList<>();
+				Set<DataFile> merged;
+				try {
+					merged = mergeCompactionFiles(candidates.values(), table.specs().get(entry.getKey().specId()),
+							candidates.values().iterator().next().partition(), targetSize, groupPaths);
+				} finally {
+					paths.addAll(groupPaths);
+				}
+				if (merged.size() >= candidates.size()) {
+					cleanup(groupPaths);
+				} else {
+					inputs.addAll(candidates.values());
+					replacements.addAll(merged);
+				}
+			}
+			if (inputs.isEmpty()) {
 				return;
 			}
 			// Validate against exactly the snapshot read: concurrent appends are safe,
 			// but replaced inputs and newly added row-level deletes must conflict.
 			table.newRewrite().validateFromSnapshot(snapshotId)
-					.rewriteFiles(new LinkedHashSet<>(candidates.values()), replacements).commit();
+					.rewriteFiles(inputs, replacements).commit();
 		} catch (CommitStateUnknownException e) {
 			log.error("Iceberg compaction commit state is unknown; appended tuples remain committed and output files are retained", e);
 			throw e;
@@ -297,7 +355,11 @@ public class IcebergRecordStore implements KvinRecordStore {
 		}
 	}
 
-	private Set<DataFile> mergeCompactionFiles(Iterable<DataFile> files, long targetSize, List<String> paths) throws IOException {
+	private record PartitionGroup(int specId, StructLikeWrapper partition) {
+	}
+
+	private Set<DataFile> mergeCompactionFiles(Iterable<DataFile> files, PartitionSpec spec, StructLike partition,
+			long targetSize, List<String> paths) throws IOException {
 		Set<DataFile> replacements = new LinkedHashSet<>();
 		PriorityQueue<CompactionCursor> queue = new PriorityQueue<>((a, b) -> ORDER.compare(a.row, b.row));
 		try (CloseableGroup readers = new CloseableGroup()) {
@@ -311,7 +373,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 				}
 			}
 			while (!queue.isEmpty()) {
-				DataWriter<org.apache.iceberg.data.Record> writer = newCompactionWriter(targetSize, paths);
+				DataWriter<org.apache.iceberg.data.Record> writer = newWriter(spec, partition, targetSize, paths);
 				long item = 0, context = 0, property = 0;
 				boolean first = true;
 				try (writer) {
@@ -336,15 +398,18 @@ public class IcebergRecordStore implements KvinRecordStore {
 		return replacements;
 	}
 
-	private DataWriter<org.apache.iceberg.data.Record> newCompactionWriter(long targetSize, List<String> paths) throws IOException {
+	private DataWriter<org.apache.iceberg.data.Record> newWriter(PartitionSpec spec, StructLike partition,
+			Long targetSize, List<String> paths) throws IOException {
 		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet").toString();
 		paths.add(path);
 		Files.createDirectories(Path.of(path).getParent());
-		var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table)
-				.set(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, Long.toString(Math.min(targetSize, 8L * 1024 * 1024)))
-				.writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
+		var builder = Parquet.write(table.io().newOutputFile(path)).forTable(table);
+		if (targetSize != null) {
+			builder.set(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, Long.toString(Math.min(targetSize, 8L * 1024 * 1024)));
+		}
+		var appender = builder.writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
 				.createWriterFunc(message -> GenericParquetWriter.create(SCHEMA, message)).<org.apache.iceberg.data.Record>build();
-		return new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null, table.sortOrder());
+		return new DataWriter<>(appender, FileFormat.PARQUET, path, spec, partition, null, table.sortOrder());
 	}
 
 	private static final class CompactionCursor {
@@ -399,6 +464,22 @@ public class IcebergRecordStore implements KvinRecordStore {
 	}
 
 	private void writeBatch(List<GenericRecord> batch, List<DataFile> files, List<String> paths) throws IOException {
+		PartitionSpec spec = table.spec();
+		validatePartitionSpec(spec);
+		PartitionKey key = new PartitionKey(spec, SCHEMA);
+		Map<PartitionKey, List<GenericRecord>> partitions = new LinkedHashMap<>();
+		for (GenericRecord row : batch) {
+			key.partition(row);
+			partitions.computeIfAbsent(key.copy(), ignored -> new ArrayList<>()).add(row);
+		}
+		for (var entry : partitions.entrySet()) {
+			writePartition(entry.getValue(), spec, entry.getKey(), files, paths);
+		}
+		batch.clear();
+	}
+
+	private void writePartition(List<GenericRecord> batch, PartitionSpec spec, PartitionKey partition,
+			List<DataFile> files, List<String> paths) throws IOException {
 		batch.sort(ORDER);
 
 		for (int i = 0; i < batch.size(); i++) {
@@ -409,21 +490,13 @@ public class IcebergRecordStore implements KvinRecordStore {
 			current.set(5, first);
 		}
 
-		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet").toString();
-
-		paths.add(path);
-		Files.createDirectories(Path.of(path).getParent());
-
-		var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table).writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0).createWriterFunc(message -> GenericParquetWriter.create(SCHEMA, message)).<org.apache.iceberg.data.Record>build();
-
-		DataWriter<org.apache.iceberg.data.Record> writer = new DataWriter<>(appender, FileFormat.PARQUET, path, SPEC, null, null, table.sortOrder());
+		DataWriter<org.apache.iceberg.data.Record> writer = newWriter(spec, partition, null, paths);
 
 		try (writer) {
 			batch.forEach(writer::write);
 		}
 
 		files.add(writer.toDataFile());
-		batch.clear();
 	}
 
 	public synchronized void createBranch(String branchName) {
@@ -776,6 +849,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 			committed = true;
 
 			return deleted;
+		} catch (CommitStateUnknownException e) {
+			throw e;
 		} catch (IOException e) {
 			cleanup(temporaryPaths);
 			throw new UncheckedIOException("Unable to delete Iceberg tuples", e);
