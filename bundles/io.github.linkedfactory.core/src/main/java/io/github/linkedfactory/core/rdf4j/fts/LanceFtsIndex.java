@@ -170,8 +170,10 @@ public class LanceFtsIndex implements AutoCloseable {
 						.build());
 	}
 
-	private static final int DELETE_BATCH_SIZE = 100;
+	private static final int DELETE_BATCH_SIZE = 500;
+	private static final int COMPACT_STRIDE = 10;
 	private boolean rowKeyIndexReady = false;
+	private int deleteCallCount = 0;
 
 	private void deleteRows(List<FieldValue> rows) throws Exception {
 		if (dataset == null) {
@@ -188,7 +190,10 @@ public class LanceFtsIndex implements AutoCloseable {
 				rowKeys.add(quote(rowKey(row)));
 			}
 			dataset.delete("row_key IN (" + String.join(",", rowKeys) + ")");
-			dataset.compact();
+			deleteCallCount++;
+			if (deleteCallCount % COMPACT_STRIDE == 0) {
+				dataset.compact();
+			}
 		}
 	}
 
