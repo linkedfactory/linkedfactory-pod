@@ -140,6 +140,9 @@ public class LanceFtsIndex implements AutoCloseable {
 		allocator.close();
 	}
 
+	private static final int VALUE_INDEX_REBUILD_THRESHOLD = 50_000;
+	private int rowsSinceValueIndexRebuild = 0;
+
 	private void appendRows(List<FieldValue> rows) throws Exception {
 		byte[] arrowData = encode(rows);
 		try (ByteArrayInputStream in = new ByteArrayInputStream(arrowData);
@@ -156,7 +159,11 @@ public class LanceFtsIndex implements AutoCloseable {
 			}
 			dataset = written;
 		}
-		reindexValueColumn();
+		rowsSinceValueIndexRebuild += rows.size();
+		if (rowsSinceValueIndexRebuild >= VALUE_INDEX_REBUILD_THRESHOLD) {
+			reindexValueColumn();
+			rowsSinceValueIndexRebuild = 0;
+		}
 	}
 
 	private void reindexValueColumn() {
