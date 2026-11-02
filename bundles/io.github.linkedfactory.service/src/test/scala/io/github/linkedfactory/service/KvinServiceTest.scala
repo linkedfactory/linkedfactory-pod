@@ -11,7 +11,14 @@ import net.enilink.komma.model.*
 import net.enilink.platform.lift.util.Globals
 import net.liftweb.common.{Box, Full}
 import net.liftweb.http.provider.servlet.HTTPRequestServlet
-import net.liftweb.http.{CurrentReq, InMemoryResponse, LiftResponse, OutputStreamResponse, Req, S}
+import net.liftweb.http.{BasicResponse, CurrentReq, InMemoryResponse, LiftResponse, OutputStreamResponse, Req, S}
+import org.apache.parquet.conf.PlainParquetConfiguration
+import org.apache.parquet.example.data.Group
+import org.apache.parquet.example.data.simple.SimpleGroupFactory
+import org.apache.parquet.hadoop.{ParquetFileWriter, ParquetWriter}
+import org.apache.parquet.hadoop.example.ExampleParquetWriter
+import org.apache.parquet.io.LocalOutputFile
+import org.apache.parquet.schema.MessageTypeParser
 import org.junit.Assert.*
 import org.junit.{AfterClass, BeforeClass, Test}
 
@@ -206,6 +213,115 @@ class KvinServiceTest {
       body_=("time,value\ninvalid,1", "text/csv")
     }
     assertEquals(400, kvinRest(toReq(request))().map(_.toResponse).openOr(null).code)
+  }
+
+  private def postParquet(payload: Array[Byte]): BasicResponse = {
+    val request = new MockHttpServletRequest(baseUrl) {
+      method = "POST"
+      body = payload
+      contentType = "application/vnd.apache.parquet"
+    }
+    kvinRest(toReq(request))().map(_.toResponse).openOr(null)
+  }
+
+  /** Writes a Parquet file like other tools, e.g. pandas or pyarrow. */
+  private def writeParquet(schema: String, rowGroupSize: Long = ParquetWriter.DEFAULT_BLOCK_SIZE)
+                          (rows: SimpleGroupFactory => Seq[Group]): Array[Byte] = {
+    val messageType = MessageTypeParser.parseMessageType(schema)
+    val file = Files.createTempFile("kvin-parquet-test-", ".parquet")
+    try {
+      val writer = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(messageType)
+        .withConf(new PlainParquetConfiguration()).withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+        .withRowGroupSize(rowGroupSize).build()
+      try rows(new SimpleGroupFactory(messageType)).foreach(writer.write) finally writer.close()
+      Files.readAllBytes(file)
+    } finally Files.delete(file)
+  }
+
+  private def fetch(item: URI, property: URI): List[KvinTuple] = {
+    val stored = KvinServiceTest.store.fetch(item, property, Kvin.DEFAULT_CONTEXT, 0)
+    try stored.toList.asScala.toList finally stored.close()
+  }
+
+  @Test
+  def parquetPostRoundTrip(): Unit = {
+    val values: Seq[Object] = Seq(Int.box(42), Long.box(9007199254740993L), Float.box(1.5f), Double.box(2.5d),
+      "text ✓", Boolean.box(true))
+    val series = for (i <- 1 to 2; p <- 1 to 2)
+      yield (URIs.createURI(s"urn:parquet:item$i"), URIs.createURI(s"urn:parquet:property$p"))
+    // value types also change within each series
+    val tuples = (0 until 2000).map { i =>
+      val (item, property) = series(i % series.size)
+      new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 1710000000000L + i, i % 3, values(i % values.size))
+    }
+    val payload = writeParquet("message KvinTuple { required binary item (STRING); required binary property (STRING); " +
+      "required int64 time; required int32 seqNr; optional int32 valueInt; optional int64 valueLong; " +
+      "optional float valueFloat; optional double valueDouble; optional binary valueString (STRING); " +
+      "optional boolean valueBool; }", rowGroupSize = 1024) { factory =>
+      tuples.map { t =>
+        val row = factory.newGroup().append("item", t.item.toString).append("property", t.property.toString)
+          .append("time", t.time).append("seqNr", t.seqNr)
+        t.value match {
+          case v: Integer => row.append("valueInt", v.intValue)
+          case v: java.lang.Long => row.append("valueLong", v.longValue)
+          case v: java.lang.Float => row.append("valueFloat", v.floatValue)
+          case v: java.lang.Double => row.append("valueDouble", v.doubleValue)
+          case v: String => row.append("valueString", v)
+          case v: java.lang.Boolean => row.append("valueBool", v.booleanValue)
+        }
+      }
+    }
+    assertEquals(200, postParquet(payload).code)
+    for ((item, property) <- series) {
+      val expected = tuples.filter(t => t.item == item && t.property == property)
+      assertEquals(expected.reverse, fetch(item, property))
+    }
+  }
+
+  @Test
+  def parquetPostResolvesRelativeUrisAndConvertsTimestamps(): Unit = {
+    // like pyarrow: optional columns, timestamps and no seqNr, with an additional column
+    val payload = writeParquet("message schema { optional double valueDouble; optional binary item (STRING); " +
+      "optional binary property (STRING); optional int64 time (TIMESTAMP(MICROS,true)); optional binary note; }") {
+      factory => Seq(factory.newGroup().append("valueDouble", 21.5d).append("item", "parquet/machine1")
+        .append("property", "temperature").append("time", 1710000000123999L).append("note", "ignored"))
+    }
+    assertEquals(200, postParquet(payload).code)
+    val item = URIs.createURI("http://foo.com/linkedfactory/parquet/machine1")
+    val property = URIs.createURI("http://foo.com/linkedfactory/temperature")
+    assertEquals(List(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 1710000000123L, 0, Double.box(21.5d))),
+      fetch(item, property))
+  }
+
+  @Test
+  def parquetPostRejectsInvalidContent(): Unit = {
+    val response = postParquet(Array[Byte](1, 2, 3))
+    assertEquals(400, response.code)
+    assertTrue(responseBody(response).contains("is not a Parquet file"))
+
+    val identity = "optional binary item; optional binary property; optional int64 time; "
+    for (schema <- Seq(
+      identity + "optional double value;", // single value column
+      "optional binary item; optional int64 time; optional double valueDouble;", // no property
+      identity + "optional int64 valueDouble;",
+      identity + "optional int32 valueInt (DECIMAL(9,2));",
+      identity + "repeated double valueDouble;")) {
+      val payload = writeParquet(s"message m { $schema }")(_ => Nil)
+      assertEquals(schema, 400, postParquet(payload).code)
+    }
+
+    val item = URIs.createURI("urn:parquet:invalid")
+    for (twoValues <- Seq(false, true)) {
+      val payload = writeParquet(s"message m { $identity optional int32 valueInt; optional boolean valueBool; }") {
+        factory =>
+          val valid = factory.newGroup().append("item", item.toString).append("property", "urn:p").append("time", 1L)
+            .append("valueInt", 1)
+          val invalid = factory.newGroup().append("item", item.toString).append("property", "urn:p").append("time", 2L)
+          if (twoValues) invalid.append("valueInt", 1).append("valueBool", true)
+          Seq(valid, invalid)
+      }
+      assertEquals(400, postParquet(payload).code)
+    }
   }
 
   @Test

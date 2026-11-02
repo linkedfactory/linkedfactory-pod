@@ -239,6 +239,7 @@
 								org.iq80.snappy,
 								org.xerial.snappy,
 								org.apache.parquet,
+								org.locationtech.jts,
 								org.apache.avro,
 								org.apache.hadoop,
 								com.fasterxml.woodstox,

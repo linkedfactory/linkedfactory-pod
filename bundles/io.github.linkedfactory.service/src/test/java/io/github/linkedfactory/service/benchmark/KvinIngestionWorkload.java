@@ -5,10 +5,22 @@ import io.github.linkedfactory.core.kvin.util.JsonFormatWriter;
 import net.enilink.commons.iterator.WrappedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import org.apache.parquet.conf.PlainParquetConfiguration;
+import org.apache.parquet.example.data.Group;
+import org.apache.parquet.example.data.simple.SimpleGroupFactory;
+import org.apache.parquet.hadoop.ParquetFileWriter;
+import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.example.ExampleParquetWriter;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
+import org.apache.parquet.io.LocalOutputFile;
+import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.MessageTypeParser;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -44,6 +56,7 @@ public final class KvinIngestionWorkload {
 	private final List<KvinTuple> preseedTuples;
 	private final byte[] jsonPayload;
 	private final byte[] csvPayload;
+	private final byte[] parquetPayload;
 
 	public KvinIngestionWorkload() {
 		this(0);
@@ -62,6 +75,7 @@ public final class KvinIngestionWorkload {
 		this.preseedTuples = createPreseedTuples();
 		this.jsonPayload = createJsonPayload(tuples);
 		this.csvPayload = createCsvPayload(0, ROW_COUNT);
+		this.parquetPayload = createParquetPayload(tuples);
 	}
 
 	static List<KvinIngestionWorkload> variants() {
@@ -98,6 +112,10 @@ public final class KvinIngestionWorkload {
 
 	public byte[] csvPayload() {
 		return csvPayload.clone();
+	}
+
+	public byte[] parquetPayload() {
+		return parquetPayload.clone();
 	}
 
 	public List<byte[]> csvPayloads(int fileCount) {
@@ -143,6 +161,34 @@ public final class KvinIngestionWorkload {
 							.thenComparingInt(t -> t.seqNr))
 					.toList().iterator()));
 			return json.getBytes(StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
+	/**
+	 * Writes the tuples like pyarrow with its default settings.
+	 */
+	private static byte[] createParquetPayload(List<KvinTuple> tuples) {
+		MessageType schema = MessageTypeParser.parseMessageType("message schema { optional binary item (STRING); " +
+				"optional binary property (STRING); optional int64 time; optional int32 seqNr; optional double valueDouble; }");
+		try {
+			Path file = Files.createTempFile("kvin-ingestion-", ".parquet");
+			try {
+				SimpleGroupFactory groups = new SimpleGroupFactory(schema);
+				try (ParquetWriter<Group> writer = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(schema)
+						.withConf(new PlainParquetConfiguration()).withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+						.withCompressionCodec(CompressionCodecName.SNAPPY).build()) {
+					for (KvinTuple tuple : tuples) {
+						writer.write(groups.newGroup().append("item", tuple.item.toString())
+								.append("property", tuple.property.toString()).append("time", tuple.time)
+								.append("seqNr", tuple.seqNr).append("valueDouble", (Double) tuple.value));
+					}
+				}
+				return Files.readAllBytes(file);
+			} finally {
+				Files.delete(file);
+			}
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}

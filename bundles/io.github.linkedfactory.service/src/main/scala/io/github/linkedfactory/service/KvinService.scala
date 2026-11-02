@@ -15,7 +15,7 @@
  */
 package io.github.linkedfactory.service
 
-import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator}
+import io.github.linkedfactory.core.kvin.util.{AsyncExtendedIterator, CsvFormatParser, JsonFormatParser, JsonFormatWriter, KvinTupleGroupingIterator, ParquetFormatParser}
 import io.github.linkedfactory.core.kvin.{Kvin, KvinTuple, Record}
 import io.github.linkedfactory.core.rdf4j.FederatedServiceComponent
 import io.github.linkedfactory.service.util.LineProtocolParser
@@ -33,6 +33,7 @@ import net.liftweb.util.Helpers.*
 import org.apache.commons.csv.{CSVFormat, CSVPrinter}
 
 import java.io.{InputStream, OutputStream, OutputStreamWriter}
+import java.nio.file.{Files, StandardCopyOption}
 import java.text.SimpleDateFormat
 import java.util
 import java.util.Date
@@ -40,7 +41,7 @@ import scala.jdk.CollectionConverters.*
 
 class KvinService(path: List[String], store: Kvin) extends RestHelper with Loggable {
   val MAX_LIMIT = 500000
-  private val CSV_GROUPING_WINDOW_SIZE = 6000
+  private val GROUPING_WINDOW_SIZE = 6000
   val valueProperty: URI = URIs.createURI("value")
 
   val CORS_HEADERS: List[(String, String)] = ("Access-Control-Allow-Origin", "*") :: ("Access-Control-Allow-Credentials", "true") :: //
@@ -115,6 +116,8 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
           req.rawInputStream.flatMap(saveLineValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
         case Full("text/csv") =>
           req.rawInputStream.flatMap(saveCsvValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
+        case Full("application/vnd.apache.parquet") =>
+          req.rawInputStream.flatMap(saveParquetValues(_, path ++ list.dropRight(1)))
         case _ =>
           req.rawInputStream.flatMap(saveJsonValues(_, path ++ list.dropRight(1), System.currentTimeMillis))
       }
@@ -296,12 +299,31 @@ class KvinService(path: List[String], store: Kvin) extends RestHelper with Logga
       val parser = new CsvFormatParser(parentUri, separator, in)
       parser.setContext(contextModelUri)
       val tuples: IExtendedIterator[KvinTuple] =
-        new KvinTupleGroupingIterator(parser.parse(), CSV_GROUPING_WINDOW_SIZE)
+        new KvinTupleGroupingIterator(parser.parse(), GROUPING_WINDOW_SIZE)
       try store.put(tuples) finally tuples.close()
       Empty
     } catch {
       case e: Exception => new Failure(e.getMessage, Full(e), Empty)
     }
+  }
+
+  // handle Parquet post content
+  protected def saveParquetValues(in: InputStream, path: List[String]): Box[?] = {
+    var parentUri = Data.pathToURI(path)
+    if (parentUri.lastSegment != "") parentUri = parentUri.appendSegment("")
+
+    // Parquet requires random access, hence the content is buffered in a temporary file
+    val file = Files.createTempFile("kvin-upload-", ".parquet")
+    try {
+      Files.copy(in, file, StandardCopyOption.REPLACE_EXISTING)
+      val parser = new ParquetFormatParser(parentUri, file).setContext(contextModelUri)
+      val tuples: IExtendedIterator[KvinTuple] =
+        new KvinTupleGroupingIterator(parser.parse(), GROUPING_WINDOW_SIZE)
+      try store.put(tuples) finally tuples.close()
+      Empty
+    } catch {
+      case e: Exception => new Failure(e.getMessage, Full(e), Empty)
+    } finally Files.delete(file)
   }
 
   // handle InfluxDB line protocol content

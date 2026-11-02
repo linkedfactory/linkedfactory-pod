@@ -1,6 +1,6 @@
 # KVIN Ingestion Benchmarks
 
-This JMH suite measures **KVIN ingestion throughput** through the direct LevelDB API and the in-process JSON and CSV service routes.
+This JMH suite measures **KVIN ingestion throughput** through the direct LevelDB API and the in-process JSON, CSV and Parquet service routes.
 
 Each primary benchmark processes **30,000 `KvinTuple`s per invocation**. JMH reports throughput as `ops/s`; `@OperationsPerInvocation(30000)` normalizes the result so that:
 
@@ -18,6 +18,7 @@ flowchart LR
     CD["putCsvDirect"] --> CP["CSV parser"] --> W
     PC["postCsv"] --> L["Lift route"] --> CP
     PJ["postJson"] --> L --> JP["JSON parser"] --> W
+    PP["postParquet"] --> L --> PQ["Parquet parser"] --> W
     PS["postCsvSequentialFiles<br/>10 requests"] --> L
     W --> DB[("LevelDB")]
 ```
@@ -28,9 +29,10 @@ flowchart LR
 | `putCsvDirect`           | CSV parsing + tuple creation + persistence, without Lift routing        |
 | `postCsv`                | In-process CSV request → route → parsing → persistence                  |
 | `postJson`               | In-process JSON request → route → parsing → persistence                 |
+| `postParquet`            | In-process Parquet request → route → temporary file → parsing → persistence |
 | `postCsvSequentialFiles` | Ten sequential CSV requests to the same service and store               |
 
-`putBatch` is the persistence baseline. `putCsvDirect` adds CSV parsing. `postCsv` and `postJson` represent the main in-process service ingestion paths.
+`putBatch` is the persistence baseline. `putCsvDirect` adds CSV parsing. `postCsv`, `postJson` and `postParquet` represent the main in-process service ingestion paths. The Parquet payload is written like pyarrow does with its default settings.
 
 ### Test data
 
@@ -63,7 +65,7 @@ From the repository root, build once:
 mvn clean install -DskipTests
 ```
 
-Run the five primary benchmarks:
+Run the six primary benchmarks:
 
 ```sh
 mvn -pl bundles/io.github.linkedfactory.service -Pjmh \
