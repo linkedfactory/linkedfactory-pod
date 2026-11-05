@@ -45,7 +45,12 @@ jobs:
           images: linkedfactory/linkedfactory-pod
 
       - name: Set version env variable
-        run: echo "PROJECT_VERSION=$(< server/target/version.txt)" >> $GITHUB_ENV
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
+            echo "PROJECT_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "PROJECT_VERSION=$(< server/target/version.txt)" >> "$GITHUB_ENV"
+          fi
       
       - name: Build and push Docker image
         uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
@@ -53,5 +58,5 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           push: true
-          tags: linkedfactory/linkedfactory-pod:${{ env.PROJECT_VERSION }},linkedfactory/linkedfactory-pod:latest
+          tags: linkedfactory/linkedfactory-pod:${{ env.PROJECT_VERSION }}${{ github.ref_type != 'tag' && ',linkedfactory/linkedfactory-pod:latest' || '' }}
           labels: ${{ steps.meta.outputs.labels }}

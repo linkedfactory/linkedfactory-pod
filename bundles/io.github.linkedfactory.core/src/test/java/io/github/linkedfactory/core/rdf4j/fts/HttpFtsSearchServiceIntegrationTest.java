@@ -26,8 +26,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -37,6 +35,7 @@ public class HttpFtsSearchServiceIntegrationTest {
 			.connectTimeout(Duration.ofSeconds(5))
 			.build();
 	private final SimpleValueFactory vf = SimpleValueFactory.getInstance();
+	private final IRI testContext = vf.createIRI("urn:fts:integration");
 
 	private String endpoint;
 	private String indexName;
@@ -83,53 +82,46 @@ public class HttpFtsSearchServiceIntegrationTest {
 	}
 
 	@Test
-	public void syncsMultipleValuesUpdatesAndDeletes() throws Exception {
+	public void syncsLiteralStatementsAsIndependentDocuments() throws Exception {
 		initRepository(defaultIndexDefinition());
 
 		try (SailRepositoryConnection connection = repository.getConnection()) {
 			connection.begin();
-			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("alpha"));
-			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("beta"));
+			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("alpha"), testContext);
+			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("beta"), testContext);
 			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:related"), vf.createIRI("urn:lineA"));
 			connection.commit();
 		}
 
 		refreshIndex();
-		JsonNode source = documentSource("urn:sensor1");
-		assertNotNull(source);
-		assertEquals("urn:sensor1", source.path("subject").asText());
-		assertEquals(Set.of("alpha", "beta"), fieldValues(source, "urn:label"));
-		assertEquals(Set.of("urn:lineA"), fieldValues(source, "urn:related"));
+		assertEquals(2, documentCount());
+		assertEquals(Set.of("alpha", "beta"), valuesForSubject("urn:sensor1"));
 
 		try (SailRepositoryConnection connection = repository.getConnection()) {
 			connection.begin();
 			connection.remove(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("alpha"));
-			connection.remove(vf.createIRI("urn:sensor1"), vf.createIRI("urn:related"), vf.createIRI("urn:lineA"));
-			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("gamma"));
-			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:related"), vf.createIRI("urn:lineB"));
+			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("gamma"), testContext);
 			connection.commit();
 		}
 
 		refreshIndex();
-		source = documentSource("urn:sensor1");
-		assertNotNull(source);
-		assertEquals(Set.of("beta", "gamma"), fieldValues(source, "urn:label"));
-		assertEquals(Set.of("urn:lineB"), fieldValues(source, "urn:related"));
+		assertEquals(2, documentCount());
+		assertEquals(Set.of("beta", "gamma"), valuesForSubject("urn:sensor1"));
 
 		try (SailRepositoryConnection connection = repository.getConnection()) {
 			connection.begin();
 			connection.remove(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("beta"));
 			connection.remove(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("gamma"));
-			connection.remove(vf.createIRI("urn:sensor1"), vf.createIRI("urn:related"), vf.createIRI("urn:lineB"));
 			connection.commit();
 		}
 
 		refreshIndex();
-		assertNull(documentSource("urn:sensor1"));
+		assertTrue(valuesForSubject("urn:sensor1").isEmpty());
+		assertEquals(0, documentCount());
 	}
 
 	@Test
-	public void clearContextsRemovesMatchingValuesAndDeletesEmptiedDocuments() throws Exception {
+	public void clearContextsRemovesMatchingDocuments() throws Exception {
 		initRepository(defaultIndexDefinition());
 
 		IRI ctxA = vf.createIRI("urn:ctx:A");
@@ -144,7 +136,7 @@ public class HttpFtsSearchServiceIntegrationTest {
 		}
 
 		refreshIndex();
-		assertEquals(2, documentCount());
+		assertEquals(3, documentCount());
 
 		try (SailRepositoryConnection connection = repository.getConnection()) {
 			connection.begin();
@@ -153,11 +145,8 @@ public class HttpFtsSearchServiceIntegrationTest {
 		}
 
 		refreshIndex();
-		JsonNode source = documentSource("urn:sensor1");
-		assertNotNull(source);
-		assertEquals(Set.of("beta"), fieldValues(source, "urn:label"));
-		assertEquals(Set.of("urn:ctx:B"), fieldContexts(source, "urn:label"));
-		assertNull(documentSource("urn:sensor2"));
+		assertEquals(Set.of("beta"), valuesForSubject("urn:sensor1"));
+		assertTrue(valuesForSubject("urn:sensor2").isEmpty());
 		assertEquals(1, documentCount());
 	}
 
@@ -167,8 +156,8 @@ public class HttpFtsSearchServiceIntegrationTest {
 
 		try (SailRepositoryConnection connection = repository.getConnection()) {
 			connection.begin();
-			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("alpha"));
-			connection.add(vf.createIRI("urn:sensor2"), vf.createIRI("urn:label"), vf.createLiteral("beta"));
+			connection.add(vf.createIRI("urn:sensor1"), vf.createIRI("urn:label"), vf.createLiteral("alpha"), testContext);
+			connection.add(vf.createIRI("urn:sensor2"), vf.createIRI("urn:label"), vf.createLiteral("beta"), testContext);
 			connection.commit();
 		}
 
@@ -191,18 +180,18 @@ public class HttpFtsSearchServiceIntegrationTest {
 
 		try (SailRepositoryConnection connection = repository.getConnection()) {
 			connection.begin();
-			connection.add(vf.createIRI("urn:ok"), vf.createIRI("urn:number"), vf.createLiteral("42"));
-			connection.add(vf.createIRI("urn:bad"), vf.createIRI("urn:number"), vf.createLiteral("not-a-number"));
+			connection.add(vf.createIRI("urn:ok"), vf.createIRI("urn:number"), vf.createLiteral("42"), testContext);
+			connection.add(vf.createIRI("urn:bad"), vf.createIRI("urn:number"), vf.createLiteral("not-a-number"), testContext);
 			try {
 				connection.commit();
 				fail("Expected bulk item failure");
 			} catch (Exception expected) {
-				assertTrue(containsMessage(expected, "bulk update"));
+				assertTrue(containsMessage(expected, "bulk index"));
 			}
 		}
 
 		try (var files = Files.list(outboxDir)) {
-			assertTrue(files.findAny().isPresent());
+			assertTrue(files.filter(path -> path.toString().endsWith(".jsonl")).findAny().isPresent());
 		}
 
 		deleteIndexIfExists();
@@ -210,18 +199,49 @@ public class HttpFtsSearchServiceIntegrationTest {
 		searchService.commit();
 
 		refreshIndex();
-		assertNotNull(documentSource("urn:ok"));
-		assertNotNull(documentSource("urn:bad"));
-		assertEquals(Set.of("42"), fieldValues(documentSource("urn:ok"), "urn:number"));
-		assertEquals(Set.of("not-a-number"), fieldValues(documentSource("urn:bad"), "urn:number"));
+		assertEquals(Set.of("42"), valuesForSubject("urn:ok"));
+		assertEquals(Set.of("not-a-number"), valuesForSubject("urn:bad"));
 		try (var files = Files.list(outboxDir)) {
-			assertTrue(files.findAny().isEmpty());
+			assertTrue(files.filter(path -> path.toString().endsWith(".jsonl")).findAny().isEmpty());
+		}
+	}
+
+	@Test
+	public void persistedAsyncDeletionTaskRecoversBeforeLaterUpdates() throws Exception {
+		initRepository(defaultIndexDefinition());
+		try (SailRepositoryConnection connection = repository.getConnection()) {
+			connection.begin();
+			connection.add(vf.createIRI("urn:old"), vf.createIRI("urn:label"), vf.createLiteral("old"), testContext);
+			connection.commit();
+		}
+		refreshIndex();
+		JsonNode submitted = sendExpecting("POST", "/" + indexName
+				+ "/_delete_by_query?conflicts=proceed&refresh=true&wait_for_completion=false",
+				"{\"query\":{\"match_all\":{}}}", 200);
+		Path payload = outboxDir.resolve("1-recovery.jsonl");
+		Files.writeString(payload, "{\"op\":\"clear\"}\n");
+		Path marker = payload.resolveSibling(payload.getFileName() + ".uncertain");
+		Files.writeString(marker, mapper.writeValueAsString(java.util.Map.of(
+				"version", 1, "kind", "delete", "requestId", "recovery-integration",
+				"taskId", submitted.path("task").asText())));
+		searchService.begin();
+		searchService.addRemoveStatements(Set.of(vf.createStatement(vf.createIRI("urn:new"),
+				vf.createIRI("urn:label"), vf.createLiteral("replacement"), testContext)), Set.of());
+		searchService.commit();
+		refreshIndex();
+		assertEquals(1, documentCount());
+		assertEquals(Set.of("replacement"), valuesForSubject("urn:new"));
+		assertTrue(valuesForSubject("urn:old").isEmpty());
+		assertTrue(Files.notExists(marker));
+		try (var files = Files.list(outboxDir)) {
+			assertTrue(files.noneMatch(path -> path.toString().endsWith(".jsonl")));
 		}
 	}
 
 	private void initRepository(String indexDefinition) throws Exception {
 		createIndex(indexDefinition);
-		outboxDir = Files.createTempDirectory("fts-es-it-outbox");
+		Files.createDirectories(Path.of("target"));
+		outboxDir = Files.createTempDirectory(Path.of("target"), "fts-es-it-outbox");
 		searchService = new HttpFtsSearchService(endpoint, "/" + indexName + "/_bulk", true, outboxDir.toString());
 		repository = new SailRepository(new FtsSail(searchService, new MemoryStore()));
 		repository.init();
@@ -235,10 +255,15 @@ public class HttpFtsSearchServiceIntegrationTest {
 				    "number_of_replicas": 0
 				  },
 				  "mappings": {
+				    "dynamic": "strict",
 				    "properties": {
-				      "subject": {
-				        "type": "keyword"
-				      }
+				      "subject": { "type": "keyword" },
+				      "predicate": { "type": "keyword" },
+				      "value": { "type": "text" },
+				      "context": { "type": "keyword" },
+				      "datatype": { "type": "keyword" },
+				      "language": { "type": "keyword" },
+				      "sortValue": { "type": "keyword" }
 				    }
 				  }
 				}
@@ -253,19 +278,15 @@ public class HttpFtsSearchServiceIntegrationTest {
 				    "number_of_replicas": 0
 				  },
 				  "mappings": {
+				    "dynamic": "strict",
 				    "properties": {
-				      "subject": {
-				        "type": "keyword"
-				      },
-				      "urn:number": {
-				        "properties": {
-				          "kind": { "type": "keyword" },
-				          "value": { "type": "long" },
-				          "datatype": { "type": "keyword" },
-				          "language": { "type": "keyword" },
-				          "context": { "type": "keyword" }
-				        }
-				      }
+				      "subject": { "type": "keyword" },
+				      "predicate": { "type": "keyword" },
+				      "value": { "type": "long" },
+				      "context": { "type": "keyword" },
+				      "datatype": { "type": "keyword" },
+				      "language": { "type": "keyword" },
+				      "sortValue": { "type": "keyword" }
 				    }
 				  }
 				}
@@ -285,30 +306,21 @@ public class HttpFtsSearchServiceIntegrationTest {
 		return response.path("count").asLong();
 	}
 
-	private JsonNode documentSource(String subject) throws Exception {
-		HttpResponse<String> response = sendRaw("GET", "/" + indexName + "/_doc/" + encodePathSegment(subject), null);
-		if (response.statusCode() == 404) {
-			return null;
-		}
-		if (response.statusCode() >= 300) {
-			throw new AssertionError("HTTP " + response.statusCode() + " while reading document: " + response.body());
-		}
-		JsonNode root = mapper.readTree(response.body());
-		return root.path("found").asBoolean(false) ? root.path("_source") : null;
-	}
-
-	private Set<String> fieldValues(JsonNode source, String field) {
+	private Set<String> valuesForSubject(String subject) throws Exception {
+		JsonNode response = sendExpecting("POST", "/" + indexName + "/_search", """
+				{
+				  "size": 100,
+				  "_source": ["value"],
+				  "query": {
+				    "term": {
+				      "subject": "%s"
+				    }
+				  }
+				}
+				""".formatted(subject), 200);
 		Set<String> values = new LinkedHashSet<>();
-		for (JsonNode value : source.path(field)) {
-			values.add(value.path("value").asText());
-		}
-		return values;
-	}
-
-	private Set<String> fieldContexts(JsonNode source, String field) {
-		Set<String> values = new LinkedHashSet<>();
-		for (JsonNode value : source.path(field)) {
-			values.add(value.path("context").asText());
+		for (JsonNode hit : response.path("hits").path("hits")) {
+			values.add(hit.path("_source").path("value").asText());
 		}
 		return values;
 	}
@@ -340,18 +352,18 @@ public class HttpFtsSearchServiceIntegrationTest {
 		}
 	}
 
-	private String encodePathSegment(String value) {
-		return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
-	}
-
-	private boolean containsMessage(Throwable error, String fragment) {
-		Throwable current = error;
+	private boolean containsMessage(Throwable throwable, String token) {
+		Throwable current = throwable;
 		while (current != null) {
-			if (current.getMessage() != null && current.getMessage().contains(fragment)) {
+			if (current.getMessage() != null && current.getMessage().contains(token)) {
 				return true;
 			}
 			current = current.getCause();
 		}
 		return false;
+	}
+
+	private String encodePathSegment(String value) {
+		return URLEncoder.encode(value, StandardCharsets.UTF_8);
 	}
 }
