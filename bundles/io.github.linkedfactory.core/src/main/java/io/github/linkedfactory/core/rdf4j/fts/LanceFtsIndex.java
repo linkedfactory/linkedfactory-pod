@@ -16,6 +16,7 @@ import org.lance.WriteParams;
 import org.lance.index.IndexOptions;
 import org.lance.index.IndexParams;
 import org.lance.index.IndexType;
+import org.lance.index.OptimizeOptions;
 import org.lance.index.scalar.ScalarIndexParams;
 import org.lance.ipc.FullTextQuery;
 import org.lance.ipc.LanceScanner;
@@ -140,8 +141,9 @@ public class LanceFtsIndex implements AutoCloseable {
 		allocator.close();
 	}
 
-	private static final int VALUE_INDEX_REBUILD_THRESHOLD = 50_000;
-	private int rowsSinceValueIndexRebuild = 0;
+	private static final int VALUE_INDEX_UPDATE_THRESHOLD = 50_000;
+	private int rowsSinceValueIndexUpdate = 0;
+	private boolean valueIndexReady = false;
 
 	private void appendRows(List<FieldValue> rows) throws Exception {
 		byte[] arrowData = encode(rows);
@@ -159,14 +161,18 @@ public class LanceFtsIndex implements AutoCloseable {
 			}
 			dataset = written;
 		}
-		rowsSinceValueIndexRebuild += rows.size();
-		if (rowsSinceValueIndexRebuild >= VALUE_INDEX_REBUILD_THRESHOLD) {
-			reindexValueColumn();
-			rowsSinceValueIndexRebuild = 0;
+		rowsSinceValueIndexUpdate += rows.size();
+		if (rowsSinceValueIndexUpdate >= VALUE_INDEX_UPDATE_THRESHOLD) {
+			updateValueIndex();
+			rowsSinceValueIndexUpdate = 0;
 		}
 	}
 
-	private void reindexValueColumn() {
+	private void updateValueIndex() {
+		if (valueIndexReady) {
+			dataset.optimizeIndices(OptimizeOptions.builder().indexNames(List.of("value_idx")).build());
+			return;
+		}
 		ScalarIndexParams invertedParams = ScalarIndexParams.create(
 				"inverted", "{\"base_tokenizer\":\"simple\",\"language\":\"English\",\"with_position\":false}");
 		IndexParams indexParams = IndexParams.builder().setScalarIndexParams(invertedParams).build();
@@ -175,6 +181,7 @@ public class LanceFtsIndex implements AutoCloseable {
 						.withIndexName("value_idx")
 						.replace(true)
 						.build());
+		valueIndexReady = true;
 	}
 
 	private static final int DELETE_BATCH_SIZE = 500;

@@ -8,11 +8,11 @@ Each JMH invocation loads or deletes exactly 10,000, 100,000, or 1,000,000 deter
 
 These timings isolate the FTS backend service. They do not include Pod model upload/download, RDF parsing, `FtsSail`, network transport to the Pod, or Elasticsearch refresh visibility. Elasticsearch must be running separately. Run both backends on the same host and report the Elasticsearch image/version, JVM, CPU, storage, and settings with results.
 
-## Lance delete at scale is slow — read this before running the full matrix
+## Lance index maintenance and large runs
 
-`LanceFtsIndex.deleteRows()` already batches deletes into groups of 5,000 statements per `dataset.delete()` call (a fix for a native crash seen with much larger single OR-predicate chains). Each of those calls still performs a full, unindexed scan over the dataset to evaluate the predicate, because this schema has no scalar index on `subject`/`predicate`/`value`. Delete cost therefore grows with both the batch size and the number of 5,000-row sub-batches needed to cover it, unlike Lucene's near-constant per-document delete.
+`LanceFtsIndex` builds the `value_idx` inverted index after the first 50,000 loaded rows. At each later 50,000-row threshold it incrementally adds unindexed fragments with `optimizeIndices()` restricted to `value_idx`. The index uses `with_position=false`. Searches include rows appended since the last index update because the scan leaves `fastSearch` disabled. This benchmark uses 5,000-statement transactions, so a 1,000,000-row load performs one initial build and 19 incremental updates.
 
-Concretely, expect the `(lance, 1000000, delete)` case alone to take on the order of 20-30 minutes **per invocation**, so roughly 1.5-2 hours for its one warmup plus three measured invocations under the default profile. The benchmark class sets an explicit `@Timeout(30, MINUTES)` on `FtsBackendLifecycleBenchmark` so JMH does not kill that iteration before it finishes (JMH's own default is 10 minutes). The full 12-case matrix took just over two hours end to end on the reference machine used to validate this benchmark. Everything other than lance/delete/1000000 completes in seconds.
+Deletes use a `row_key` BTREE index, 500-row native delete predicates, and compaction after every ten delete calls. The last full JMH matrix before incremental index maintenance measured about 37 seconds for a 1,000,000-row Lance delete. A separate 1,000,000-row incremental maintenance probe completed loading in 15.2 seconds with full index coverage and deletion in 80.9 seconds using its older 100-row delete configuration. These probe timings are diagnostic and should not be compared directly with JMH scores. Re-run the JMH matrix when reporting comparative backend performance.
 
 ## Lance requires Linux
 
@@ -46,7 +46,7 @@ Run the full matrix, writing JMH JSON under the ignored `target` directory:
 mvn -pl bundles/io.github.linkedfactory.core -Pjmh test-compile exec:exec
 ```
 
-The default run uses one JVM fork, one warmup invocation, three measured invocations, and one thread per case. Twelve cases cover two backends, three sizes, and two operations — see the warning above about how long the 1,000,000-row lance delete cases take, and make sure there is enough free disk space for the temporary Lance datasets and Elasticsearch indexes at that scale. For a stronger comparison, run the full matrix more than once and retain each JSON result file separately.
+The default run uses one JVM fork, one warmup invocation, three measured invocations, and one thread per case. Twelve cases cover two backends, three sizes, and two operations. Make sure there is enough free disk space for the temporary Lance datasets and Elasticsearch indexes at that scale. For a stronger comparison, run the full matrix more than once and retain each JSON result file separately.
 
 To run a small smoke check first:
 
