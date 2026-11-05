@@ -7,7 +7,12 @@ import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
+import org.lance.Dataset;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,6 +24,7 @@ public class LanceFtsIndexTest {
 	private static final AtomicInteger COUNTER = new AtomicInteger();
 
 	private final SimpleValueFactory vf = SimpleValueFactory.getInstance();
+	private String indexUri;
 	private LanceFtsIndex index;
 	private LanceFtsSearchService searchService;
 	private LanceFtsSearchBackend searchBackend;
@@ -27,7 +33,8 @@ public class LanceFtsIndexTest {
 	public void setUp() {
 		Assume.assumeFalse("org.lance:lance-core ships no Windows native library",
 				System.getProperty("os.name", "").toLowerCase().contains("win"));
-		index = new LanceFtsIndex("memory://lance-fts-" + COUNTER.incrementAndGet());
+		indexUri = "memory://lance-fts-" + COUNTER.incrementAndGet();
+		index = new LanceFtsIndex(indexUri);
 		searchService = new LanceFtsSearchService(index);
 		searchBackend = new LanceFtsSearchBackend(index);
 	}
@@ -50,6 +57,40 @@ public class LanceFtsIndexTest {
 		List<FtsSearchHit> hits = searchBackend.search(new FtsSearchRequest("quick", null, 10, null, false, null));
 		assertEquals(1, hits.size());
 		assertEquals("urn:item:1", hits.get(0).getIri());
+	}
+
+	@Test
+	public void incrementallyIndexesRowsAfterFirstThreshold() throws Exception {
+		Path workDir = Files.createTempDirectory("lance-fts-incremental-");
+		index.close();
+		indexUri = workDir.resolve("data.lance").toString();
+		index = new LanceFtsIndex(indexUri);
+		try {
+			List<LanceFtsIndex.FieldValue> first = new ArrayList<>(50_000);
+			List<LanceFtsIndex.FieldValue> second = new ArrayList<>(50_000);
+			for (int i = 0; i < 50_000; i++) {
+				first.add(new LanceFtsIndex.FieldValue("urn:first:" + i, "urn:title",
+						i == 0 ? "alphauniqueword" : "fox", false, "urn:context"));
+				second.add(new LanceFtsIndex.FieldValue("urn:second:" + i, "urn:title",
+						i == 49_999 ? "betanewword" : "fox", false, "urn:context"));
+			}
+			index.applyAddRemove(first, List.of());
+			assertEquals("urn:first:0", index.search(new FtsSearchRequest("alphauniqueword", null, 10, null, false, null)).get(0).getIri());
+			index.applyAddRemove(second, List.of());
+			assertEquals("urn:second:49999", index.search(new FtsSearchRequest("betanewword", null, 10, null, false, null)).get(0).getIri());
+			try (Dataset dataset = Dataset.open().uri(indexUri).build()) {
+				assertEquals(100_000L, ((Number) dataset.getIndexStatistics("value_idx").get("num_indexed_rows")).longValue());
+				assertEquals(0L, ((Number) dataset.getIndexStatistics("value_idx").get("num_unindexed_rows")).longValue());
+			}
+		} finally {
+			index.close();
+			index = null;
+			try (var paths = Files.walk(workDir)) {
+				for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+					Files.deleteIfExists(path);
+				}
+			}
+		}
 	}
 
 	@Test
