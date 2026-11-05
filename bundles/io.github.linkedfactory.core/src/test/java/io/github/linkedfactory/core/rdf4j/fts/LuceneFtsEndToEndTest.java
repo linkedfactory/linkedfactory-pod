@@ -54,7 +54,8 @@ public class LuceneFtsEndToEndTest {
 		try (var connection = repository.getConnection()) {
 			var vf = connection.getValueFactory();
 			connection.begin();
-			connection.add(vf.createIRI("urn:item1"), vf.createIRI("urn:title"), vf.createLiteral("the quick brown fox"));
+			connection.add(vf.createIRI("urn:item1"), vf.createIRI("urn:title"), vf.createLiteral("the quick brown fox"),
+					vf.createIRI("urn:graph:test"));
 			connection.commit();
 		}
 
@@ -93,10 +94,11 @@ public class LuceneFtsEndToEndTest {
 		var title = repository.getValueFactory().createIRI("urn:title");
 		var item = repository.getValueFactory().createIRI("urn:item1");
 		var literal = repository.getValueFactory().createLiteral("the quick brown fox");
+		var graph = repository.getValueFactory().createIRI("urn:graph:test");
 
 		try (var connection = repository.getConnection()) {
 			connection.begin();
-			connection.add(item, title, literal);
+			connection.add(item, title, literal, graph);
 			connection.commit();
 
 			connection.begin();
