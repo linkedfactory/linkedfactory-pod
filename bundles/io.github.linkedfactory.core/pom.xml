@@ -297,6 +297,7 @@
 			<properties>
 				<jmh.backends>lucene,elastic</jmh.backends>
 				<jmh.batch.sizes>10000,100000,1000000</jmh.batch.sizes>
+				<jmh.literal.lengths>short,long</jmh.literal.lengths>
 				<jmh.warmups>1</jmh.warmups>
 				<jmh.measurements>3</jmh.measurements>
 				<jmh.forks>1</jmh.forks>
@@ -314,6 +315,7 @@
 							<environmentVariables>
 								<JMH_BACKENDS>${jmh.backends}</JMH_BACKENDS>
 								<JMH_BATCH_SIZES>${jmh.batch.sizes}</JMH_BATCH_SIZES>
+								<JMH_LITERAL_LENGTHS>${jmh.literal.lengths}</JMH_LITERAL_LENGTHS>
 								<JMH_WARMUPS>${jmh.warmups}</JMH_WARMUPS>
 								<JMH_MEASUREMENTS>${jmh.measurements}</JMH_MEASUREMENTS>
 								<JMH_FORKS>${jmh.forks}</JMH_FORKS>
