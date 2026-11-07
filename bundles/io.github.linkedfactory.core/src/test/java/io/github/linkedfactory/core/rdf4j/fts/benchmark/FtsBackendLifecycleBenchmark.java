@@ -1,9 +1,13 @@
 package io.github.linkedfactory.core.rdf4j.fts.benchmark;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.linkedfactory.core.rdf4j.fts.ElasticKeywordSearchBackend;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchBackend;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchRequest;
 import io.github.linkedfactory.core.rdf4j.fts.FtsSearchService;
 import io.github.linkedfactory.core.rdf4j.fts.HttpFtsSearchService;
 import io.github.linkedfactory.core.rdf4j.fts.LuceneFtsIndex;
+import io.github.linkedfactory.core.rdf4j.fts.LuceneFtsSearchBackend;
 import io.github.linkedfactory.core.rdf4j.fts.LuceneFtsSearchService;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.store.FSDirectory;
@@ -66,12 +70,21 @@ public class FtsBackendLifecycleBenchmark {
 	private static final SimpleValueFactory VF = SimpleValueFactory.getInstance();
 	private static final ObjectMapper MAPPER = new ObjectMapper();
 	private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+	private static final String SEARCH_QUERY_TERM = "fox";
+	private static final int SEARCH_QUERIES_PER_INVOCATION = 100;
+	private static final int SHORT_LITERAL_MIN_WORDS = 2;
+	private static final int SHORT_LITERAL_MAX_WORDS = 8;
+	private static final int LONG_LITERAL_MIN_WORDS = 60;
+	private static final int LONG_LITERAL_MAX_WORDS = 100;
 
 	@Param({ "lucene", "elastic" })
 	public String backend;
 
 	@Param({ "10000", "100000", "1000000" })
 	public int batchSize;
+
+	@Param({ "short", "long" })
+	public String literalLength;
 
 	private List<Set<Statement>> batches;
 	private Path workDir;
@@ -81,19 +94,22 @@ public class FtsBackendLifecycleBenchmark {
 	private LuceneFtsIndex luceneIndex;
 	private HttpFtsSearchService httpService;
 	private FtsSearchService service;
+	private FtsSearchBackend searchBackend;
 
 	@Setup(Level.Trial)
 	public void prepareStatements() {
 		batches = new ArrayList<>((batchSize + COMMIT_SIZE - 1) / COMMIT_SIZE);
 		IRI context = VF.createIRI("urn:fts-benchmark:model");
 		Random random = new Random(LITERAL_SEED);
+		int minWords = "long".equals(literalLength) ? LONG_LITERAL_MIN_WORDS : SHORT_LITERAL_MIN_WORDS;
+		int maxWords = "long".equals(literalLength) ? LONG_LITERAL_MAX_WORDS : SHORT_LITERAL_MAX_WORDS;
 		for (int offset = 0; offset < batchSize; offset += COMMIT_SIZE) {
 			Set<Statement> batch = new LinkedHashSet<>(COMMIT_SIZE);
 			for (int i = offset; i < Math.min(offset + COMMIT_SIZE, batchSize); i++) {
 				batch.add(VF.createStatement(
 						VF.createIRI("urn:fts-benchmark:item:" + i),
 						VF.createIRI("urn:fts-benchmark:property:" + (i % 16)),
-						VF.createLiteral(randomLiteral(random)), context));
+						VF.createLiteral(randomLiteral(random, minWords, maxWords)), context));
 			}
 			batches.add(batch);
 		}
@@ -109,8 +125,8 @@ public class FtsBackendLifecycleBenchmark {
 		return cumulative;
 	}
 
-	private static String randomLiteral(Random random) {
-		int wordCount = 2 + random.nextInt(7);
+	private static String randomLiteral(Random random, int minWords, int maxWords) {
+		int wordCount = minWords + random.nextInt(maxWords - minWords + 1);
 		StringBuilder literal = new StringBuilder();
 		for (int w = 0; w < wordCount; w++) {
 			if (w > 0) {
@@ -135,6 +151,7 @@ public class FtsBackendLifecycleBenchmark {
 		luceneIndex = null;
 		httpService = null;
 		service = null;
+		searchBackend = null;
 		elasticIndexCreated = false;
 		indexName = null;
 		workDir = Files.createTempDirectory("fts-backend-jmh-");
@@ -142,22 +159,35 @@ public class FtsBackendLifecycleBenchmark {
 			if ("lucene".equals(backend)) {
 				luceneIndex = new LuceneFtsIndex(workDir.resolve("index"));
 				service = new LuceneFtsSearchService(luceneIndex);
+				searchBackend = new LuceneFtsSearchBackend(luceneIndex);
 			} else if ("elastic".equals(backend)) {
 				endpoint = System.getenv().getOrDefault("FTS_BENCHMARK_ENDPOINT", "http://localhost:9200");
 				endpoint = endpoint.replaceAll("/+$", "");
 				indexName = "linkedfactory-fts-jmh-" + UUID.randomUUID();
-				request("PUT", "/" + indexName, "{}");
+				request("PUT", "/" + indexName, """
+						{
+						  "mappings":{
+						    "properties":{
+						      "subject":{"type":"keyword"},
+						      "predicate":{"type":"keyword"},
+						      "value":{"type":"text"},
+						      "sortValue":{"type":"keyword"}
+						    }
+						  }
+						}
+						""");
 				elasticIndexCreated = true;
 				httpService = new HttpFtsSearchService(endpoint, "/" + indexName + "/_bulk", true,
 						workDir.resolve("outbox").toString());
 				service = httpService;
+				searchBackend = new ElasticKeywordSearchBackend(endpoint, "/" + indexName + "/_search", true, 100);
 			} else {
 				throw new IllegalArgumentException("Unsupported FTS backend: " + backend);
 			}
-			if (params.getBenchmark().endsWith(".delete")) {
+			if (params.getBenchmark().endsWith(".delete") || params.getBenchmark().endsWith(".search")) {
 				runBatches(false);
 				if (documentCount() != batchSize) {
-					throw new IllegalStateException("Delete setup did not index " + batchSize + " triples");
+					throw new IllegalStateException("Setup did not index " + batchSize + " triples");
 				}
 			}
 		} catch (Exception e) {
@@ -180,6 +210,18 @@ public class FtsBackendLifecycleBenchmark {
 		runBatches(true);
 	}
 
+	@Benchmark
+	public void search() throws Exception {
+		FtsSearchRequest request = new FtsSearchRequest(SEARCH_QUERY_TERM, null, 50, null, true, null);
+		int totalHits = 0;
+		for (int i = 0; i < SEARCH_QUERIES_PER_INVOCATION; i++) {
+			totalHits += searchBackend.search(request).size();
+		}
+		if (totalHits == 0) {
+			throw new IllegalStateException("Expected hits for '" + SEARCH_QUERY_TERM + "'");
+		}
+	}
+
 	@TearDown(Level.Invocation)
 	public void verifyAndClean(BenchmarkParams params) throws Exception {
 		try {
@@ -200,18 +242,24 @@ public class FtsBackendLifecycleBenchmark {
 			}
 		} finally {
 			try {
-				if (httpService != null) {
-					httpService.shutdown();
+				if (searchBackend != null) {
+					searchBackend.close();
 				}
 			} finally {
 				try {
-					if (elasticIndexCreated) {
-						request("DELETE", "/" + indexName, "");
+					if (httpService != null) {
+						httpService.shutdown();
 					}
 				} finally {
-					try (var paths = Files.walk(workDir)) {
-						for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-							Files.deleteIfExists(path);
+					try {
+						if (elasticIndexCreated) {
+							request("DELETE", "/" + indexName, "");
+						}
+					} finally {
+						try (var paths = Files.walk(workDir)) {
+							for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+								Files.deleteIfExists(path);
+							}
 						}
 					}
 				}
