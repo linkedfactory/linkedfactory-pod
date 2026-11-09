@@ -151,6 +151,8 @@ The following example shows how to configure the federated service and the FtsSa
              sail:sailType "fts:FtsSail" ;
              fts:backend "elastic" ;  # use built-in elasticsearch backend for external Elasticsearch server.
             fts:endpoint "http://localhost:9200" ; # the endpoint of the external search server
+            fts:outboxDir "/var/lib/linkedfactory/fts/linkedfactory-data/outbox" ; # durable, store-specific WAL directory
+            fts:storeIdentity "linkedfactory-data" ; # stable ID unique to this RDF store/index
             fts:bulkPath "/fts/bulk" ; # the bulk endpoint path for indexing (where linkedfactory sends the changes).
             fts:searchPath "/fts/_search" ; # the search endpoint path for querying .
             fts:defaultLimit 100 ; # the default result size for queries.
@@ -174,7 +176,21 @@ Common TTL options:
 - `fts:searchPath` backend query path
 - `fts:bulkPath "/fts/bulk"` is the bulk endpoint path for indexing (where linkedfactory sends the changes and not related to the federated service)
 - `fts:defaultLimit` default result size
-- `fts:failOnError` fail or log on backend errors
+
+- `fts:failOnError` legacy synchronous-service behavior; durable WAL delivery always retries asynchronously
+- `fts:outboxDir` absolute persistent directory on a filesystem that supports atomic same-directory rename and file/directory synchronization; dedicate it to one RDF store/index, keep it out of temporary storage, and include it in the store's backup/recovery plan
+- `fts:storeIdentity` stable identifier for this RDF store/index; it must remain unchanged across restarts and must differ for every store
+- `fts:backend "elastic"` selects the current `ElasticHttpFtsIndexUpdateStrategy`; other update strategies must be explicitly implemented and registered
+
+RDF commits only wait for the local WAL to be durable. A background worker applies remote updates in RDF commit order and retries failures. Keep the WAL directory on persistent storage; startup fails if a committed RDF journal marker has no matching WAL record or the directory ownership does not match. The file coordinator requires atomic same-directory rename, file and directory synchronization, and cooperating processes that honor OS file locks; use a local filesystem with those guarantees and dedicate one outbox directory to each store.
+
+Backend providers implement `FtsIndexUpdateStrategyFactory` and register it through Java `ServiceLoader` in `META-INF/services/io.github.linkedfactory.core.rdf4j.fts.config.FtsIndexUpdateStrategyFactory`. In OSGi, provider descriptors are also enumerated from installed bundles and classes are loaded by their declaring bundle classloader; the core bundle includes the Elasticsearch provider descriptor. Common infrastructure does not need to change when adding a backend. The strategy applies idempotent logical updates, while the coordinator owns durability, ordering, retries, and recovery. A failed earlier update blocks later updates until it succeeds. `FtsSail` accepts an `FtsIndexUpdateCoordinatorFactory` for selecting a different coordinator; the default is `FileFtsIndexUpdateCoordinatorFactory`, whose shutdown grace period is configurable.
+
+Monitor `FtsSail.getOutboxStatus()` for durable record count, pending count, record bytes, total outbox directory bytes, oldest pending-record age and sequence, delivery failure count, last successful delivery time, recovery duration, and the most recent delivery or recovery error. Alert on growing WAL size/age and repeated delivery failures, and provision disk capacity for prolonged backend outages. Successfully acknowledged `.done` records and their RDF journal markers are removed immediately; this is the retention policy, and cleanup never runs before backend application succeeds. Unfinished records are retained for restart recovery. For a poison update, inspect the recorded error and matching WAL transaction, correct the backend or mapping issue, then call `FtsSail.recoverFtsTransactions()` or restart the Sail to replay it. Do not delete, edit, or skip a pending WAL record to unblock later updates: strict sequence ordering is required to preserve index consistency. Recovery validates the complete WAL and RDF journal before changing record states.
+
+An FTS activation error after the RDF commit means the RDF data is committed but its durable prepared WAL record still requires recovery; that connection is unusable and should be closed. Recovery belongs to the Sail-level coordinator and can proceed while the Sail remains running. Shutdown stops new work, waits for the configured grace period, requests interruption, and leaves incomplete WAL state untouched; if delivery or journal cleanup does not stop, its resources are deliberately left open. `FtsSail` waits for coordinator termination before shutting down the base Sail because journal cleanup may still need it; this final wait can exceed the grace period when a callback ignores interruption.
+
+The HTTP backend's default socket inactivity timeout is 300 seconds (`fts:requestTimeoutMillis`); connection establishment and pool acquisition each have a 5-second timeout. The socket timeout is not a total request deadline. The default coordinator shutdown grace is 10 seconds per wait (graceful wait, then another wait after interruption), but `FtsSail` intentionally waits for an active callback to terminate before closing the RDF store. Configure the service manager's stop timeout above the expected in-flight delivery duration plus both coordinator waits and process-shutdown overhead (allow at least 330 seconds for a stalled request with defaults), but note that this is not a hard upper bound: a strategy or HTTP request that ignores interruption or continues making progress can take longer. Configure a shorter backend timeout when faster shutdown is required, and rely on the durable WAL to replay unfinished work after a forced process stop.
 
 `fts:FtsSail` can also be used with in-memory stores by wrapping `openrdf:MemoryStore` instead of `NativeStore`.
 

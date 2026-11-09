@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.rdf4j.fts;
 
+import org.eclipse.rdf4j.common.iteration.CloseableIteration;
 import org.eclipse.rdf4j.model.BNode;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
@@ -10,7 +11,9 @@ import org.eclipse.rdf4j.model.ValueFactory;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.sail.NotifyingSailConnection;
 import org.eclipse.rdf4j.sail.SailException;
+import org.eclipse.rdf4j.sail.UpdateContext;
 import org.eclipse.rdf4j.sail.helpers.NotifyingSailConnectionWrapper;
+import org.eclipse.rdf4j.common.transaction.IsolationLevel;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -18,7 +21,6 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.attribute.FileTime;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -27,31 +29,30 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 
 public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 	private static final int DEFAULT_MAX_BUFFERED_STATEMENTS = 5000;
-	private static final long STALE_SPILL_FILE_MILLIS = TimeUnit.HOURS.toMillis(1);
+	static final IRI JOURNAL_CONTEXT = SimpleValueFactory.getInstance().createIRI("urn:linkedfactory:fts:journal");
+	static final IRI JOURNAL_PREDICATE = SimpleValueFactory.getInstance()
+			.createIRI("urn:linkedfactory:fts:committed-transaction");
 
-	private final FtsSearchService searchService;
+	private final FtsIndexUpdateCoordinator updateCoordinator;
 	private final FtsSailBuffer buffer;
 	private final Set<String> excludedModels;
+	private boolean rdfCommitOutcomeUnknown;
+	private boolean transactionFailed;
+	private boolean requiresRecovery;
 
-	public FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsSearchService searchService) {
-		this(wrappedConnection, searchService, Collections.emptySet(), DEFAULT_MAX_BUFFERED_STATEMENTS);
-	}
-
-	public FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsSearchService searchService,
+	FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsIndexUpdateCoordinator updateCoordinator,
 			Set<String> excludedModels) {
-		this(wrappedConnection, searchService, excludedModels, DEFAULT_MAX_BUFFERED_STATEMENTS);
+		this(wrappedConnection, updateCoordinator, excludedModels, DEFAULT_MAX_BUFFERED_STATEMENTS);
 	}
 
-	FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsSearchService searchService,
-			Set<String> excludedModels,
-			int maxBufferedStatements) {
+	FtsSailConnection(NotifyingSailConnection wrappedConnection, FtsIndexUpdateCoordinator updateCoordinator,
+			Set<String> excludedModels, int maxBufferedStatements) {
 		super(wrappedConnection);
-		cleanupStaleSpillFiles();
-		this.searchService = searchService == null ? FtsSearchService.NOOP : searchService;
+		this.updateCoordinator = updateCoordinator;
 		this.excludedModels = excludedModels == null || excludedModels.isEmpty()
 				? Collections.emptySet()
 				: Set.copyOf(excludedModels);
@@ -73,137 +74,452 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 			return false;
 		}
 		Resource context = statement.getContext();
-		return context != null && !excludedModels.contains(context.stringValue());
+		return context == null
+				|| (!JOURNAL_CONTEXT.equals(context) && !excludedModels.contains(context.stringValue()));
 	}
 
-	private void cleanupStaleSpillFiles() {
-		cleanupStaleSpillFiles(System.currentTimeMillis());
+	@Override
+	public CloseableIteration<? extends Statement> getStatements(Resource subj, IRI pred, Value obj,
+			boolean includeInferred, Resource... contexts) throws SailException {
+		CloseableIteration<? extends Statement> statements = super.getStatements(
+				subj, pred, obj, includeInferred, contexts);
+		return new CloseableIteration<Statement>() {
+			private Statement next;
+			private boolean closed;
+
+			@Override
+			public boolean hasNext() {
+				while (!closed && next == null && statements.hasNext()) {
+					Statement candidate = statements.next();
+					if (!JOURNAL_CONTEXT.equals(candidate.getContext())) {
+						next = candidate;
+					}
+				}
+				return next != null;
+			}
+
+			@Override
+			public Statement next() {
+				if (!hasNext()) {
+					throw new java.util.NoSuchElementException();
+				}
+				Statement result = next;
+				next = null;
+				return result;
+			}
+
+			@Override
+			public void remove() {
+				throw new UnsupportedOperationException();
+			}
+
+			@Override
+			public void close() {
+				if (!closed) {
+					closed = true;
+					statements.close();
+				}
+			}
+		};
 	}
 
-	private static void cleanupStaleSpillFiles(long nowMillis) {
-		Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
-		long cutoff = nowMillis - STALE_SPILL_FILE_MILLIS;
-		try (var files = Files.list(tmpDir)) {
-			files.filter(path -> path.getFileName().toString().startsWith("fts-sail-buffer-"))
-					.filter(path -> path.getFileName().toString().endsWith(".bin"))
-					.forEach(path -> {
-						try {
-							FileTime modified = Files.getLastModifiedTime(path);
-							if (modified.toMillis() < cutoff) {
-								Files.deleteIfExists(path);
-							}
-						} catch (IOException e) {
-							throw new RuntimeException("Unable to clean stale FTS spill file", e);
-						}
-					});
-		} catch (IOException e) {
-			throw new RuntimeException("Unable to scan FTS spill files", e);
+	@Override
+	public CloseableIteration<? extends Resource> getContextIDs() throws SailException {
+		CloseableIteration<? extends Resource> contexts = super.getContextIDs();
+		return new CloseableIteration<Resource>() {
+			private Resource next;
+			private boolean closed;
+
+			@Override
+			public boolean hasNext() {
+				while (!closed && next == null && contexts.hasNext()) {
+					Resource candidate = contexts.next();
+					if (!JOURNAL_CONTEXT.equals(candidate)) {
+						next = candidate;
+					}
+				}
+				return next != null;
+			}
+
+			@Override
+			public Resource next() {
+				if (!hasNext()) {
+					throw new java.util.NoSuchElementException();
+				}
+				Resource result = next;
+				next = null;
+				return result;
+			}
+
+			@Override
+			public void remove() {
+				throw new UnsupportedOperationException();
+			}
+
+			@Override
+			public void close() {
+				if (!closed) {
+					closed = true;
+					contexts.close();
+				}
+			}
+		};
+	}
+
+	@Override
+	public boolean hasStatement(Resource subj, IRI pred, Value obj, boolean includeInferred, Resource... contexts)
+			throws SailException {
+		try (CloseableIteration<? extends Statement> statements = getStatements(
+				subj, pred, obj, includeInferred, contexts)) {
+			return statements.hasNext();
 		}
 	}
 
 	@Override
-	public synchronized void addStatement(Resource subj, IRI pred, Value obj, Resource... contexts) throws SailException {
-		super.addStatement(subj, pred, obj, contexts);
-		if (contexts == null || contexts.length == 0) {
-			recordAddedStatement(subj, pred, obj, null);
-			return;
+	public long size(Resource... contexts) throws SailException {
+		long count = 0;
+		try (CloseableIteration<? extends Statement> statements = getStatements(null, null, null, false, contexts)) {
+			while (statements.hasNext()) {
+				statements.next();
+				count++;
+			}
 		}
-		for (Resource context : contexts) {
-			recordAddedStatement(subj, pred, obj, context);
+		return count;
+	}
+
+	@Override
+	public synchronized void addStatement(Resource subj, IRI pred, Value obj, Resource... contexts) throws SailException {
+		ensureTransactionUsable();
+		if (contexts != null) {
+			for (Resource context : contexts) {
+				if (JOURNAL_CONTEXT.equals(context)) {
+					throw new SailException("The FTS transaction journal context is reserved.");
+				}
+			}
+		}
+		try {
+			super.addStatement(subj, pred, obj, contexts);
+			if (contexts == null || contexts.length == 0) {
+				recordAddedStatement(subj, pred, obj, null);
+			} else {
+				for (Resource context : contexts) {
+					recordAddedStatement(subj, pred, obj, context);
+				}
+			}
+		} catch (RuntimeException e) {
+			transactionFailed = true;
+			throw e;
 		}
 	}
 
 	@Override
 	public synchronized void removeStatements(Resource subj, IRI pred, Value obj, Resource... contexts) throws SailException {
-		List<Statement> removedStatements = collectStatementsForRemoval(subj, pred, obj, contexts);
-		super.removeStatements(subj, pred, obj, contexts);
-		for (Statement statement : removedStatements) {
-			if (isIndexedStatement(statement)) {
-				buffer.remove(statement);
-			}
+		ensureTransactionUsable();
+		List<Statement> journalStatements = new ArrayList<>();
+		try {
+			collectStatementsForRemoval(subj, pred, obj, contexts, journalStatements);
+			super.removeStatements(subj, pred, obj, contexts);
+			restoreJournalStatements(journalStatements);
+		} catch (RuntimeException e) {
+			transactionFailed = true;
+			throw e;
 		}
 	}
 
 	@Override
 	public synchronized void clear(Resource... contexts) throws SailException {
-		super.clear(contexts);
-		buffer.clear(contexts);
+		ensureTransactionUsable();
+		try {
+			List<Statement> journalStatements = collectJournalStatements(null, null, null, contexts);
+			super.clear(contexts);
+			restoreJournalStatements(journalStatements);
+			buffer.clear(contexts);
+		} catch (RuntimeException e) {
+			transactionFailed = true;
+			throw e;
+		}
 	}
 
 	@Override
 	public void begin() throws SailException {
-		cleanupStaleSpillFiles();
+		ensureTransactionUsable();
 		super.begin();
 		buffer.reset();
-		try {
-			searchService.begin();
-		} catch (Exception e) {
-			throw new SailException(e);
+		transactionFailed = false;
+	}
+
+	@Override
+	public void begin(IsolationLevel level) throws SailException {
+		ensureTransactionUsable();
+		super.begin(level);
+		buffer.reset();
+		transactionFailed = false;
+	}
+
+	@Override
+	public void startUpdate(UpdateContext updateContext) throws SailException {
+		ensureTransactionUsable();
+		super.startUpdate(updateContext);
+	}
+
+	@Override
+	public synchronized void addStatement(UpdateContext updateContext, Resource subj, IRI pred, Value obj,
+			Resource... contexts) throws SailException {
+		ensureTransactionUsable();
+		if (contexts != null) {
+			for (Resource context : contexts) {
+				if (JOURNAL_CONTEXT.equals(context)) {
+					throw new SailException("The FTS transaction journal context is reserved.");
+				}
+			}
 		}
+		try {
+			super.addStatement(updateContext, subj, pred, obj, contexts);
+			if (contexts == null || contexts.length == 0) {
+				recordAddedStatement(subj, pred, obj, null);
+			} else {
+				for (Resource context : contexts) {
+					recordAddedStatement(subj, pred, obj, context);
+				}
+			}
+		} catch (RuntimeException e) {
+			transactionFailed = true;
+			throw e;
+		}
+	}
+
+	@Override
+	public synchronized void removeStatement(UpdateContext updateContext, Resource subj, IRI pred, Value obj,
+			Resource... contexts) throws SailException {
+		ensureTransactionUsable();
+		List<Statement> journalStatements = new ArrayList<>();
+		try {
+			collectStatementsForRemoval(subj, pred, obj, contexts, journalStatements);
+			super.removeStatement(updateContext, subj, pred, obj, contexts);
+			restoreJournalStatements(journalStatements);
+		} catch (RuntimeException e) {
+			transactionFailed = true;
+			throw e;
+		}
+	}
+
+	@Override
+	public void endUpdate(UpdateContext updateContext) throws SailException {
+		ensureTransactionUsable();
+		super.endUpdate(updateContext);
+	}
+
+	@Override
+	public void setNamespace(String prefix, String name) throws SailException {
+		ensureTransactionUsable();
+		super.setNamespace(prefix, name);
+	}
+
+	@Override
+	public void removeNamespace(String prefix) throws SailException {
+		ensureTransactionUsable();
+		super.removeNamespace(prefix);
+	}
+
+	@Override
+	public void clearNamespaces() throws SailException {
+		ensureTransactionUsable();
+		super.clearNamespaces();
+	}
+
+	@Override
+	public void flush() throws SailException {
+		ensureCommitOutcomeKnown();
+		super.flush();
+	}
+
+	@Override
+	public void prepare() throws SailException {
+		ensureCommitOutcomeKnown();
+		super.prepare();
 	}
 
 	@Override
 	public void commit() throws SailException {
-		super.commit();
+		ensureCommitOutcomeKnown();
+		if (transactionFailed) {
+			SailException failure = new SailException(
+					"RDF transaction cannot commit after a failed mutation; it has been rolled back");
+			try {
+				rollback();
+			} catch (SailException rollbackError) {
+				failure.addSuppressed(rollbackError);
+			}
+			throw failure;
+		}
+		String transactionId = null;
+		long sequence = -1;
+		boolean rdfCommitAttempted = false;
+		boolean rdfCommitted = false;
+		boolean handlingFailure = false;
+		FtsIndexUpdateCoordinator.CommitLock commitLock = null;
+		Exception commitFailure = null;
 		try {
 			buffer.optimize();
-
-			for (Iterator<FtsSailBuffer.Operation> it = buffer.operations().iterator(); it.hasNext();) {
-				FtsSailBuffer.Operation op = it.next();
-				if (op instanceof FtsSailBuffer.AddRemoveOperation) {
-					FtsSailBuffer.AddRemoveOperation addRemove = (FtsSailBuffer.AddRemoveOperation) op;
-					if (!addRemove.getAdded().isEmpty() || !addRemove.getRemoved().isEmpty()) {
-						searchService.addRemoveStatements(addRemove.getAdded(), addRemove.getRemoved());
-					}
-				} else if (op instanceof FtsSailBuffer.SpilledAddRemoveOperation) {
-					FtsSailBuffer.SpilledAddRemoveOperation spilled = (FtsSailBuffer.SpilledAddRemoveOperation) op;
-					FtsSailBuffer.AddRemoveOperation addRemove = spilled.load();
-					try {
-						if (!addRemove.getAdded().isEmpty() || !addRemove.getRemoved().isEmpty()) {
-							searchService.addRemoveStatements(addRemove.getAdded(), addRemove.getRemoved());
-						}
-					} finally {
-						spilled.delete();
-					}
-				} else if (op instanceof FtsSailBuffer.ClearContextOperation) {
-					searchService.clearContexts(((FtsSailBuffer.ClearContextOperation) op).getContexts());
-				} else if (op instanceof FtsSailBuffer.ClearOperation) {
-					searchService.clear();
-				} else {
-					throw new SailException("Unsupported operation type: " + op.getClass().getName());
-				}
-				it.remove();
+			if (buffer.hasOperations()) {
+				transactionId = UUID.randomUUID().toString();
+				commitLock = updateCoordinator.acquireCommitLock();
+				sequence = commitLock.nextSequence();
+				super.addStatement(
+						SimpleValueFactory.getInstance().createIRI("urn:linkedfactory:fts:transaction:" + transactionId),
+						JOURNAL_PREDICATE,
+						SimpleValueFactory.getInstance().createLiteral(transactionId),
+						JOURNAL_CONTEXT);
 			}
-			searchService.commit();
+
+			if (transactionId != null) {
+				updateCoordinator.prepare(transactionId, sequence, buffer.indexOperations());
+			}
+			rdfCommitAttempted = true;
+			super.commit();
+			rdfCommitted = true;
+			if (transactionId != null) {
+				updateCoordinator.activate(transactionId);
+			}
 		} catch (Exception e) {
-			try {
-				searchService.rollback();
-			} catch (Exception rollbackError) {
-				e.addSuppressed(rollbackError);
+			handlingFailure = true;
+			commitFailure = e;
+			// Distinguish an RDF commit success from an FTS activation failure
+			if (rdfCommitted && transactionId != null) {
+				requiresRecovery = true;
+				throw new SailException(
+						"RDF transaction committed successfully, but FTS activation failed. "
+								+ "The FTS update remains recoverable.",
+						e
+				);
+			}
+			if (!rdfCommitted) {
+				if (rdfCommitAttempted && transactionId != null) {
+					rdfCommitOutcomeUnknown = true;
+				} else {
+					if (transactionId != null) {
+						try {
+							updateCoordinator.rollback(transactionId);
+						} catch (Exception rollbackError) {
+							e.addSuppressed(rollbackError);
+						}
+					}
+					try {
+						super.rollback();
+					} catch (Exception rollbackError) {
+						e.addSuppressed(rollbackError);
+					}
+				}
 			}
 			throw new SailException(e);
 		} finally {
-			buffer.reset();
+			if (commitLock != null) {
+				try {
+					commitLock.close();
+				} catch (Exception lockError) {
+					if (commitFailure == null) {
+						commitFailure = lockError;
+					} else {
+						commitFailure.addSuppressed(lockError);
+					}
+				}
+			}
+			try {
+				resetBuffer();
+			} catch (RuntimeException resetError) {
+				if (commitFailure == null) {
+					commitFailure = resetError;
+				} else {
+					commitFailure.addSuppressed(resetError);
+				}
+			}
+			if (commitFailure != null && !handlingFailure) {
+				if (rdfCommitted) {
+					throw new SailException(
+							"RDF transaction committed successfully, but FTS transaction resource cleanup failed.",
+							commitFailure);
+				}
+				throw new SailException("Unable to release FTS transaction resources", commitFailure);
+			}
 		}
+	}
+
+	void resetBuffer() {
+		buffer.reset();
 	}
 
 	@Override
 	public void rollback() throws SailException {
-		super.rollback();
-		buffer.reset();
+		ensureCommitOutcomeKnown();
+		Exception failure = null;
 		try {
-			searchService.rollback();
+			super.rollback();
 		} catch (Exception e) {
-			throw new SailException(e);
+			failure = e;
+		}
+		try {
+			buffer.reset();
+		} catch (Exception e) {
+			if (failure == null) {
+				failure = e;
+			} else {
+				failure.addSuppressed(e);
+			}
+		}
+		if (failure != null) {
+			throw new SailException(failure);
+		}
+		transactionFailed = false;
+	}
+
+	private void ensureConnectionUsable() throws SailException {
+		if (!isOpen()) {
+			throw new SailException("This FTS connection is closed");
+		}
+		if (requiresRecovery) {
+			throw new SailException(
+					"This connection cannot be reused because an FTS update "
+							+ "requires recovery. Close the connection and "
+							+ "allow the FTS coordinator to recover the update.");
+		}
+	}
+
+	private void ensureTransactionUsable() throws SailException {
+		ensureConnectionUsable();
+		if (rdfCommitOutcomeUnknown) {
+			throw new SailException("RDF commit outcome is unknown; close this connection and allow FTS recovery");
+		}
+		if (transactionFailed) {
+			throw new SailException("RDF transaction has failed; roll it back before continuing");
+		}
+	}
+
+	private void ensureCommitOutcomeKnown() throws SailException {
+		ensureConnectionUsable();
+		if (rdfCommitOutcomeUnknown) {
+			throw new SailException("RDF commit outcome is unknown; close this connection and allow FTS recovery");
 		}
 	}
 
 	@Override
 	public void close() throws SailException {
+		Exception failure = null;
 		try {
 			buffer.reset();
-		} finally {
+		} catch (Exception e) {
+			failure = e;
+		}
+		try {
 			super.close();
+		} catch (Exception e) {
+			if (failure == null) {
+				failure = e;
+			} else {
+				failure.addSuppressed(e);
+			}
+		}
+		if (failure != null) {
+			throw new SailException(failure);
 		}
 	}
 
@@ -214,18 +530,39 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 		}
 	}
 
-	private List<Statement> collectStatementsForRemoval(Resource subj, IRI pred, Value obj, Resource... contexts)
+	private void collectStatementsForRemoval(Resource subj, IRI pred, Value obj, Resource[] contexts,
+			List<Statement> journalStatements) throws SailException {
+		try (var results = getWrappedConnection().getStatements(subj, pred, obj, false, contexts)) {
+			while (results.hasNext()) {
+				Statement statement = results.next();
+				if (JOURNAL_CONTEXT.equals(statement.getContext())) {
+					journalStatements.add(statement);
+				} else if (isIndexedStatement(statement)) {
+					buffer.remove(statement);
+				}
+			}
+		}
+	}
+
+	private List<Statement> collectJournalStatements(Resource subj, IRI pred, Value obj, Resource... contexts)
 			throws SailException {
 		List<Statement> statements = new ArrayList<>();
 		try (var results = getWrappedConnection().getStatements(subj, pred, obj, false, contexts)) {
 			while (results.hasNext()) {
 				Statement statement = results.next();
-				if (isIndexedStatement(statement)) {
+				if (JOURNAL_CONTEXT.equals(statement.getContext())) {
 					statements.add(statement);
 				}
 			}
 		}
 		return statements;
+	}
+
+	private void restoreJournalStatements(List<Statement> statements) throws SailException {
+		for (Statement statement : statements) {
+			super.addStatement(statement.getSubject(), statement.getPredicate(), statement.getObject(),
+					statement.getContext());
+		}
 	}
 
 	private static final class FtsSailBuffer {
@@ -267,8 +604,8 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 		}
 
 		void clear(Resource... contexts) {
-			reset();
 			if (contexts == null || contexts.length == 0) {
+				reset();
 				operations.add(new ClearOperation());
 			} else {
 				operations.add(new ClearContextOperation(contexts.clone()));
@@ -279,38 +616,67 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 			for (int i = operations.size() - 1; i >= 0; i--) {
 				if (operations.get(i) instanceof ClearOperation) {
 					while (i > 0) {
-						operations.remove(i - 1);
+						Operation discarded = operations.remove(i - 1);
+						if (discarded instanceof SpilledAddRemoveOperation) {
+							((SpilledAddRemoveOperation) discarded).delete();
+						}
 						i--;
 					}
 					break;
 				}
 			}
-			mergeSpilledOperations();
 			for (Operation op : operations) {
 				if (op instanceof AddRemoveOperation) {
 					((AddRemoveOperation) op).optimize();
-				} else if (op instanceof SpilledAddRemoveOperation) {
-					((SpilledAddRemoveOperation) op).optimize();
 				}
 			}
 		}
 
-		private void mergeSpilledOperations() {
-			for (int i = 1; i < operations.size(); i++) {
-				Operation previous = operations.get(i - 1);
-				Operation current = operations.get(i);
-				if (!(previous instanceof SpilledAddRemoveOperation) || !(current instanceof AddRemoveOperation)) {
-					continue;
+		boolean hasOperations() {
+			for (Operation operation : operations) {
+				if (operation instanceof AddRemoveOperation && !((AddRemoveOperation) operation).isEmpty()) {
+					return true;
 				}
-				SpilledAddRemoveOperation spilled = (SpilledAddRemoveOperation) previous;
-				AddRemoveOperation merged = spilled.load();
-				merged.getAdded().addAll(((AddRemoveOperation) current).getAdded());
-				merged.getRemoved().addAll(((AddRemoveOperation) current).getRemoved());
-				merged.optimize();
-				spilled.store(merged);
-				operations.remove(i);
-				i--;
+				if (operation instanceof SpilledAddRemoveOperation) {
+					return true;
+				}
+				if (operation instanceof ClearOperation || operation instanceof ClearContextOperation) {
+					return true;
+				}
 			}
+			return false;
+		}
+
+		Iterable<FtsIndexOperation> indexOperations() {
+			return () -> new Iterator<>() {
+				private final Iterator<Operation> operationsIterator = operations.iterator();
+
+				@Override
+				public boolean hasNext() {
+					return operationsIterator.hasNext();
+				}
+
+				@Override
+				public FtsIndexOperation next() {
+					Operation operation = operationsIterator.next();
+					if (operation instanceof AddRemoveOperation addRemove) {
+						return new FtsIndexOperation.Statements(addRemove.getAdded(), addRemove.getRemoved());
+					}
+					if (operation instanceof SpilledAddRemoveOperation spilled) {
+						AddRemoveOperation addRemove = spilled.load();
+						spilled.delete();
+						return new FtsIndexOperation.Statements(addRemove.getAdded(), addRemove.getRemoved());
+					}
+					if (operation instanceof ClearOperation) {
+						return new FtsIndexOperation.Clear();
+					}
+					if (operation instanceof ClearContextOperation clear) {
+						return new FtsIndexOperation.ClearContexts(
+								java.util.Arrays.stream(clear.getContexts()).filter(java.util.Objects::nonNull).toList());
+					}
+					throw new IllegalStateException("Unsupported operation type: " + operation.getClass().getName());
+				}
+			};
 		}
 
 		private AddRemoveOperation ensureAddRemoveOperation() {
@@ -568,22 +934,6 @@ public class FtsSailConnection extends NotifyingSailConnectionWrapper {
 				} catch (IOException e) {
 					throw new RuntimeException("Unable to read spilled FTS buffer", e);
 				}
-			}
-
-			void store(AddRemoveOperation addRemove) {
-				try (DataOutputStream out = new DataOutputStream(
-						new BufferedOutputStream(Files.newOutputStream(file)))) {
-					writeStatements(out, addRemove.getAdded());
-					writeStatements(out, addRemove.getRemoved());
-				} catch (IOException e) {
-					throw new RuntimeException("Unable to rewrite spilled FTS buffer", e);
-				}
-			}
-
-			void optimize() {
-				AddRemoveOperation addRemove = load();
-				addRemove.optimize();
-				store(addRemove);
 			}
 
 			void delete() {

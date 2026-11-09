@@ -1,4 +1,4 @@
-package io.github.linkedfactory.core.rdf4j.fts;
+package io.github.linkedfactory.core.rdf4j.fts.elastic;
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.linkedfactory.core.rdf4j.fts.FtsIndexOperation;
+import io.github.linkedfactory.core.rdf4j.fts.FtsIndexUpdate;
+import io.github.linkedfactory.core.rdf4j.fts.FtsIndexUpdateException;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchService;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -33,6 +37,7 @@ import java.net.SocketTimeoutException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -153,6 +158,11 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	@Override
+	public void close() throws IOException {
+		shutdown();
+	}
+
+	@Override
 	public void begin() {
 		TransactionState tx = txState.get();
 		if (tx != null) {
@@ -166,6 +176,44 @@ public class HttpFtsSearchService implements FtsSearchService {
 		ObjectNode batch = statementBatch(added, removed);
 		if (batch.has("addedDocuments") || batch.has("removedDocuments")) {
 			state().append(batch);
+		}
+	}
+
+	@Override
+	public void apply(FtsIndexUpdate update) throws FtsIndexUpdateException {
+		TransactionState tx = null;
+		Path payload = null;
+		try {
+			begin();
+			tx = state();
+			for (FtsIndexOperation operation : update.operations()) {
+				if (operation instanceof FtsIndexOperation.Statements statements) {
+					addRemoveStatements(statements.added(), statements.removed());
+				} else if (operation instanceof FtsIndexOperation.ClearContexts clear) {
+					clearContexts(clear.contexts().toArray(Resource[]::new));
+				} else if (operation instanceof FtsIndexOperation.Clear) {
+					clear();
+				}
+			}
+			if (endpoint.isEmpty()) {
+				throw new IOException("Cannot deliver committed FTS update without " + PROP_ENDPOINT);
+			}
+			ensureOutboxDir();
+			payload = tx.finishPayload();
+			if (!tx.isEmpty()) {
+				Path uncertain = outboxDir.resolve(String.format("%020d-%s.uncertain",
+						update.sequence(), update.transactionId()));
+				if (Files.exists(uncertain)) {
+					reconcile(uncertain);
+				}
+				sendPayload(payload, uncertain);
+			}
+			Files.deleteIfExists(payload);
+			txState.remove();
+		} catch (Exception e) {
+			cleanup(tx);
+			txState.remove();
+			throw new FtsIndexUpdateException("Unable to apply FTS update " + update.transactionId(), e);
 		}
 	}
 
@@ -193,6 +241,31 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	@Override
+	public void prepareCommit(String transactionId) {
+		TransactionState tx = state();
+		if (!tx.isEmpty()) {
+			tx.prepare(outboxDir, transactionId);
+		}
+	}
+
+	@Override
+	public void preservePreparedTransaction(String transactionId) {
+		TransactionState tx = txState.get();
+		try {
+			if (tx != null && !tx.isEmpty()) {
+				if (!tx.prepared || !tx.file.getFileName().toString().equals(transactionId + ".prepared")) {
+					throw new IllegalStateException("Unable to preserve unprepared FTS transaction " + transactionId);
+				}
+				tx.keepPreparedOnFailure();
+			} else {
+				cleanup(tx);
+			}
+		} finally {
+			txState.remove();
+		}
+	}
+
+	@Override
 	public void commit() throws Exception {
 		TransactionState tx = txState.get();
 		if (endpoint.isEmpty()) {
@@ -207,6 +280,65 @@ public class HttpFtsSearchService implements FtsSearchService {
 		} finally {
 			cleanup(tx);
 			txState.remove();
+		}
+	}
+
+	@Override
+	public void commit(String transactionId) throws Exception {
+		TransactionState tx = txState.get();
+		if (endpoint.isEmpty()) {
+			logger.debug("Skipping FTS update: no {} configured.", PROP_ENDPOINT);
+			cleanup(tx);
+			txState.remove();
+			return;
+		}
+
+		try {
+			if (tx != null && !tx.isEmpty()) {
+				tx.keepPreparedOnFailure();
+			}
+			drainOutbox(tx, transactionId);
+		} finally {
+			cleanup(tx);
+			txState.remove();
+		}
+	}
+
+	@Override
+	public void recoverCommittedTransactions(Set<String> committedTransactionIds) throws Exception {
+		ensureOutboxDir();
+		if (endpoint.isEmpty() && !committedTransactionIds.isEmpty()) {
+			throw new IOException("Cannot recover committed FTS transactions without " + PROP_ENDPOINT);
+		}
+		Path directory = outboxDir.toRealPath();
+		ReentrantLock lock = OUTBOX_LOCKS[Math.floorMod(directory.hashCode(), OUTBOX_LOCKS.length)];
+		lock.lockInterruptibly();
+		try (FileChannel channel = FileChannel.open(directory.resolve(".drain.lock"),
+				StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+				var fileLock = channel.lock()) {
+			boolean directoryChanged = false;
+			List<Path> preparedFiles;
+			try (var files = Files.list(directory)) {
+				preparedFiles = files.filter(path -> path.getFileName().toString().endsWith(".prepared")).toList();
+			}
+			for (Path prepared : preparedFiles) {
+				String name = prepared.getFileName().toString();
+				String transactionId = name.substring(0, name.length() - ".prepared".length());
+				if (committedTransactionIds.contains(transactionId)) {
+					activatePrepared(prepared, transactionId);
+				} else {
+					Files.deleteIfExists(prepared);
+				}
+				directoryChanged = true;
+			}
+			if (directoryChanged) {
+				forceDirectory(directory);
+			}
+			if (!endpoint.isEmpty()) {
+				drainLocked(directory);
+			}
+		} finally {
+			lock.unlock();
 		}
 	}
 
@@ -375,6 +507,14 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private void drainOutbox(TransactionState tx) throws Exception {
+		drainOutbox(tx, null);
+	}
+
+	private void drainOutbox(TransactionState tx, String transactionId) throws Exception {
+		drainOutbox(tx, transactionId, failOnError);
+	}
+
+	private void drainOutbox(TransactionState tx, String transactionId, boolean strict) throws Exception {
 		ensureOutboxDir();
 		Path directory = outboxDir.toRealPath();
 		ReentrantLock lock = OUTBOX_LOCKS[Math.floorMod(directory.hashCode(), OUTBOX_LOCKS.length)];
@@ -383,15 +523,71 @@ public class HttpFtsSearchService implements FtsSearchService {
 				StandardOpenOption.CREATE, StandardOpenOption.WRITE);
 				var fileLock = channel.lock()) {
 			if (tx != null && !tx.isEmpty()) {
-				tx.persist(directory);
+				tx.persist(directory, transactionId);
 			}
-			drainLocked(directory);
+			drainLocked(directory, strict);
 		} finally {
 			lock.unlock();
 		}
 	}
 
+	private static void activatePrepared(Path prepared, String transactionId) throws IOException {
+		if (transactionId == null || !transactionId.matches("[A-Za-z0-9._-]+")) {
+			throw new IOException("Invalid FTS transaction ID in prepared outbox: " + transactionId);
+		}
+		Path directory = prepared.getParent();
+		String committedSuffix = "-" + transactionId + ".jsonl";
+		boolean alreadyCommitted;
+		try (var files = Files.list(directory)) {
+			alreadyCommitted = files.anyMatch(path -> path.getFileName().toString().endsWith(committedSuffix));
+		}
+		if (alreadyCommitted) {
+			Files.deleteIfExists(prepared);
+			return;
+		}
+		Path target = nextOutboxPath(directory, transactionId);
+		try {
+			Files.move(prepared, target, StandardCopyOption.ATOMIC_MOVE);
+		} catch (NoSuchFileException alreadyRecovered) {
+			return;
+		}
+		forceDirectory(directory);
+	}
+
+	private static Path nextOutboxPath(Path directory, String transactionId) throws IOException {
+		long timestamp = System.currentTimeMillis();
+		try (var files = Files.list(directory)) {
+			for (Path pending : (Iterable<Path>) files::iterator) {
+				String name = pending.getFileName().toString();
+				if (name.endsWith(".jsonl") && name.indexOf('-') > 0) {
+					try {
+						timestamp = Math.max(timestamp, Long.parseLong(name.substring(0, name.indexOf('-'))) + 1);
+					} catch (NumberFormatException ignored) {
+						// Older/custom payload names still participate in normal sorted replay.
+					}
+				}
+			}
+		}
+		return directory.resolve(timestamp + "-" + transactionId + ".jsonl");
+	}
+
+	private static void forceFile(Path file) throws IOException {
+		try (FileChannel channel = FileChannel.open(file, StandardOpenOption.WRITE)) {
+			channel.force(true);
+		}
+	}
+
+	private static void forceDirectory(Path directory) throws IOException {
+		try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+			channel.force(true);
+		}
+	}
+
 	private void drainLocked(Path directory) throws Exception {
+		drainLocked(directory, failOnError);
+	}
+
+	private void drainLocked(Path directory, boolean strict) throws Exception {
 		List<Path> pending;
 		try (var files = Files.list(directory)) {
 			pending = files.filter(path -> path.getFileName().toString().endsWith(".jsonl"))
@@ -409,7 +605,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 			} catch (Exception error) {
 				logger.error("Retaining FTS outbox {} and stopping replay ({}={})",
 						payload, PROP_FAIL_ON_ERROR, failOnError, error);
-				if (failOnError) {
+				if (strict) {
 					throw error;
 				}
 				return;
@@ -418,18 +614,8 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private void sendPayload(Path payloadFile, Path uncertain) throws Exception {
-		PreparedPayload prepared = PreparedPayload.from(payloadFile, mapper);
-
-		if (prepared.hasClear()) {
-			deleteAndConfirm(mapper.writeValueAsString(Map.of("query", Map.of("match_all", Map.of()))), uncertain);
-		}
-
-		if (prepared.hasClearContexts()) {
-			deleteAndConfirm(mapper.writeValueAsString(Map.of(
-					"query", Map.of("terms", Map.of(FIELD_CONTEXT, prepared.clearedContexts())))), uncertain);
-		}
-
-		prepared.sendBulk(mapper, MAX_BULK_BYTES, chunk -> {
+		PreparedPayload prepared = new PreparedPayload(payloadFile);
+		prepared.replay(mapper, MAX_BULK_BYTES, chunk -> {
 			for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
 				ObjectNode fence = newFence("bulk");
 				writeFence(uncertain, fence);
@@ -452,6 +638,12 @@ public class HttpFtsSearchService implements FtsSearchService {
 				validateBulkResponse(responseBody);
 				return;
 			}
+		}, (clear, contexts) -> {
+			String query = clear
+					? mapper.writeValueAsString(Map.of("query", Map.of("match_all", Map.of())))
+					: mapper.writeValueAsString(Map.of(
+							"query", Map.of("terms", Map.of(FIELD_CONTEXT, contexts))));
+			deleteAndConfirm(query, uncertain);
 		});
 	}
 
@@ -901,12 +1093,14 @@ public class HttpFtsSearchService implements FtsSearchService {
 	}
 
 	private static final class TransactionState {
-		private final Path file;
+		private Path file;
 		private final BufferedWriter writer;
 		private final ObjectMapper mapper;
 		private boolean empty = true;
 		private boolean finished = false;
 		private boolean persisted = false;
+		private boolean prepared = false;
+		private boolean keepPreparedOnFailure = false;
 
 		private TransactionState(Path file, BufferedWriter writer, ObjectMapper mapper) {
 			this.file = file;
@@ -917,7 +1111,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 		static TransactionState create(Path outboxDir, ObjectMapper mapper) {
 			try {
 				Files.createDirectories(outboxDir);
-				Path file = Files.createTempFile(outboxDir, ".fts-http-bulk-", ".pending");
+				Path file = Files.createTempFile(outboxDir, ".fts-http-bulk-", ".scratch");
 				BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
 				return new TransactionState(file, writer, mapper);
 			} catch (IOException e) {
@@ -929,33 +1123,87 @@ public class HttpFtsSearchService implements FtsSearchService {
 			return empty;
 		}
 
-		Path persist(Path outboxDir) {
+		Path persist(Path outboxDir, String transactionId) {
 			finishPayload();
 			if (persisted) {
 				return file;
 			}
 			try {
 				Files.createDirectories(outboxDir);
-				long timestamp = System.currentTimeMillis();
-				try (var files = Files.list(outboxDir)) {
-					for (Path pending : (Iterable<Path>) files::iterator) {
-						String name = pending.getFileName().toString();
-						if (name.endsWith(".jsonl") && name.indexOf('-') > 0) {
-							try {
-								timestamp = Math.max(timestamp, Long.parseLong(name.substring(0, name.indexOf('-'))) + 1);
-							} catch (NumberFormatException ignored) {
-								// Older/custom payload names still participate in normal sorted replay.
-							}
-						}
+				if (prepared) {
+					String name = file.getFileName().toString();
+					String preparedTransactionId = name.substring(0, name.length() - ".prepared".length());
+					if (transactionId != null && !transactionId.equals(preparedTransactionId)) {
+						throw new IllegalStateException("Prepared FTS transaction ID does not match commit ID");
 					}
+					activate(outboxDir, preparedTransactionId);
+					return file;
 				}
-				Path target = outboxDir.resolve(timestamp + "-" + UUID.randomUUID() + ".jsonl");
+				if (transactionId != null) {
+					prepare(outboxDir, transactionId);
+					activate(outboxDir, transactionId);
+					return file;
+				}
+				forceFile(file);
+				Path target = nextOutboxPath(outboxDir, UUID.randomUUID().toString());
 				Files.move(file, target, StandardCopyOption.ATOMIC_MOVE);
+				file = target;
 				persisted = true;
+				forceDirectory(outboxDir);
 				return target;
 			} catch (IOException e) {
 				throw new RuntimeException("Unable to persist FTS bulk payload", e);
 			}
+		}
+
+		void prepare(Path outboxDir, String transactionId) {
+			finishPayload();
+			if (persisted || prepared) {
+				return;
+			}
+			if (transactionId == null || !transactionId.matches("[A-Za-z0-9._-]+")) {
+				throw new IllegalArgumentException("Invalid FTS transaction ID");
+			}
+			try {
+				Files.createDirectories(outboxDir);
+				forceFile(file);
+				Path target = outboxDir.resolve(transactionId + ".prepared");
+				Files.move(file, target, StandardCopyOption.ATOMIC_MOVE);
+				file = target;
+				prepared = true;
+				forceDirectory(outboxDir);
+			} catch (IOException e) {
+				throw new RuntimeException("Unable to durably prepare FTS bulk payload", e);
+			}
+		}
+
+		void activate(Path outboxDir, String transactionId) {
+			finishPayload();
+			if (persisted) {
+				return;
+			}
+			if (transactionId == null || !transactionId.matches("[A-Za-z0-9._-]+")) {
+				throw new IllegalArgumentException("Invalid FTS transaction ID");
+			}
+			if (!prepared) {
+				prepare(outboxDir, transactionId);
+			} else if (!file.getFileName().toString().equals(transactionId + ".prepared")) {
+				throw new IllegalStateException("Prepared FTS transaction ID does not match commit ID");
+			}
+			try {
+				Path committed = nextOutboxPath(outboxDir, transactionId);
+				Files.move(file, committed, StandardCopyOption.ATOMIC_MOVE);
+				file = committed;
+				prepared = false;
+				persisted = true;
+				forceDirectory(outboxDir);
+			} catch (IOException e) {
+				throw new RuntimeException("Unable to activate prepared FTS bulk payload", e);
+			}
+		}
+
+		void keepPreparedOnFailure() {
+			keepPreparedOnFailure = true;
 		}
 
 		void append(JsonNode op) {
@@ -983,7 +1231,7 @@ public class HttpFtsSearchService implements FtsSearchService {
 		}
 
 		void cleanup() {
-			if (persisted) {
+			if (persisted || (prepared && keepPreparedOnFailure)) {
 				return;
 			}
 			try {
@@ -1004,44 +1252,81 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	private static final class PreparedPayload {
 		private final Path file;
-		private final List<String> clearedContexts = new ArrayList<>();
-		private boolean clear;
-		private boolean clearContexts;
-		private long lastClear = -1;
 
 		private PreparedPayload(Path file) {
 			this.file = file;
 		}
 
-		static PreparedPayload from(Path payloadFile, ObjectMapper mapper) throws IOException {
-			PreparedPayload prepared = new PreparedPayload(payloadFile);
-			try (JsonParser parser = mapper.getFactory().createParser(payloadFile.toFile())) {
+		void replay(ObjectMapper mapper, int maxBytes, BulkSender sender, ClearSender clearSender)
+				throws Exception {
+			long lastClear = lastClearRecord(mapper);
+			BulkChunkBuilder builder = new BulkChunkBuilder(maxBytes, sender);
+			try (JsonParser headers = mapper.getFactory().createParser(file.toFile());
+					JsonParser parser = mapper.getFactory().createParser(file.toFile())) {
 				long record = 0;
-				while (parser.nextToken() != null) {
-					ObjectNode op = readHeader(parser, mapper);
+				while (headers.nextToken() != null) {
+					ObjectNode op = readHeader(headers, mapper);
 					String type = op.path("op").asText();
-					if (OP_CLEAR.equals(type)) {
-						prepared.clear = true;
-						prepared.clearContexts = false;
-						prepared.clearedContexts.clear();
-						prepared.lastClear = record;
-					} else if (OP_CLEAR_CONTEXTS.equals(type)) {
-						prepared.clearContexts = true;
-						JsonNode contexts = op.path("contexts");
-						if (!contexts.isArray()) {
-							throw new IOException("Invalid FTS outbox payload: clearContexts contexts must be an array");
-						}
-						prepared.clearedContexts.clear();
-						for (JsonNode context : contexts) {
-							prepared.clearedContexts.add(context.asText());
-						}
-					} else if (!Set.of(OP_STATEMENTS, OP_UPSERT, OP_REMOVE).contains(type)) {
+					if (parser.nextToken() != JsonToken.START_OBJECT) {
+						throw new IOException("Invalid FTS outbox operation");
+					}
+					if (!Set.of(OP_CLEAR, OP_CLEAR_CONTEXTS, OP_STATEMENTS, OP_UPSERT, OP_REMOVE).contains(type)) {
 						throw new IOException("Invalid FTS outbox payload: unsupported operation " + type);
+					}
+					if (record == lastClear) {
+						builder.finish();
+						clearSender.clear(true, List.of());
+					} else if (record > lastClear && OP_CLEAR.equals(type)) {
+						builder.finish();
+						clearSender.clear(true, List.of());
+					}
+
+					while (parser.nextToken() != JsonToken.END_OBJECT) {
+						if (parser.currentToken() != JsonToken.FIELD_NAME) {
+							throw new IOException("Invalid FTS outbox operation field");
+						}
+						String field = parser.currentName();
+						parser.nextToken();
+						if (record >= lastClear && OP_CLEAR_CONTEXTS.equals(type) && "contexts".equals(field)) {
+							List<String> contexts = readContexts(parser);
+							if (!contexts.isEmpty()) {
+								builder.finish();
+								clearSender.clear(false, contexts);
+							}
+						} else if (record >= lastClear
+								&& (Set.of("documents", "addedDocuments", "removedDocuments").contains(field))) {
+							boolean create = (OP_STATEMENTS.equals(type) && "addedDocuments".equals(field))
+									|| (OP_UPSERT.equals(type) && "documents".equals(field));
+							boolean remove = (OP_STATEMENTS.equals(type) && "removedDocuments".equals(field))
+									|| (OP_REMOVE.equals(type) && "documents".equals(field));
+							if (create || remove) {
+								appendDocuments(parser, builder, create, mapper);
+							} else {
+								validateDocuments(parser);
+							}
+						} else {
+							parser.skipChildren();
+						}
 					}
 					record++;
 				}
 			}
-			return prepared;
+			builder.finish();
+		}
+
+		private long lastClearRecord(ObjectMapper mapper) throws IOException {
+			long lastClear = -1;
+			try (JsonParser parser = mapper.getFactory().createParser(file.toFile())) {
+				long record = 0;
+				while (parser.nextToken() != null) {
+					ObjectNode op = readHeader(parser, mapper);
+					if (OP_CLEAR.equals(op.path("op").asText())) {
+						lastClear = record;
+					}
+					record++;
+				}
+			}
+			return lastClear;
 		}
 
 		private static ObjectNode readHeader(JsonParser parser, ObjectMapper mapper) throws IOException {
@@ -1063,7 +1348,36 @@ public class HttpFtsSearchService implements FtsSearchService {
 					parser.skipChildren();
 				}
 			}
+			String operation = header.path("op").asText();
+			if (!Set.of(OP_CLEAR, OP_CLEAR_CONTEXTS, OP_STATEMENTS, OP_UPSERT, OP_REMOVE).contains(operation)) {
+				throw new IOException("Invalid FTS outbox payload: unsupported operation " + operation);
+			}
+			if (OP_CLEAR_CONTEXTS.equals(operation)) {
+				JsonNode contexts = header.path("contexts");
+				if (!contexts.isArray()) {
+					throw new IOException("Invalid FTS outbox payload: clearContexts contexts must be an array");
+				}
+				for (JsonNode context : contexts) {
+					if (!context.isTextual()) {
+						throw new IOException("Invalid FTS outbox payload: context must be a string");
+					}
+				}
+			}
 			return header;
+		}
+
+		private static List<String> readContexts(JsonParser parser) throws IOException {
+			if (parser.currentToken() != JsonToken.START_ARRAY) {
+				throw new IOException("Invalid FTS outbox payload: clearContexts contexts must be an array");
+			}
+			List<String> contexts = new ArrayList<>();
+			while (parser.nextToken() != JsonToken.END_ARRAY) {
+				if (parser.currentToken() != JsonToken.VALUE_STRING) {
+					throw new IOException("Invalid FTS outbox payload: context must be a string");
+				}
+				contexts.add(parser.getText());
+			}
+			return contexts;
 		}
 
 		private static void validateDocuments(JsonParser parser) throws IOException {
@@ -1079,52 +1393,6 @@ public class HttpFtsSearchService implements FtsSearchService {
 				}
 				parser.skipChildren();
 			}
-		}
-
-		boolean hasClear() {
-			return clear;
-		}
-
-		boolean hasClearContexts() {
-			return clearContexts && !clearedContexts.isEmpty();
-		}
-
-		List<String> clearedContexts() {
-			return clearedContexts;
-		}
-
-		void sendBulk(ObjectMapper mapper, int maxBytes, BulkSender sender) throws Exception {
-			BulkChunkBuilder builder = new BulkChunkBuilder(maxBytes, sender);
-			// Preserve the existing additions-before-removals semantics without retaining the whole upload.
-			for (boolean create : new boolean[] { true, false }) {
-				try (JsonParser headers = mapper.getFactory().createParser(file.toFile());
-						JsonParser parser = mapper.getFactory().createParser(file.toFile())) {
-					long record = 0;
-					while (headers.nextToken() != null) {
-						String type = readHeader(headers, mapper).path("op").asText();
-						if (parser.nextToken() != JsonToken.START_OBJECT) {
-							throw new IOException("Invalid FTS outbox operation");
-						}
-						while (parser.nextToken() != JsonToken.END_OBJECT) {
-							if (parser.currentToken() != JsonToken.FIELD_NAME) {
-								throw new IOException("Invalid FTS outbox operation field");
-							}
-							String field = parser.currentName();
-							parser.nextToken();
-							boolean selected = OP_STATEMENTS.equals(type)
-									&& (create ? "addedDocuments" : "removedDocuments").equals(field)
-									|| (create ? OP_UPSERT : OP_REMOVE).equals(type) && "documents".equals(field);
-							if (selected && record > lastClear) {
-								appendDocuments(parser, builder, create, mapper);
-							} else {
-								parser.skipChildren();
-							}
-						}
-						record++;
-					}
-				}
-			}
-			builder.finish();
 		}
 
 		private static void appendDocuments(JsonParser parser, BulkChunkBuilder builder, boolean create,
@@ -1176,6 +1444,10 @@ public class HttpFtsSearchService implements FtsSearchService {
 
 	private interface BulkSender {
 		void send(BulkRequest request) throws Exception;
+	}
+
+	private interface ClearSender {
+		void clear(boolean all, List<String> contexts) throws Exception;
 	}
 
 	private static final class BulkChunkBuilder {

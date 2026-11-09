@@ -1,4 +1,8 @@
-package io.github.linkedfactory.core.rdf4j.fts;
+package io.github.linkedfactory.core.rdf4j.fts.elastic;
+
+import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceConfig;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchBackend;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchBackendFactory;
 
 public class ElasticKeywordSearchBackendFactory implements FtsSearchBackendFactory {
 	@Override

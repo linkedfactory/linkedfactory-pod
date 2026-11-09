@@ -20,6 +20,8 @@
             sail:sailType "fts:FtsSail" ;
             fts:backend "elastic" ;
             fts:endpoint "http://localhost:9222" ;
+            fts:outboxDir "/tmp/linkedfactory-test-fts-outbox" ;
+            fts:storeIdentity "linkedfactory-test-store" ;
             fts:bulkPath "/_bulk" ;
             fts:searchPath "/_search" ;
             fts:excludedModels <http://linkedfactory.github.io/data/> , <http://linkedfactory.github.io/ontology/> ;
