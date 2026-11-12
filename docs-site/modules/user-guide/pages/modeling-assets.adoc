@@ -1,0 +1,78 @@
+= Model assets
+:description: Describe industrial assets using RDF identifiers shared with measurement series.
+
+An asset model records what equipment exists and how its components relate.
+Measurements describe how selected properties change over time.
+
+== Choose shared identifiers
+
+Use the same sensor IRI in RDF and in measurement payloads.
+Avoid generating a new identifier each time a collector starts.
+
+include::ROOT:partial$namespaces.adoc[]
+
+== Add an asset description
+
+Select the intended Pod model through the xref:platform-basics:managing-models.adoc[eniLINK model-management interface].
+Add or import this Turtle description using the editing facilities available in your deployment:
+
+[source,turtle]
+----
+@prefix ex: <https://example.org/vocab/> .
+@prefix lf: <http://linkedfactory.github.io/vocab#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<https://example.org/Press/Frame>
+    a ex:MachineComponent ;
+    rdfs:label "Press frame" ;
+    lf:contains <https://example.org/Press/Frame/StrainGauge> .
+
+<https://example.org/Press/Frame/StrainGauge>
+    a ex:StrainGauge ;
+    rdfs:label "Frame strain gauge" .
+----
+
+For a reproducible HTTP import, save this example as `assets.ttl` and follow xref:api-reference:models.adoc[].
+The equivalent JSON-LD payload and import request are in xref:api-reference:json-ld.adoc[].
+
+[NOTE]
+====
+The `ex:` classes are illustrative application terms.
+This example does not claim that Pod ships a required manufacturing ontology.
+
+eniLINK manages the RDF model and ontology imports.
+Pod connects those resources with measurements through shared identifiers.
+====
+
+== Verify the description
+
+Run this query against the model where you added the statements:
+
+[source,sparql]
+----
+PREFIX lf: <http://linkedfactory.github.io/vocab#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?sensor ?label
+WHERE {
+  <https://example.org/Press/Frame> lf:contains ?sensor .
+  ?sensor rdfs:label ?label .
+}
+----
+
+See xref:platform-basics:sparql.adoc[] for the HTTP request shape.
+
+== Extend the model deliberately
+
+Reuse suitable domain vocabularies for asset types, units, and observed properties.
+Record the unit associated with each measurement property rather than expecting a numeric value to carry that meaning.
+Use xref:platform-basics:semantic-concepts.adoc[ontology imports] to share vocabulary definitions.
+For manuals and calibration reports, upload bytes with xref:api-reference:files.adoc[] and record the returned URL in the asset graph.
+
+[IMPORTANT]
+====
+The supplied model configuration disables inference.
+Do not assume that OWL imports or subclass declarations automatically produce inferred query results.
+====
+
+Continue with xref:user-guide:querying-data.adoc[] to join this asset description with measurements.

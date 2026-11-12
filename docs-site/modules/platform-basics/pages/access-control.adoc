@@ -1,0 +1,153 @@
+= Manage users and access
+:description: Configure and verify the security boundary around Pod models and HTTP endpoints.
+
+Pod uses eniLINK's configured authentication framework and model access-control vocabulary.
+Operators must also verify the authorization behavior of each exposed Pod service.
+
+include::platform-basics:partial$enilink-auth.adoc[]
+
+== Replace development defaults
+
+The supplied server workspace configuration:
+
+* Defines `enilink:user:admin` with password `admin`.
+* Adds that user to the administrators group.
+* Grants `enilink:user:anonymous` read, write, and control permissions across models.
+
+Before network exposure, replace the default credentials and remove or narrow the anonymous authorization.
+
+[IMPORTANT]
+====
+Adding a restrictive authorization does not cancel an existing broad grant.
+Remove or narrow the development grant rather than assuming a new read-only rule overrides it.
+====
+
+== Understand model permissions
+
+eniLINK's supplied configuration uses the W3C ACL vocabulary:
+
+[cols="1,2",options="header"]
+|===
+|Mode |Intended responsibility
+
+|`acl:Read`
+|Read model data.
+
+|`acl:Append`
+|Append data without granting general write or access-administration rights.
+
+|`acl:Write`
+|Modify model data.
+
+|`acl:Control`
+|Administer access.
+|===
+
+The following Turtle illustrates a model-specific read authorization for an already provisioned user.
+It is configuration data, not a request to the measurement endpoint:
+
+[source,turtle]
+----
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+
+<urn:pod:authorization:reader>
+    a acl:Authorization ;
+    acl:agent <enilink:user:reader> ;
+    acl:accessTo <http://linkedfactory.github.io/data/> ;
+    acl:mode acl:Read .
+----
+
+Apply authorizations through your deployment's supported security configuration process.
+Confirm effective access after loading them.
+
+== Local accounts, sessions, and HTTP Basic
+
+The upstream Lift request wrapper looks up local accounts using HTTP Basic credentials and establishes the caller identity for that request.
+The browser login uses configured JAAS methods and can retain an authenticated subject in the HTTP session.
+These are different integration paths; a directory-backed JAAS method does not automatically make directory passwords valid in the local-account Basic lookup.
+
+For a deployment with verified Basic support, set `POD_URL` to its HTTPS base URL and use a least-privilege local account:
+
+[source,bash]
+----
+export POD_URL='https://pod.example.org'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+export ENILINK_USER='reader'
+
+curl --fail-with-body --user "$ENILINK_USER" \
+  "$POD_URL/sparql" \
+  --header 'Accept: application/sparql-results+json' \
+  --data-urlencode "model=$POD_MODEL" \
+  --data-urlencode 'query=ASK { ?s ?p ?o }'
+----
+
+curl prompts for the password instead of embedding it in the command.
+An ASK result of `false` is a valid query result, not an authentication failure.
+Inspect status and media type as well as result content.
+
+The configured browser method names, JAAS file, and `enilink.loginrequired` property are explained in xref:platform-basics:configuration.adoc[].
+Do not treat a UI login requirement as an endpoint-wide authorization policy.
+
+== Groups and model ownership
+
+eniLINK uses `foaf:Group` and `foaf:member` for configured groups.
+An authorization's `acl:agent` can identify a group instead of an individual.
+For example, this fragment grants an already provisioned reader access through a group:
+
+[source,turtle]
+----
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+<enilink:group:PodReaders>
+    a foaf:Group ;
+    foaf:member <enilink:user:reader> .
+
+<urn:pod:authorization:readers>
+    a acl:Authorization ;
+    acl:agent <enilink:group:PodReaders> ;
+    acl:accessTo <http://linkedfactory.github.io/data/> ;
+    acl:mode acl:Read .
+----
+
+The packaged administrators-group configuration grants read, write, and control across models and permits group administration.
+Do not assign collector accounts to that group for convenience.
+
+The secure model-set implementation assigns an authenticated non-system creator as model owner when no owner is set.
+Ownership grants effective control in its model checks.
+Review ownership as well as explicit ACL grants when handing models between operators.
+
+Permissions belong to the platform's model metadata.
+Importing ACL-shaped triples into the ordinary asset graph does not automatically provision administrative access.
+
+== Verify the endpoint boundary
+
+The Pod time-series handler calls its KVIN store directly.
+Its source does not establish a per-operation ACL check inside that handler.
+Do not infer time-series protection solely from an RDF model ACL.
+
+For anonymous, read-only, writer, and administrator identities, check:
+
+* RDF queries and RDF updates through `/sparql`.
+* KVIN queries through `/sparql`.
+* Reads, writes, discovery, and deletion through `/linkedfactory/`.
+* RDF import, replacement, and deletion through `/models` and `/vocab`.
+* Uploads and downloads through `/files`.
+* The effect of selecting another `model`.
+
+[IMPORTANT]
+====
+Deny unauthorized requests at a verified enforcement layer.
+Where endpoint-level checks are insufficient, restrict network exposure and use an explicitly configured gateway policy.
+
+A login screen, a successful login, or an ACL declaration alone is not evidence that a time-series write or deletion is protected.
+====
+
+== Operational requirements
+
+Use HTTPS, least-privilege service identities, credential rotation, and protected configuration storage.
+Keep administrator credentials out of collectors.
+
+Coordinate these policies with xref:platform-basics:managing-models.adoc[] and xref:api-reference:rest.adoc[].
+
+include::platform-basics:partial$upstream-scope.adoc[]

@@ -1,0 +1,74 @@
+= HTTP interfaces
+:description: Identify the Pod time-series routes and the underlying SPARQL interface.
+
+include::ROOT:partial$connection.adoc[]
+
+== Interface map
+
+[cols="1,1,2",options="header"]
+|===
+|Path |Methods |Purpose
+
+|`/linkedfactory/values`
+|GET, POST, DELETE
+|Retrieve, insert, or delete measurements.
+
+|`/linkedfactory/properties`
+|GET
+|Discover measured properties for an item.
+
+|`/linkedfactory/**`
+|GET
+|Discover descendants; `**` is the handler's literal discovery suffix.
+
+|`/sparql`
+|GET, POST
+|eniLINK SPARQL queries and supported updates.
+
+|`/models`, `/vocab` with `model`
+|GET, POST, PUT, DELETE, OPTIONS
+|eniLINK RDF model import, export, replacement, and removal.
+
+|`/files`
+|POST, OPTIONS
+|eniLINK multipart attachment upload.
+
+|`/files/{key}`
+|GET, HEAD
+|Retrieve attachment bytes or headers.
+|===
+
+For the values route, POST with `application/x-www-form-urlencoded` performs retrieval.
+POST with a measurement payload performs insertion.
+
+See xref:api-reference:models.adoc[] and xref:api-reference:files.adoc[] for the platform API contracts.
+Optional xref:api-reference:ldp.adoc[LDP handlers] use application-registered paths; do not assume a default `/ldp` route.
+
+include::platform-basics:partial$upstream-scope.adoc[]
+
+[IMPORTANT]
+====
+A gateway must not treat every POST as an insertion or every SPARQL POST as read-only.
+Classify requests according to the actual endpoint contract and enforce an appropriate policy.
+====
+
+include::platform-basics:partial$enilink-auth.adoc[]
+
+== Representations
+
+* LF JSON and CSV carry time-series data.
+* SPARQL results JSON and CSV carry SELECT bindings.
+* Turtle and JSON-LD carry asset-description models through the model API.
+* Binary attachments use multipart upload and byte-stream download.
+
+JSON-LD is not the time-series ingestion format.
+
+See xref:api-reference:time-series.adoc[], xref:platform-basics:sparql.adoc[], and xref:api-reference:json-ld.adoc[].
+
+== Errors
+
+The time-series handler returns JSON error objects for explicitly handled failures.
+The SPARQL endpoint's tested request errors use plain text.
+
+Always inspect the HTTP status and `Content-Type` before decoding the body.
+Streaming responses can fail after headers have been sent; HTTP success alone does not prove a complete export.

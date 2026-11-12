@@ -1,0 +1,44 @@
+= Quickstart
+:description: Start a local development Pod and retrieve your first measurements.
+
+This walkthrough is for an isolated development machine, not a production deployment.
+
+== Start the container
+
+[source,bash]
+----
+docker run --name linkedfactory-pod \
+  --publish 127.0.0.1:8080:8080 \
+  --volume linkedfactory-pod-workspace:/linkedfactory-pod/workspace \
+  linkedfactory/linkedfactory-pod
+----
+
+The command runs in the foreground.
+Use a second terminal for HTTP requests.
+For repeatable deployments, select a tested image tag or digest rather than relying on the image's default tag.
+
+include::ROOT:partial$connection.adoc[]
+
+Open http://localhost:8080/linkedfactory/[the local Pod interface].
+Wait until it responds before sending data.
+
+[IMPORTANT]
+====
+Binding to loopback limits direct network exposure but does not harden the application.
+The supplied server configuration defines `admin` / `admin` and grants anonymous read, write, and control access to models.
+
+The workspace volume preserves files, but the supplied RDF model-set configuration is in-memory.
+See xref:ROOT:architecture.adoc[] before relying on data persistence.
+====
+
+== Write and read measurements
+
+Follow xref:user-guide:ingesting-data.adoc[] to write the sample observations.
+Then follow xref:user-guide:querying-data.adoc[] to retrieve them through HTTP and SPARQL.
+
+== Add semantic descriptions
+
+Use xref:user-guide:modeling-assets.adoc[] to describe the sensor and its parent asset.
+The same sensor IRI connects this description with the ingested measurements.
+
+Before moving beyond local development, complete xref:platform-basics:access-control.adoc[].

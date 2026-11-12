@@ -1,0 +1,75 @@
+= Architecture
+:description: Understand how Pod connects industrial data services to eniLINK's semantic platform.
+
+LinkedFactory Pod runs as domain functionality on an Eclipse Equinox/OSGi platform.
+Its bundles integrate with eniLINK's model management and web framework.
+
+== Request and storage paths
+
+The following Mermaid source describes the logical architecture.
+It is displayed as source without a diagram extension; configure a locally hosted renderer in the publishing environment if graphical rendering is required.
+
+[source,mermaid]
+----
+flowchart TB
+  U["Users and integrators"]
+  UI["Pod views on the eniLINK web framework"]
+  API["Pod time-series HTTP API"]
+  SQ["eniLINK SPARQL interface"]
+  SEC["Configured authentication and access policy"]
+  RDF["eniLINK RDF/OWL model management"]
+  KV["Pod KVIN query service and value store"]
+  TS[("Configured RDF repository")]
+  VS[("Configured time-series storage")]
+
+  U --> UI
+  U --> API
+  U --> SQ
+  SEC -. "identity and configured policy" .-> UI
+  SEC -. "verify endpoint enforcement" .-> API
+  SEC -. "identity and configured policy" .-> SQ
+  UI --> RDF
+  SQ --> RDF
+  SQ -->|"SERVICE kvin:"| KV
+  API --> KV
+  RDF --> TS
+  KV --> VS
+----
+
+[NOTE]
+====
+The security arrows describe integration responsibilities, not proof that all routes enforce identical permissions.
+Validate each exposed route as described in xref:platform-basics:access-control.adoc[].
+====
+
+== Asset descriptions and measurements
+
+eniLINK manages RDF and OWL models through a configured repository.
+Pod's KVIN store manages time-series values associated with item, property, context, time, and sequence identifiers.
+
+The default service configuration selects a LevelDB-backed value store.
+Other storage implementations require explicit configuration.
+Changing time-series storage does not automatically change the RDF repository.
+
+eniLINK also maintains model metadata and a separate file store for attachments.
+Use xref:api-reference:models.adoc[] for graph exchange and xref:api-reference:files.adoc[] for document bytes.
+Neither interface substitutes for the time-series API.
+See xref:platform-basics:configuration.adoc[] for configuration discovery and storage boundaries.
+
+[IMPORTANT]
+====
+The supplied server configuration selects an in-memory RDF model set.
+A persistent workspace or a persistent time-series store alone does not guarantee persistence of asset descriptions.
+Configure and verify both storage paths.
+====
+
+== Query integration
+
+Use ordinary SPARQL patterns for asset descriptions.
+Use `SERVICE <kvin:>` for measurements, then join on shared resource identifiers.
+
+See xref:user-guide:querying-data.adoc[] for complete requests and xref:platform-basics:managing-models.adoc[] for model selection.
+
+== Identifier conventions
+
+include::ROOT:partial$namespaces.adoc[]

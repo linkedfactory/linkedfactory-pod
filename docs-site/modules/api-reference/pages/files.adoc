@@ -1,0 +1,95 @@
+= File attachments
+:description: Store manuals and other binary attachments separately from Pod asset-description graphs.
+
+Use eniLINK's file service for documents associated with industrial assets, such as manuals or calibration reports.
+Upload the bytes separately, then record the returned attachment URL in the asset's RDF description.
+Uploading a file does not create that RDF relationship automatically.
+
+include::platform-basics:partial$upstream-scope.adoc[]
+
+== Supported routes
+
+[cols="1,2",options="header"]
+|===
+|Request |Behavior
+
+|POST `/files` with multipart form data
+|Store the first uploaded file and return a JSON array containing its metadata.
+
+|GET `/files/{key}`
+|Return the stored bytes and recorded content type.
+
+|HEAD `/files/{key}`
+|Return file headers without the body.
+
+|OPTIONS `/files`
+|Return an empty successful response.
+|===
+
+The registered POST route selects requests containing an uploaded file.
+Use multipart form data; do not assume that a raw-body upload is reachable solely because the underlying helper contains raw-body handling.
+The service does not register a DELETE route.
+
+== Upload an attachment
+
+For the isolated development configuration, with an existing local `manual.pdf`:
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+
+curl --fail-with-body \
+  "$POD_URL/files" \
+  --form 'upload=@manual.pdf;type=application/pdf'
+----
+
+For a nonempty file, the response has this shape; the key is illustrative:
+
+[source,json]
+----
+[
+  {
+    "id": "returned-key",
+    "type": "application/pdf",
+    "size": 12345
+  }
+]
+----
+
+Use the returned `id` to construct `/files/{key}`.
+Send one file per request: additional multipart files are not separate uploads.
+Treat a zero-size response as a failed attachment workflow rather than assuming it contains a usable identifier.
+
+== Link the attachment to an asset
+
+Add a statement to the asset model using your application vocabulary:
+
+[source,turtle]
+----
+@prefix ex: <https://example.org/vocab/> .
+
+<https://example.org/Press/Frame>
+    ex:manual <https://pod.example.org/files/returned-key> .
+----
+
+Replace the example host and key with the deployment's actual public URL and returned identifier.
+See xref:api-reference:models.adoc[] for RDF import.
+
+== Retrieve and retain attachments
+
+GET returns the stored content type, size, and an attachment filename where available.
+A missing file returns `404`.
+Upload failures can return `500` with a JSON error array; this is not the time-series error envelope.
+
+The file store defaults to `files/` under the Eclipse instance workspace.
+The JVM property `net.enilink.filestore.path` selects another directory.
+Include that directory in backup and retention procedures; exporting RDF does not include file bytes.
+
+[IMPORTANT]
+====
+The file handler does not establish an asset-model ACL check for each stored key.
+Do not assume that restricting the RDF statement also restricts file download.
+Verify upload and download policy independently, impose appropriate upload limits, and use an approved enforcement layer for sensitive attachments.
+====
+
+See xref:platform-basics:configuration.adoc[] and xref:platform-basics:access-control.adoc[].
