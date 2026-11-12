@@ -1,6 +1,6 @@
 package io.github.linkedfactory.core.rdf4j.fts.config;
 
-import io.github.linkedfactory.core.rdf4j.fts.HttpFtsSearchService;
+import io.github.linkedfactory.core.rdf4j.fts.elastic.HttpFtsSearchService;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Literal;
 import org.eclipse.rdf4j.model.Model;
@@ -27,11 +27,10 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private static final IRI SEARCH_PATH = VF.createIRI(CONFIG_NS, "searchPath");
 	private static final IRI FAIL_ON_ERROR = VF.createIRI(CONFIG_NS, "failOnError");
 	private static final IRI OUTBOX_DIR = VF.createIRI(CONFIG_NS, "outboxDir");
+	private static final IRI STORE_IDENTITY = VF.createIRI(CONFIG_NS, "storeIdentity");
 	private static final IRI REQUEST_TIMEOUT = VF.createIRI(CONFIG_NS, "requestTimeoutMillis");
 	private static final IRI EXCLUDED_MODELS = VF.createIRI(CONFIG_NS, "excludedModels");
 	private static final IRI DEFAULT_LIMIT = VF.createIRI(CONFIG_NS, "defaultLimit");
-	private static final String DEFAULT_OUTBOX_DIR = Path.of(System.getProperty("java.io.tmpdir"),
-			"linkedfactory-fts-outbox").toString();
 
 	private String backend = "elastic";
 	private String endpoint;
@@ -39,7 +38,8 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 	private String searchPath = "/fts/_search";
 	private List<String> excludedModels = new ArrayList<>();
 	private boolean failOnError = true;
-	private String outboxDir = DEFAULT_OUTBOX_DIR;
+	private String outboxDir;
+	private String storeIdentity;
 	private int defaultLimit = 100;
 	private int requestTimeoutMillis = HttpFtsSearchService.DEFAULT_REQUEST_TIMEOUT_MILLIS;
 
@@ -89,7 +89,21 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 
 	public void setOutboxDir(String outboxDir) {
 		if (outboxDir != null && !outboxDir.isBlank()) {
-			this.outboxDir = outboxDir.trim();
+			Path path = Path.of(outboxDir.trim()).toAbsolutePath();
+			if (!path.isAbsolute()) {
+				throw new IllegalArgumentException("fts:outboxDir must be an absolute persistent path: "+ path);
+			}
+			this.outboxDir = path.normalize().toString();
+		}
+	}
+
+	public String getStoreIdentity() {
+		return storeIdentity;
+	}
+
+	public void setStoreIdentity(String storeIdentity) {
+		if (storeIdentity != null && !storeIdentity.isBlank()) {
+			this.storeIdentity = storeIdentity.trim();
 		}
 	}
 
@@ -161,7 +175,12 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 			}
 		}
 		model.add(implNode, FAIL_ON_ERROR, VF.createLiteral(failOnError));
-		model.add(implNode, OUTBOX_DIR, VF.createLiteral(outboxDir));
+		if (outboxDir != null) {
+			model.add(implNode, OUTBOX_DIR, VF.createLiteral(outboxDir));
+		}
+		if (storeIdentity != null) {
+			model.add(implNode, STORE_IDENTITY, VF.createLiteral(storeIdentity));
+		}
 		model.add(implNode, REQUEST_TIMEOUT, VF.createLiteral(requestTimeoutMillis));
 		model.add(implNode, DEFAULT_LIMIT, VF.createLiteral(defaultLimit));
 		return implNode;
@@ -201,7 +220,18 @@ public class FtsSailConfig extends AbstractDelegatingSailImplConfig {
 		}
 
 		Optional<Literal> outboxDirLiteral = Models.objectLiteral(model.filter(implNode, OUTBOX_DIR, null));
-		outboxDirLiteral.ifPresent(literal -> outboxDir = literal.getLabel());
+		if (outboxDirLiteral.isPresent()) {
+			try {
+				setOutboxDir(outboxDirLiteral.get().getLabel());
+			} catch (IllegalArgumentException e) {
+				throw new SailConfigException("Invalid absolute path for fts:outboxDir", e);
+			}
+		}
+
+		Optional<Literal> storeIdentityLiteral = Models.objectLiteral(model.filter(implNode, STORE_IDENTITY, null));
+		if (storeIdentityLiteral.isPresent()) {
+			setStoreIdentity(storeIdentityLiteral.get().getLabel());
+		}
 
 		Optional<Literal> timeoutLiteral = Models.objectLiteral(model.filter(implNode, REQUEST_TIMEOUT, null));
 		if (timeoutLiteral.isPresent()) {

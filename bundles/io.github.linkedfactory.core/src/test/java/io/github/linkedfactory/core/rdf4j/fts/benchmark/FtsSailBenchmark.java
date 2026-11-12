@@ -2,6 +2,7 @@ package io.github.linkedfactory.core.rdf4j.fts.benchmark;
 
 import io.github.linkedfactory.core.rdf4j.fts.FtsSail;
 import io.github.linkedfactory.core.rdf4j.fts.FtsSearchService;
+import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceConfig;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.ValueFactory;
@@ -31,6 +32,9 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
@@ -48,11 +52,17 @@ public class FtsSailBenchmark {
 	private SailRepositoryConnection connection;
 	private List<Statement> statements;
 	private BenchmarkSearchService searchService;
+	private Path outbox;
 
 	@Setup(Level.Trial)
-	public void setup() {
+	public void setup() throws Exception {
 		searchService = new BenchmarkSearchService();
-		repository = new SailRepository(new FtsSail(searchService, new MemoryStore()));
+		Files.createDirectories(Path.of("target"));
+		outbox = Files.createTempDirectory(Path.of("target").toAbsolutePath(), "fts-benchmark-outbox-");
+		FtsSail sail = new FtsSail(searchService, outbox,
+				"fts-benchmark-" + UUID.randomUUID(), FtsFederatedServiceConfig.defaults(), Set.of());
+		sail.setBaseSail(new MemoryStore());
+		repository = new SailRepository(sail);
 		repository.init();
 		connection = repository.getConnection();
 		statements = new ArrayList<>(batchSize);
@@ -67,6 +77,13 @@ public class FtsSailBenchmark {
 	public void tearDown() {
 		connection.close();
 		repository.shutDown();
+		try (var files = Files.walk(outbox)) {
+			for (Path path : files.sorted(java.util.Comparator.reverseOrder()).toList()) {
+				Files.deleteIfExists(path);
+			}
+		} catch (Exception e) {
+			throw new RuntimeException("Unable to clean benchmark FTS outbox", e);
+		}
 	}
 
 	@Benchmark
@@ -114,6 +131,12 @@ public class FtsSailBenchmark {
 
 	private static final class BenchmarkSearchService implements FtsSearchService {
 		private long checksum;
+		private long completedUpdates;
+		private long observedUpdates;
+
+		@Override
+		public void prepareCommit(String transactionId) {
+		}
 
 		@Override
 		public void addRemoveStatements(Set<Statement> added, Set<Statement> removed) {
@@ -131,11 +154,26 @@ public class FtsSailBenchmark {
 		}
 
 		@Override
-		public void commit() {
+		public synchronized void commit() {
 			checksum++;
+			completedUpdates++;
+			notifyAll();
 		}
 
-		long checksum() {
+		synchronized long checksum() {
+			long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+			while (completedUpdates <= observedUpdates && System.nanoTime() < deadline) {
+				try {
+					TimeUnit.NANOSECONDS.timedWait(this, deadline - System.nanoTime());
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					throw new IllegalStateException("Interrupted waiting for benchmark FTS update", e);
+				}
+			}
+			if (completedUpdates <= observedUpdates) {
+				throw new IllegalStateException("Timed out waiting for benchmark FTS update");
+			}
+			observedUpdates++;
 			return checksum;
 		}
 	}

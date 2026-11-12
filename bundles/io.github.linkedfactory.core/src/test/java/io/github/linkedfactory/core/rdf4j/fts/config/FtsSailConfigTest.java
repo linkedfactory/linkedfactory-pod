@@ -4,6 +4,7 @@ import org.eclipse.rdf4j.model.Model;
 import org.eclipse.rdf4j.model.impl.LinkedHashModel;
 import org.junit.Test;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.Assert.*;
@@ -19,6 +20,7 @@ public class FtsSailConfigTest {
 		config.setExcludedModels(List.of("urn:model:A", "urn:model:B"));
 		config.setFailOnError(false);
 		config.setOutboxDir("/var/lib/fts-outbox");
+		config.setStoreIdentity("store-a");
 		config.setDefaultLimit(25);
 		config.setRequestTimeoutMillis(120_000);
 
@@ -35,8 +37,16 @@ public class FtsSailConfigTest {
 		assertArrayEquals(List.of("urn:model:A", "urn:model:B").toArray(), parsed.getExcludedModels().toArray());
 		assertFalse(parsed.isFailOnError());
 		assertEquals("/var/lib/fts-outbox", parsed.getOutboxDir());
+		assertEquals("store-a", parsed.getStoreIdentity());
 		assertEquals(25, parsed.getDefaultLimit());
 		assertEquals(120_000, parsed.getRequestTimeoutMillis());
+	}
+
+	@Test
+	public void normalizesRelativeOutboxPathToAbsolute() {
+		FtsSailConfig config = new FtsSailConfig();
+		config.setOutboxDir("tmp/fts");
+		assertEquals(Path.of("tmp/fts").toAbsolutePath().normalize().toString(), config.getOutboxDir());
 	}
 
 	@Test(expected = IllegalArgumentException.class)
