@@ -1,0 +1,73 @@
+= Models, imports, and identifiers
+:description: Understand the semantic platform concepts required to integrate Pod asset data.
+
+Pod uses eniLINK's RDF model framework to connect industrial asset descriptions.
+Understanding graph identity and import scope prevents accidental duplication and incomplete queries.
+
+include::platform-basics:partial$upstream-scope.adoc[]
+
+== Distinguish the identifiers
+
+[cols="1,2",options="header"]
+|===
+|Identifier |Pod meaning
+
+|Model IRI
+|Identifies the semantic graph selected by `model`.
+
+|Asset or item IRI
+|Identifies a machine or sensor. Reuse it as the KVIN item identifier.
+
+|Property IRI
+|Identifies a relationship or measured quantity. Reuse the exact measurement-property IRI in queries.
+
+|Ontology IRI
+|Identifies a vocabulary model imported by asset models.
+
+|Document URL
+|Locates an RDF serialization; it need not equal the model or ontology IRI.
+|===
+
+Do not confuse `urn:enilink:data`, the configured model set, with `http://linkedfactory.github.io/data/`, the default Pod model.
+The former configures a collection and repository; the latter selects a graph and Pod measurement context.
+
+Blank nodes represent unnamed RDF structures.
+Use stable IRIs for industrial assets rather than blank nodes, so collectors and semantic queries can address the same resource.
+
+== Import vocabularies into an asset model
+
+Load the vocabulary model first, then add an import statement to the asset model:
+
+[source,turtle]
+----
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+<http://linkedfactory.github.io/data/>
+    a owl:Ontology ;
+    owl:imports <https://example.org/vocab/> .
+----
+
+The example vocabulary IRI is illustrative; replace it with an actual, available model.
+Use xref:api-reference:models.adoc[] to upload the vocabulary and asset descriptions.
+The model loader can resolve ontology IRIs through local mappings, including models discovered using `net.enilink.models.dir`.
+
+eniLINK's model-scoped queries can include statements from imported models.
+Upstream tests exercise query visibility when imports are added or removed.
+Consequently, a query against one asset model need not be limited to statements physically stored in that graph.
+
+[IMPORTANT]
+====
+Import visibility is not the same as OWL inference.
+An imported vocabulary can be query-visible even when inference is disabled.
+Do not expect subclass entailments or complete OWL reasoning unless the selected repository explicitly provides them.
+====
+
+== Model context and access
+
+The platform tracks a current model and, in browser resource views, a current resource.
+The `resource` parameter selects a resource within the selected `model`; it does not select a new measurement series or grant access.
+
+eniLINK stores model metadata and applies model permissions separately from ordinary asset triples.
+An ACL-like statement imported into an asset graph is not a substitute for provisioning permissions through the administrative configuration.
+
+Use xref:platform-basics:managing-models.adoc[] for model workflows, xref:platform-basics:access-control.adoc[] for ownership and grants, and xref:user-guide:querying-data.adoc[] for the RDF-to-KVIN join.

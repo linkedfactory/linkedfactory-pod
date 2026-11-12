@@ -1,0 +1,25 @@
+[cols="1,2",options="header"]
+|===
+|IRI or namespace |Meaning
+
+|`http://linkedfactory.github.io/data/`
+|Default Pod data-model IRI
+
+|`http://linkedfactory.github.io/vocab#`
+|LinkedFactory vocabulary namespace used here for `contains`
+
+|`kvin:`
+|KVIN service and query-term namespace
+
+|`http://www.w3.org/1999/02/22-rdf-syntax-ns#`
+|RDF vocabulary
+
+|`http://www.w3.org/2000/01/rdf-schema#`
+|RDF Schema vocabulary
+
+|`http://www.w3.org/2002/07/owl#`
+|OWL vocabulary
+
+|`https://example.org/vocab/`
+|Illustrative application vocabulary, not a shipped Pod ontology
+|===

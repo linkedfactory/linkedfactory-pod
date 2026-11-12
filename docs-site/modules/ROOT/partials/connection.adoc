@@ -1,0 +1,7 @@
+[NOTE]
+====
+The repository's local examples use port `8080`, the Pod interface at `http://localhost:8080/linkedfactory/`, and the default data model `http://linkedfactory.github.io/data/`.
+
+These are deployment defaults, not globally fixed addresses.
+Replace the base URL and model IRI with values supplied by your operator.
+====

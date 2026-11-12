@@ -1,0 +1,44 @@
+= Optional Linked Data Platform integration
+:description: Understand when eniLINK's LDP support applies to a Pod deployment.
+
+eniLINK contains Linked Data Platform support for RDF resources and containers.
+A Pod extension can use it to expose resource-oriented asset APIs in addition to the model API.
+
+include::platform-basics:partial$upstream-scope.adoc[]
+
+[IMPORTANT]
+====
+There is no universal `/ldp` endpoint established by these sources.
+The generic LDP service registration in the Lift boot code is commented out.
+An application must install the relevant bundle, register an `LDPHelper` handler, and select its path, root model, and container configuration.
+
+Do not treat the presence of the LDP bundle or its cache configuration as proof of an exposed LDP API.
+====
+
+== Concepts for Pod integrators
+
+An RDF source represents resource statements.
+A basic container groups resources through containment.
+A direct container additionally defines membership relationships.
+These are HTTP resource-management concepts, not Pod's KVIN item/property/time representation.
+
+The upstream helper can register OPTIONS, HEAD, GET, POST, PUT, PATCH, and DELETE handling under an application-selected path.
+Its representation support includes Turtle and JSON-LD; patch support uses `text/ldpatch`.
+Actual operations remain subject to the configured container handler and implementation constraints.
+
+== Integrating with an enabled deployment
+
+. Obtain the registered container URL and supported operations from the operator.
+. Inspect response headers such as `Link`, `Location`, and any advertised method or media-type information.
+. Preserve returned resource URLs rather than constructing resource identifiers from a guessed route.
+. Follow the endpoint's conditional-update requirements, including `If-Match` where required.
+. Verify authorization and concurrency behavior before modifying asset descriptions.
+
+[NOTE]
+====
+The upstream helper contains implementation-specific constraints and incomplete areas.
+This page does not assert complete W3C LDP conformance or a production-ready API for every Pod build.
+Use xref:api-reference:models.adoc[] for the directly registered model import/export workflow.
+====
+
+LDP RDF resources are distinct from xref:api-reference:files.adoc[file attachments] and xref:api-reference:time-series.adoc[measurement series].

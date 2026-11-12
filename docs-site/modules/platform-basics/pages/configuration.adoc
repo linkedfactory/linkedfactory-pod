@@ -1,0 +1,165 @@
+= Configure the Pod platform
+:description: Configure eniLINK model storage, login, query timeouts, and bundle settings for Pod.
+
+Pod combines eniLINK platform configuration with Pod-specific bundle configuration.
+Keep these layers separate: selecting an RDF repository does not select a KVIN store.
+
+include::platform-basics:partial$upstream-scope.adoc[]
+
+== Platform configuration discovery
+
+eniLINK selects the platform RDF configuration using:
+
+. The JVM property `net.enilink.config`, when it supplies a usable path or absolute URI.
+. `config.ttl` in the Eclipse instance workspace.
+. `config.ttl` in the installation location.
+
+The selected configuration can import other RDF configuration documents with `owl:imports`.
+Relative IRIs resolve against the document location.
+Read startup logs to confirm which file and imports were loaded.
+
+[IMPORTANT]
+====
+When no configuration is selected, upstream loads its anonymous-access default.
+The JVM property `net.enilink.acl.anonymous=all` also adds that default.
+Do not remove `config.ttl` as a hardening measure or assume a missing configuration fails closed.
+====
+
+== Separate data, metadata, files, and measurements
+
+[cols="1,2",options="header"]
+|===
+|Configuration target |Pod responsibility
+
+|`urn:enilink:data`
+|RDF asset descriptions and ontology models, with Pod's KVIN-aware model-set integration.
+
+|`urn:enilink:metadata`
+|Separate platform metadata storage when configured, including administrative information used by model management.
+
+|`net.enilink.filestore.path`
+|Attachment bytes; defaults to the workspace's `files/` directory.
+
+|`io.github.linkedfactory.service.ttl`
+|Pod service settings, including the default model and KVIN value-store implementation.
+|===
+
+The Pod server's supplied platform configuration uses `models:KvinMemoryModelSet`.
+For persistent RDF storage, adapt the Pod-specific persistent model-set configuration rather than substituting an upstream generic model set and losing KVIN query integration.
+
+This fragment illustrates separate persistent data and metadata paths; merge it with reviewed login and ACL configuration:
+
+[source,turtle]
+----
+@prefix models: <http://enilink.net/vocab/komma/models#> .
+
+<urn:enilink:data>
+    a models:KvinPersistentModelSet ;
+    models:inference false ;
+    models:repository <workspace:/data/> .
+
+<urn:enilink:metadata>
+    a models:PersistentModelSet ;
+    models:inference false ;
+    models:repository <workspace:/meta/> .
+----
+
+`workspace:/` resolves within the configured Eclipse instance location.
+Test a restart and an RDF/KVIN join after changing repository settings.
+The fragment does not configure time-series retention, migrate existing data, or provide a complete production policy.
+
+== Query timeout
+
+The platform reads the query timeout in milliseconds:
+
+[source,turtle]
+----
+@prefix config: <enilink:config/> .
+
+config: config:queryTimeout 60000 .
+----
+
+Upstream defaults to `20000` milliseconds if no numeric value is configured.
+The Pod server template sets `60000`.
+Check the numeric RDF value, not nearby comments in configuration examples.
+
+This setting configures model query execution; it is not a universal HTTP, proxy, or storage timeout.
+A recognized query interruption maps to `503 QUERY_TIMEOUT` in the SPARQL handler.
+
+== Login configuration
+
+The login configuration subject and its properties use this namespace:
+
+[source,turtle]
+----
+@prefix login: <plugin://net.enilink.platform.core/Login/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+login:
+    login:jaasConfigUrl <jaas.conf> ;
+    login:loginModule [
+        login:jaasConfigName "LinkedFactory-POD" ;
+        rdfs:label "LinkedFactory-POD"
+    ] .
+----
+
+The JAAS context name must match an entry in the selected JAAS file.
+eniLINK supports multiple configured login methods; the label is the browser-facing name.
+When omitted, upstream falls back to its bundled JAAS configuration and an `eniLINK` method.
+
+`enilink.loginrequired=true` is a JVM property consumed by the login infrastructure.
+It does not replace model ACLs or prove that stateless Pod routes require login.
+See xref:platform-basics:access-control.adoc[].
+
+== Bundle configuration
+
+For a bundle named `io.github.linkedfactory.service`, eniLINK looks for:
+
+. `config/io.github.linkedfactory.service.ttl` under the instance location.
+. The corresponding file under the Eclipse home location.
+. `OSGI-INF/io.github.linkedfactory.service-default.ttl` packaged in the bundle.
+
+An override is loaded instead of the packaged default, not merged into it.
+Preserve all settings your service requires.
+The platform can copy default or template files into a discovered configuration directory; the override filename remains the bundle symbolic name plus `.ttl`.
+
+A Pod service override can contain:
+
+[source,turtle]
+----
+@base <plugin://io.github.linkedfactory.service/data/> .
+
+<> <defaultModel> <http://linkedfactory.github.io/data/> ;
+   <store> [
+       a <KvinLevelDb> ;
+       <dirName> "linkedfactory-valuestore"
+   ] .
+----
+
+[IMPORTANT]
+====
+The configuration watcher can stop and restart affected active bundles when a watched `.ttl` file changes.
+Do not assume configuration edits are interruption-free.
+Create configuration directories before startup, prepare complete changes, and use a maintenance window for storage changes.
+Platform `config.ttl` and bundle overrides have different loading lifecycles; do not assume the watcher reloads all platform settings.
+====
+
+== Startup ontology lookup and remote repositories
+
+The OSGi property `net.enilink.models.dir` selects a directory scanned for `.ttl` and `.owl` models.
+The loader uses an embedded ontology IRI where found and installs URI mappings for local lookup.
+Use ontology identifiers rather than filesystem paths in your asset imports.
+See xref:platform-basics:semantic-concepts.adoc[].
+
+For configured repository implementations that use them, JVM properties `net.enilink.data.server`, `net.enilink.data.username`, and `net.enilink.data.password` override the corresponding model-set properties.
+The same pattern applies to `metadata`.
+They do not select a repository implementation or configure Pod's KVIN backend.
+Use deployment-approved secret handling rather than committing repository credentials.
+
+[NOTE]
+====
+JVM system properties and OSGi framework properties are not automatically equivalent to container environment variables.
+Check the Pod launcher or image entry point for supported environment-to-property mapping.
+====
+
+Back up and restore RDF data, metadata, attachment files, configuration, and KVIN storage as a coordinated set.

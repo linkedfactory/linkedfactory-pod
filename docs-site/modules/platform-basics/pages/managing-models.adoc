@@ -1,0 +1,62 @@
+= Manage Pod RDF and OWL models
+:description: Use eniLINK model management to organize Pod asset descriptions and ontologies.
+
+A model is an RDF dataset identified by an IRI.
+A model set groups models and connects them to the configured repository.
+
+For a Pod integrator, model selection determines which asset descriptions are queried and supplies the context used by Pod's time-series integration.
+
+== Work with an existing model
+
+. Open the xref:platform-basics:web-ui.adoc[web interface].
+. Select the intended model using the available model-management view.
+. Confirm its IRI and your access permissions.
+. Add asset descriptions or import the required ontology using the supplied editing facilities.
+. Verify the statements with xref:platform-basics:sparql.adoc[a SPARQL query].
+
+The exact editor controls depend on the eniLINK bundles installed by the deployment.
+
+include::ROOT:partial$connection.adoc[]
+
+[NOTE]
+====
+Creating or importing an ontology is an eniLINK model-management operation.
+Linking its resources to timestamped observations is a Pod workflow.
+See xref:user-guide:modeling-assets.adoc[].
+====
+
+== Keep model selection explicit
+
+Pass `model` in automated requests.
+Use the same intended model for measurement ingestion, measurement retrieval, and semantic joins.
+
+A model IRI is an identifier, not necessarily a dereferenceable web address.
+Passing an unknown IRI to SPARQL or the measurement API does not create a model.
+An authorized RDF import through the xref:api-reference:models.adoc[model API] can create one.
+
+== Import, export, and organize models
+
+Use POST `/models?model=...` to add RDF asset descriptions or vocabulary definitions.
+Use GET with an explicit RDF `Accept` header to export a model.
+Turtle and JSON-LD examples are provided in xref:api-reference:models.adoc[] and xref:api-reference:json-ld.adoc[].
+
+PUT is whole-model replacement, not a partial resource edit.
+It clears existing statements before loading the new document.
+DELETE removes the RDF model, not the matching measurement values or attachment files.
+
+Use `owl:imports` to make vocabulary models available from an asset model.
+See xref:platform-basics:semantic-concepts.adoc[] for import scope, local ontology mappings, and the difference between imports and inference.
+
+== Persistence and inference
+
+The supplied server configuration selects `models:KvinMemoryModelSet` and disables inference.
+Operators must configure an appropriate persistent model set if RDF descriptions must survive a restart.
+
+[IMPORTANT]
+====
+Back up the RDF repository, model metadata, configuration, and time-series storage according to their respective storage requirements.
+A time-series backup alone is not a complete Pod backup.
+====
+
+Use xref:platform-basics:access-control.adoc[] to restrict who can change models and permissions.
+See xref:platform-basics:configuration.adoc[] for the data/metadata model-set configuration and startup model lookup.
