@@ -1,0 +1,62 @@
+= Source baseline and compatibility
+:description: Trace the eniLINK capabilities used by Pod to their upstream implementation.
+
+The platform documentation describes eniLINK through its use in LinkedFactory Pod.
+It is based on https://github.com/enilink/enilink/tree/{enilink-source-revision}[eniLINK revision {enilink-source-revision}].
+The Pod build declares an eniLINK snapshot dependency; a snapshot version alone does not identify an immutable upstream revision.
+
+[IMPORTANT]
+====
+Source availability is not deployment availability.
+Check the installed bundles, RDF readers and writers, configuration, and endpoint permissions in the Pod distribution you run.
+This documentation does not claim that optional upstream functionality is enabled by default.
+====
+
+== Implementation references
+
+[cols="1,2",options="header"]
+|===
+|Pod-facing capability |Upstream evidence
+
+|RDF model import, replacement, export, and deletion
+|{enilink-source-url}/bundles/web/net.enilink.platform.web/src/main/scala/net/enilink/platform/web/rest/ModelsRest.scala[ModelsRest] and {enilink-source-url}/bundles/web/net.enilink.platform.web/src/main/scala/net/enilink/platform/web/rest/Util.scala[model URI resolution]
+
+|JSON-LD round trips and ontology-import visibility
+|{enilink-source-url}/bundles/web/net.enilink.platform.web/src/test/scala/net/enilink/platform/web/rest/ModelsRestTest.scala[ModelsRestTest]
+
+|SPARQL query and update request forms, formats, and errors
+|{enilink-source-url}/bundles/web/net.enilink.platform.web/src/main/scala/net/enilink/platform/web/rest/SparqlRest.scala[SparqlRest]
+
+|HTTP Basic credentials and session identity
+|{enilink-source-url}/bundles/web/net.enilink.platform.lift/src/main/scala/net/enilink/platform/lift/LiftModule.scala[Lift request integration]
+
+|Login methods and login requirement
+|{enilink-source-url}/bundles/core/net.enilink.platform.core/src/main/java/net/enilink/platform/core/security/LoginUtil.java[LoginUtil]
+
+|Platform configuration discovery and imports
+|{enilink-source-url}/bundles/core/net.enilink.platform.core/src/main/java/net/enilink/platform/core/ConfigHashGraph.java[ConfigHashGraph]
+
+|Bundle configuration lookup and change handling
+|{enilink-source-url}/bundles/core/net.enilink.platform.core/src/main/java/net/enilink/platform/core/PluginConfigManager.java[PluginConfigManager]
+
+|Data and metadata model sets, query timeout, and startup models
+|{enilink-source-url}/bundles/core/net.enilink.platform.core/src/main/java/net/enilink/platform/core/ModelSetManager.java[ModelSetManager]
+
+|Model ownership and permission modes
+|{enilink-source-url}/bundles/core/net.enilink.platform.core/src/main/java/net/enilink/platform/core/security/SecureModelSetSupport.java[SecureModelSetSupport] and {enilink-source-url}/bundles/core/net.enilink.platform.core/src/main/resources/config/group-admin.ttl[administrator group]
+
+|File upload and retrieval
+|{enilink-source-url}/bundles/web/net.enilink.platform.lift/src/main/scala/net/enilink/platform/lift/rest/FileService.scala[FileService] and {enilink-source-url}/bundles/web/net.enilink.platform.lift/src/main/scala/net/enilink/platform/lift/util/Globals.scala[file-store location]
+
+|Browser model, ontology, and SPARQL routes
+|{enilink-source-url}/bundles/web/net.enilink.platform.web/src/main/scala/net/enilink/platform/web/LiftModule.scala[Web route registration] and {enilink-source-url}/bundles/web/net.enilink.platform.web/src/main/webapp/describe.html[resource and ACL view]
+
+|Optional LDP containers and resource operations
+|{enilink-source-url}/bundles/web/net.enilink.platform.ldp/src/main/scala/net/enilink/platform/ldp/LDPHelper.scala[LDPHelper]
+|===
+
+== Choose an interface by responsibility
+
+Use xref:api-reference:models.adoc[] for asset-description graphs, xref:api-reference:files.adoc[] for attachment bytes, and xref:api-reference:time-series.adoc[] for measurements.
+Use xref:platform-basics:sparql.adoc[] to query descriptions or join them with KVIN data.
+Keep configuration graphs and access-control metadata separate from ordinary asset imports.

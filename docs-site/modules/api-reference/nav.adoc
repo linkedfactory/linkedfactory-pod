@@ -1,0 +1,7 @@
+* API reference
+** xref:api-reference:rest.adoc[HTTP interfaces]
+** xref:api-reference:models.adoc[RDF model import and export]
+** xref:api-reference:files.adoc[File attachments]
+** xref:api-reference:json-ld.adoc[JSON-LD asset descriptions]
+** xref:api-reference:time-series.adoc[Time-series API]
+** xref:api-reference:ldp.adoc[Optional Linked Data Platform integration]

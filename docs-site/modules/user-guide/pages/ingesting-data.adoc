@@ -1,0 +1,74 @@
+= Ingest measurements
+:description: Write timestamped measurements using the LinkedFactory JSON format.
+
+Use the time-series API to attach observations to an item IRI and a property IRI.
+Choose stable identifiers before connecting a collector.
+
+include::ROOT:partial$connection.adoc[]
+
+== Prepare an LF JSON payload
+
+Create `measurements.json`:
+
+[source,json]
+----
+{
+  "https://example.org/Press/Frame/StrainGauge": {
+    "p:force": [
+      {
+        "value": 7.10096884,
+        "time": 1541521440000
+      },
+      {
+        "value": 7.3,
+        "time": 1541521441000
+      }
+    ]
+  }
+}
+----
+
+The outer key identifies the sensor.
+The nested key identifies the measured property.
+Each observation supplies a value and an epoch-millisecond timestamp.
+
+[IMPORTANT]
+====
+This is LF JSON, not a generic JSON-LD document.
+Do not add an `@context` and assume the measurement endpoint performs JSON-LD expansion.
+See xref:api-reference:json-ld.adoc[] for the separate asset-description format.
+====
+
+== Submit the payload
+
+These commands target the isolated development configuration.
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+
+curl --fail-with-body \
+  "$POD_URL/linkedfactory/values?model=$POD_MODEL" \
+  --header 'Content-Type: application/json' \
+  --data-binary @measurements.json
+----
+
+The example model IRI is safe in this literal URL.
+For other model IRIs, construct the URL with proper query-parameter encoding.
+
+include::platform-basics:partial$enilink-auth.adoc[]
+
+== Verify ingestion
+
+Read the same item and property using xref:user-guide:querying-data.adoc[].
+Check the returned timestamps and numeric values; do not rely solely on an empty successful response body.
+
+[NOTE]
+====
+Pod stores the observations in its configured KVIN store.
+eniLINK supplies the surrounding model context.
+A caller-supplied `model` must resolve to an existing, accessible model.
+====
+
+For CSV ingestion and retrieval parameters, see xref:api-reference:time-series.adoc[].

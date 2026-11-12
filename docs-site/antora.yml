@@ -1,0 +1,13 @@
+name: linkedfactory-pod
+title: LinkedFactory Pod
+version: ~
+start_page: ROOT:index.adoc
+asciidoc:
+  attributes:
+    enilink-source-revision: a59ae095633ef874f1be0446430067fa49e729f1
+    enilink-source-url: https://github.com/enilink/enilink/blob/a59ae095633ef874f1be0446430067fa49e729f1
+nav:
+  - modules/ROOT/nav.adoc
+  - modules/user-guide/nav.adoc
+  - modules/platform-basics/nav.adoc
+  - modules/api-reference/nav.adoc

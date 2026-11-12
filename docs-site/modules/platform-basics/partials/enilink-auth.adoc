@@ -1,0 +1,25 @@
+[NOTE]
+====
+eniLINK supplies the configured user identity and authentication framework for LinkedFactory Pod.
+The supplied JAAS configuration names the `LinkedFactory-POD` login context and uses eniLINK's `EnilinkLoginModule`.
+
+Authentication identifies a caller.
+Authorization determines what that caller may do.
+An authenticated identity does not by itself grant access to a model or prove that every Pod endpoint enforces the same policy.
+
+The upstream Lift integration supports HTTP Basic credentials for local accounts on requests passing through its request wrapper.
+It can also use the JAAS subject associated with a browser session.
+Pod's time-series service uses stateless dispatch, so verify its identity handling separately rather than extrapolating from a working browser or SPARQL login.
+====
+
+[IMPORTANT]
+====
+Use the credential transport configured and verified for your deployment.
+Upstream HTTP Basic support does not establish a bearer-token issuer, OAuth flow, or a generic JSON login API.
+
+For an explicitly configured bearer-token gateway, the HTTP request header is `Authorization: Bearer <token>`.
+This describes that gateway's contract, not a built-in Pod token service.
+
+Transmit credentials only over HTTPS, except in an isolated local test environment.
+Do not store credentials in documentation, source-controlled commands, or payload files.
+====

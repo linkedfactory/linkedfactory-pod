@@ -1,0 +1,156 @@
+= Time-series API
+:description: Reference the implemented Pod measurement formats and retrieval parameters.
+
+== Values endpoint
+
+`/linkedfactory/values` supports:
+
+[cols="1,2",options="header"]
+|===
+|Request |Behavior
+
+|GET
+|Retrieve measurements.
+
+|POST with `application/x-www-form-urlencoded`
+|Retrieve measurements using form parameters.
+
+|POST with `application/json`
+|Insert LF JSON observations.
+
+|POST with `text/csv`
+|Insert CSV observations.
+
+|POST with `application/influxdb-line`
+|Insert observations using the implemented line-protocol parser.
+
+|DELETE
+|Delete selected measurements.
+|===
+
+[IMPORTANT]
+====
+Deletion is destructive.
+Always supply explicit model, item, property, and time bounds, and verify authorization before enabling this route for an integration.
+====
+
+== Retrieval parameters
+
+[cols="1,2",options="header"]
+|===
+|Parameter |Meaning
+
+|`model`
+|Existing model IRI used as the measurement context. Supply it explicitly in integrations.
+
+|`item`, `items`
+|Item IRI or whitespace-separated item IRIs. Prefer explicit identifiers over path-derived defaults.
+
+|`property`, `properties`
+|Property IRI or whitespace-separated property IRIs. Omission selects available properties.
+
+|`from`
+|Inclusive lower timestamp bound in epoch milliseconds. Defaults to `0`.
+
+|`to`
+|Inclusive upper timestamp bound in epoch milliseconds. Defaults to the implementation's maximum time value.
+
+|`limit`
+|Positive per-series retrieval limit. Defaults to `10000`; values above `500000` are rejected.
+
+|`interval`
+|Interval in milliseconds used for sampling or aggregation.
+
+|`op`
+|Aggregation operator passed to the configured value store. Verify supported operators for that implementation.
+|===
+
+[NOTE]
+====
+Invalid or non-positive limits currently fall back to the default rather than providing a reliable validation error.
+Validate client input before sending requests.
+The per-series limit is not a global response-size bound across many series.
+====
+
+== Response formats
+
+Request `Accept: application/json` for LF JSON or `Accept: text/csv` for CSV.
+Specify the header explicitly rather than depending on content-negotiation defaults.
+
+LF JSON has this structure:
+
+[source,json]
+----
+{
+  "https://example.org/Press/Frame/StrainGauge": {
+    "p:force": [
+      {
+        "time": 1541521440000,
+        "value": 7.10096884
+      }
+    ]
+  }
+}
+----
+
+Observations can also include sequence numbers.
+See xref:user-guide:ingesting-data.adoc[] for a complete insertion request.
+
+== CSV insertion
+
+CSV identifies a series using an item and property in the column heading:
+
+[source,csv]
+----
+time,<https://example.org/Press/Frame/StrainGauge>@<p:force>
+1541521440000,7.10096884
+1541521441000,7.3
+----
+
+Submit it with `Content-Type: text/csv`.
+For CSV insertion, the optional `separator` parameter selects the delimiter; the default is a comma.
+
+== Discovery
+
+Use `/linkedfactory/properties` with `item` and `model` to discover properties.
+
+The handler also exposes descendant discovery using a literal `**` suffix.
+If constructing that URL with curl, use `--globoff` so curl does not interpret URL glob syntax.
+
+== Handled errors
+
+Explicitly handled errors use a JSON object with `code`, `message`, and optional `details`.
+
+[cols="1,1,2",options="header"]
+|===
+|HTTP status |Code |Meaning
+
+|400
+|`INVALID_MODEL`
+|The supplied model cannot be resolved in the request context.
+
+|400
+|`INVALID_PAYLOAD`
+|The insertion payload could not be processed.
+
+|400
+|`LIMIT_TOO_LARGE`
+|The retrieval limit exceeds `500000`.
+
+|500
+|`PROPERTIES_QUERY_FAILED`
+|Property discovery failed.
+
+|500
+|`DESCENDANTS_QUERY_FAILED`
+|Descendant discovery failed.
+
+|500
+|`DELETE_VALUES_FAILED`
+|Measurement deletion failed.
+|===
+
+Do not assume that every failure path returns this envelope.
+Inspect status, media type, and response completeness.
+
+For semantic joins and bounded SPARQL retrieval, see xref:user-guide:querying-data.adoc[].

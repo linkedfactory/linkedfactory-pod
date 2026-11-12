@@ -1,0 +1,84 @@
+= JSON-LD asset descriptions
+:description: Represent Pod asset descriptions as JSON-LD without confusing them with LF JSON measurements.
+
+JSON-LD represents RDF asset descriptions using JSON syntax.
+Its identifiers can be shared with Pod measurement items.
+
+== Example description
+
+This document represents the same asset relationships as the Turtle example in xref:user-guide:modeling-assets.adoc[]:
+
+[source,json]
+----
+{
+  "@context": {
+    "ex": "https://example.org/vocab/",
+    "lf": "http://linkedfactory.github.io/vocab#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "contains": {
+      "@id": "lf:contains",
+      "@type": "@id"
+    },
+    "label": "rdfs:label"
+  },
+  "@graph": [
+    {
+      "@id": "https://example.org/Press/Frame",
+      "@type": "ex:MachineComponent",
+      "label": "Press frame",
+      "contains": "https://example.org/Press/Frame/StrainGauge"
+    },
+    {
+      "@id": "https://example.org/Press/Frame/StrainGauge",
+      "@type": "ex:StrainGauge",
+      "label": "Frame strain gauge"
+    }
+  ]
+}
+----
+
+== Loading the description
+
+eniLINK's xref:api-reference:models.adoc[model API] supports RDF import and export, including JSON-LD when its codec is installed.
+The upstream model API tests cover this format.
+
+Save the example as `assets.jsonld`.
+For the isolated development configuration:
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+
+curl --fail-with-body \
+  "$POD_URL/models?model=$POD_MODEL" \
+  --header 'Content-Type: application/ld+json' \
+  --data-binary @assets.jsonld
+----
+
+The example model IRI is safe in this literal query string; encode reserved characters for other model IRIs.
+For protected deployments, add the verified authentication options.
+Request `Accept: application/ld+json` on a model GET to export JSON-LD.
+
+include::platform-basics:partial$upstream-scope.adoc[]
+
+[IMPORTANT]
+====
+Use `/models` or `/vocab` for RDF model ingestion.
+Do not invent `/assets` or post this document to `/linkedfactory/values`.
+
+If the installed model importer does not support JSON-LD, convert the document with approved RDF tooling and import a supported RDF format.
+====
+
+Use xref:platform-basics:managing-models.adoc[] to choose the target model and xref:platform-basics:sparql.adoc[] to verify the resulting statements.
+
+Model POST adds statements; PUT clears the existing graph before loading.
+Do not use PUT for a partial asset update.
+See xref:api-reference:models.adoc[] for replacement precautions and media-type errors.
+
+== Difference from LF JSON
+
+LF JSON groups observations by item and property, with timestamped values.
+JSON-LD uses JSON-LD keywords and contexts to express RDF.
+
+Sharing an item IRI connects the descriptions and observations; sharing JSON syntax does not make their payload contracts interchangeable.

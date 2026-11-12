@@ -1,0 +1,7 @@
+* Platform capabilities for Pod users
+** xref:platform-basics:semantic-concepts.adoc[Models, imports, and identifiers]
+** xref:platform-basics:managing-models.adoc[Manage RDF and OWL models]
+** xref:platform-basics:sparql.adoc[Use the SPARQL interface]
+** xref:platform-basics:access-control.adoc[Manage users and access]
+** xref:platform-basics:configuration.adoc[Configure the Pod platform]
+** xref:platform-basics:web-ui.adoc[Navigate the web interface]

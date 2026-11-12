@@ -1,0 +1,6 @@
+[NOTE]
+====
+The eniLINK behavior on this page is based on the xref:ROOT:sources.adoc[recorded upstream source revision].
+Pod distributions can package a different eniLINK build or omit optional bundles and RDF codecs.
+Confirm the installed version, registered routes, and access policy before relying on an integration.
+====

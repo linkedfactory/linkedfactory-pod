@@ -1,0 +1,72 @@
+= Navigate the Pod web interface
+:description: Use Pod views and eniLINK model tools without confusing their responsibilities.
+
+include::ROOT:partial$connection.adoc[]
+
+== Open Pod views
+
+Open `/linkedfactory/`.
+The application redirects this entry point to its dashboard.
+
+Use the dashboard and asset views to inspect the available resource hierarchy.
+The supplied navigation template follows LinkedFactory `contains` relationships.
+
+[NOTE]
+====
+An empty hierarchy does not prove that the time-series store is empty.
+Asset navigation depends on semantic descriptions and the selected model.
+Verify measurements independently with xref:user-guide:querying-data.adoc[].
+====
+
+== Use platform tools
+
+Where included by the deployment, eniLINK's model-management and query tools let you inspect RDF descriptions, edit resources, and submit SPARQL queries.
+
+[cols="1,2",options="header"]
+|===
+|Browser path |Pod use
+
+|`/models`
+|List accessible semantic models, with labels and ownership information.
+
+|`/models?model=...`
+|Open the selected model's ontology presentation when requesting HTML.
+
+|`/describe?model=...&resource=...`
+|Inspect the selected asset's properties and available ACL controls.
+
+|`/sparql`
+|Open the interactive SPARQL page when requesting HTML.
+
+|`/upload`
+|Use the supplied RDF upload view where exposed.
+
+|`/login`, `/profile`
+|Use the configured browser login and account views.
+|===
+
+The resource description template separates properties and ACL tabs and includes editing support.
+Available actions still depend on permissions.
+Model listing and resource descriptions use platform metadata and RDF; they are not time-series inventory APIs.
+
+[TIP]
+====
+Use a browser for the HTML views and explicit RDF or SPARQL result `Accept` headers for clients.
+Content negotiation can make the same model or SPARQL path return an interactive page rather than an API representation.
+====
+
+Exact menu labels and editor controls depend on the installed platform bundles and permissions.
+Use xref:platform-basics:managing-models.adoc[] for the model workflow and xref:platform-basics:sparql.adoc[] for a reproducible HTTP query.
+
+== Check identity and context
+
+Before editing, confirm the active identity and model.
+If expected data is missing, check model selection and access before importing duplicate descriptions.
+
+See xref:platform-basics:access-control.adoc[] for security requirements.
+
+The upstream web module also includes a registration view.
+Its presence is not a recommendation to permit public self-registration in an industrial deployment.
+Use the operator's approved account-provisioning process.
+
+include::platform-basics:partial$upstream-scope.adoc[]
