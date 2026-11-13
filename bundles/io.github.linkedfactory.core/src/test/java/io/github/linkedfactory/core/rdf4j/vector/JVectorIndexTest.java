@@ -182,4 +182,25 @@ public class JVectorIndexTest {
 
 		assertEquals(threads * perThread, index.size());
 	}
+
+	@Test
+	public void removingManyVectorsOneAtATimeKeepsRemainingOnesSearchable() throws Exception {
+		int total = 50;
+		for (int i = 0; i < total; i++) {
+			commitUpsert("urn:item:" + i, new float[]{i, i, i, i});
+		}
+
+		int survivor = total - 1;
+		for (int i = 0; i < survivor; i++) {
+			searchService.begin();
+			searchService.remove("urn:item:" + i);
+			searchService.commit();
+
+			List<VectorSearchHit> hits = searchBackend.search(
+					new VectorSearchRequest(new float[]{survivor, survivor, survivor, survivor}, 1, null));
+			assertEquals("after removing urn:item:" + i, 1, hits.size());
+			assertEquals("after removing urn:item:" + i, "urn:item:" + survivor, hits.get(0).getIri());
+		}
+		assertEquals(1, index.size());
+	}
 }
