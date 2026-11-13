@@ -184,6 +184,19 @@ Query-time endpoint override is also supported with `SERVICE <fts:http://host:92
 
 _**Note**_: the payload (JSON) of the search request used by the federated service is just now for testing and need to be discussed or agreed on. The same applies to the bulk request payload. see examples in `bundles/io.github.linkedfactory.core/src/test/resources/fts/`
 
+## Vector search (experimental)
+`io.github.linkedfactory.core.rdf4j.vector` contains an embedded, in-process nearest-neighbor
+vector index (`JVectorIndex`, built on [JVector](https://github.com/jbellis/jvector)) and the
+`VectorSearchService`/`VectorSearchBackend` contracts a future vector backend would implement.
+
+This module is **not yet wired into `FtsSail` or any SPARQL vocabulary** -- there is no
+`SERVICE <vec:...>` syntax yet, and indexing/querying only happens through direct Java calls
+(`VectorSearchService.upsert`/`commit`, `VectorSearchBackend.search`). It exists so the indexing
+and search behavior, and its performance at scale, can be measured and reviewed before any SPARQL
+integration is designed. See [`docs/benchmarks/vector-backends.md`](docs/benchmarks/vector-backends.md)
+for how to run the repeatable benchmark and what it found, including a real scaling limitation in
+bulk removal that should be read before relying on this module for anything beyond load/search.
+
 ## Docker
 * We provide containers on [Docker Hub](https://hub.docker.com/r/linkedfactory/linkedfactory-pod)
 * `docker run -p 8080:8080 -v /tmp/workspace:/linkedfactory-pod/workspace linkedfactory/linkedfactory-pod`
