@@ -24,10 +24,13 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -37,6 +40,7 @@ public class JVectorIndex implements Closeable {
 	private static final int EF_CONSTRUCTION = 100;
 	private static final float NEIGHBOR_OVERFLOW = 1.2f;
 	private static final float ALPHA = 1.2f;
+	private static final int COMPACTION_THRESHOLD = 1_000;
 
 	private final int dimension;
 	private final VectorSimilarityFunction similarityFunction;
@@ -46,6 +50,7 @@ public class JVectorIndex implements Closeable {
 	private final Map<String, Integer> iriToNode = new ConcurrentHashMap<>();
 	private final Map<Integer, String> nodeToIri = new ConcurrentHashMap<>();
 	private final AtomicInteger nextNodeId = new AtomicInteger();
+	private final Set<Integer> pendingDeletions = new LinkedHashSet<>();
 
 	public JVectorIndex(int dimension, VectorSimilarityFunction similarityFunction) {
 		this.dimension = dimension;
@@ -65,10 +70,7 @@ public class JVectorIndex implements Closeable {
 		}
 		Integer existing = iriToNode.get(subjectIri);
 		if (existing != null) {
-			builder.markNodeDeleted(existing);
-			nodeToIri.remove(existing);
-			builder.removeDeletedNodes();
-			vectors.remove(existing);
+			markDeleted(existing);
 		}
 		int node = nextNodeId.getAndIncrement();
 		vectors.put(node, VTS.createFloatVector(vector));
@@ -82,10 +84,7 @@ public class JVectorIndex implements Closeable {
 		if (node == null) {
 			return;
 		}
-		builder.markNodeDeleted(node);
-		nodeToIri.remove(node);
-		builder.removeDeletedNodes();
-		vectors.remove(node);
+		markDeleted(node);
 	}
 
 	public synchronized void clear() {
@@ -96,11 +95,41 @@ public class JVectorIndex implements Closeable {
 		nodeToIri.clear();
 		builder.removeDeletedNodes();
 		vectors.clear();
+		pendingDeletions.clear();
 	}
 
 	public synchronized void compact() {
-		builder.removeDeletedNodes();
+		flushPendingDeletions();
 		builder.cleanup();
+	}
+
+	private void markDeleted(int node) {
+		builder.markNodeDeleted(node);
+		nodeToIri.remove(node);
+		pendingDeletions.add(node);
+		if (pendingDeletions.size() >= COMPACTION_THRESHOLD || isEntryPoint(node)) {
+			flushPendingDeletions();
+		}
+	}
+
+	private boolean isEntryPoint(int node) {
+		try (ImmutableGraphIndex.View view = builder.getGraph().getView()) {
+			ImmutableGraphIndex.NodeAtLevel entry = view.entryNode();
+			return entry != null && entry.node == node;
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
+	private void flushPendingDeletions() {
+		if (pendingDeletions.isEmpty()) {
+			return;
+		}
+		builder.removeDeletedNodes();
+		for (int node : pendingDeletions) {
+			vectors.remove(node);
+		}
+		pendingDeletions.clear();
 	}
 
 	public int size() {
