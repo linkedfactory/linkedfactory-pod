@@ -193,9 +193,7 @@ This module is **not yet wired into `FtsSail` or any SPARQL vocabulary** -- ther
 `SERVICE <vec:...>` syntax yet, and indexing/querying only happens through direct Java calls
 (`VectorSearchService.upsert`/`commit`, `VectorSearchBackend.search`). It exists so the indexing
 and search behavior, and its performance at scale, can be measured and reviewed before any SPARQL
-integration is designed. See [`docs/benchmarks/vector-backends.md`](docs/benchmarks/vector-backends.md)
-for how to run the repeatable benchmark and what it found, including a real scaling limitation in
-bulk removal that should be read before relying on this module for anything beyond load/search.
+integration is designed.
 
 ## Docker
 * We provide containers on [Docker Hub](https://hub.docker.com/r/linkedfactory/linkedfactory-pod)
