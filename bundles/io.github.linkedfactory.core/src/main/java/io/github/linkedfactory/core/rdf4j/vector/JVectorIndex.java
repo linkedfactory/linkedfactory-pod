@@ -40,7 +40,9 @@ public class JVectorIndex implements Closeable {
 	private static final int EF_CONSTRUCTION = 100;
 	private static final float NEIGHBOR_OVERFLOW = 1.2f;
 	private static final float ALPHA = 1.2f;
-	private static final int COMPACTION_THRESHOLD = 1_000;
+	private static final int MIN_COMPACTION_BATCH = 1_000;
+	private static final int MAX_COMPACTION_BATCH = 10_000;
+	private static final double COMPACTION_FRACTION = 0.1;
 
 	private final int dimension;
 	private final VectorSimilarityFunction similarityFunction;
@@ -107,7 +109,14 @@ public class JVectorIndex implements Closeable {
 		builder.markNodeDeleted(node);
 		nodeToIri.remove(node);
 		pendingDeletions.add(node);
-		if (pendingDeletions.size() >= COMPACTION_THRESHOLD || isEntryPoint(node)) {
+		if (isEntryPoint(node)) {
+			flushPendingDeletions();
+			return;
+		}
+		int currentTotal = iriToNode.size() + pendingDeletions.size();
+		int threshold = Math.max(MIN_COMPACTION_BATCH, (int) (currentTotal * COMPACTION_FRACTION));
+		threshold = Math.min(threshold, MAX_COMPACTION_BATCH);
+		if (pendingDeletions.size() >= threshold) {
 			flushPendingDeletions();
 		}
 	}
