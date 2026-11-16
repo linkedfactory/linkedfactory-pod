@@ -63,6 +63,7 @@ public class LanceFtsEndToEndTest {
 					vf.createIRI("urn:graph:test"));
 			connection.commit();
 		}
+		awaitOutboxDrained(sail);
 
 		try (var connection = repository.getConnection()) {
 			String query = """
@@ -80,6 +81,14 @@ public class LanceFtsEndToEndTest {
 				assertFalse(result.hasNext());
 			}
 		}
+	}
+
+	private static void awaitOutboxDrained(FtsSail sail) throws Exception {
+		long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+		while (sail.getOutboxStatus().recordCount() != 0 && System.nanoTime() < deadline) {
+			Thread.sleep(10);
+		}
+		assertEquals(0, sail.getOutboxStatus().recordCount());
 	}
 
 	@Test
@@ -107,11 +116,13 @@ public class LanceFtsEndToEndTest {
 			connection.begin();
 			connection.add(item, title, literal, graph);
 			connection.commit();
+			awaitOutboxDrained(sail);
 
 			connection.begin();
 			connection.remove(item, title, literal, graph);
 			connection.commit();
 		}
+		awaitOutboxDrained(sail);
 
 		try (var connection = repository.getConnection()) {
 			String query = """
