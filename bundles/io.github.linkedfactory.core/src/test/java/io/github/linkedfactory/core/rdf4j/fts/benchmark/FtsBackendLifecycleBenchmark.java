@@ -2,7 +2,7 @@ package io.github.linkedfactory.core.rdf4j.fts.benchmark;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.linkedfactory.core.rdf4j.fts.FtsSearchService;
-import io.github.linkedfactory.core.rdf4j.fts.HttpFtsSearchService;
+import io.github.linkedfactory.core.rdf4j.fts.elastic.HttpFtsSearchService;
 import io.github.linkedfactory.core.rdf4j.fts.LanceFtsIndex;
 import io.github.linkedfactory.core.rdf4j.fts.LanceFtsSearchService;
 import org.eclipse.rdf4j.model.IRI;

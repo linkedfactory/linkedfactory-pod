@@ -45,6 +45,8 @@ public class LanceFtsEndToEndTest {
 		FtsSailConfig config = new FtsSailConfig();
 		config.setBackend("lance");
 		config.setIndexDir(indexDir.toString());
+		config.setOutboxDir(Files.createTempDirectory("lance-fts-e2e-outbox-").toString());
+		config.setStoreIdentity("lance-fts-e2e-store");
 
 		FtsSail sail = (FtsSail) new FtsSailFactory().getSail(config);
 		sail.setBaseSail(new MemoryStore());
@@ -85,6 +87,8 @@ public class LanceFtsEndToEndTest {
 		FtsSailConfig config = new FtsSailConfig();
 		config.setBackend("lance");
 		config.setIndexDir(indexDir.toString());
+		config.setOutboxDir(Files.createTempDirectory("lance-fts-e2e-outbox-").toString());
+		config.setStoreIdentity("lance-fts-e2e-store");
 
 		FtsSail sail = (FtsSail) new FtsSailFactory().getSail(config);
 		sail.setBaseSail(new MemoryStore());
