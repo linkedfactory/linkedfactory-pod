@@ -42,6 +42,8 @@ public class LuceneFtsEndToEndTest {
 		FtsSailConfig config = new FtsSailConfig();
 		config.setBackend("lucene");
 		config.setIndexDir(indexDir.toString());
+		config.setOutboxDir(Files.createTempDirectory("lucene-fts-e2e-outbox-").toString());
+		config.setStoreIdentity("lucene-fts-e2e-store");
 
 		FtsSail sail = (FtsSail) new FtsSailFactory().getSail(config);
 		sail.setBaseSail(new MemoryStore());
@@ -82,6 +84,8 @@ public class LuceneFtsEndToEndTest {
 		FtsSailConfig config = new FtsSailConfig();
 		config.setBackend("lucene");
 		config.setIndexDir(indexDir.toString());
+		config.setOutboxDir(Files.createTempDirectory("lucene-fts-e2e-outbox-").toString());
+		config.setStoreIdentity("lucene-fts-e2e-store");
 
 		FtsSail sail = (FtsSail) new FtsSailFactory().getSail(config);
 		sail.setBaseSail(new MemoryStore());

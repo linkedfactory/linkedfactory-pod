@@ -1,11 +1,11 @@
 package io.github.linkedfactory.core.rdf4j.fts.benchmark;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.linkedfactory.core.rdf4j.fts.ElasticKeywordSearchBackend;
+import io.github.linkedfactory.core.rdf4j.fts.elastic.ElasticKeywordSearchBackend;
 import io.github.linkedfactory.core.rdf4j.fts.FtsSearchBackend;
 import io.github.linkedfactory.core.rdf4j.fts.FtsSearchRequest;
 import io.github.linkedfactory.core.rdf4j.fts.FtsSearchService;
-import io.github.linkedfactory.core.rdf4j.fts.HttpFtsSearchService;
+import io.github.linkedfactory.core.rdf4j.fts.elastic.HttpFtsSearchService;
 import io.github.linkedfactory.core.rdf4j.fts.LuceneFtsIndex;
 import io.github.linkedfactory.core.rdf4j.fts.LuceneFtsSearchBackend;
 import io.github.linkedfactory.core.rdf4j.fts.LuceneFtsSearchService;

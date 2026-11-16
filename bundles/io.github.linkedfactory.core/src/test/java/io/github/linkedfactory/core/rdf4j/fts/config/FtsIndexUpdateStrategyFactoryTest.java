@@ -108,8 +108,12 @@ public class FtsIndexUpdateStrategyFactoryTest {
 
 		FtsSailFactory.loadBundleProviders(bundle, discovered);
 
-		assertEquals(1, discovered.size());
-		assertEquals("elastic", discovered.values().iterator().next().backendType());
+		Set<String> backendTypes = new java.util.HashSet<>();
+		for (FtsIndexUpdateStrategyFactory provider : discovered.values()) {
+			backendTypes.add(provider.backendType());
+		}
+		assertTrue(backendTypes.contains("elastic"));
+		assertTrue(backendTypes.contains("lucene"));
 	}
 
 	@Test
