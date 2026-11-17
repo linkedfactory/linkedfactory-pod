@@ -1,0 +1,77 @@
+= KVIN data model
+:description: How LinkedFactory extends RDF with time and context to store measurements.
+
+LinkedFactory describes the structure of technical systems with RDF: components are identified by IRIs and linked to each other.
+Measurements are attached to the same IRIs.
+The KVIN data model makes this possible by adding time to the RDF triple.
+
+image::ROOT:lf-linking.svg[LinkedFactory semantic linking,800]
+
+== From triples to KVIN tuples
+
+RDF describes facts as triples _(S, P, O)_: a subject, a predicate, and an object.
+A measurement additionally needs a timestamp, so LinkedFactory extends the triple to _(S, P, T, O)_.
+The combination of subject IRI *S*, property IRI *P*, and time *T* identifies a value uniquely and serves as the key in a key-value store or in a time-series database.
+
+If named graphs are used to manage multiple datasets, a context *C* extends the model to _(C, S, P, T, O)_.
+This is called the *KVIN* data model.
+Pod additionally uses a sequence number to distinguish values that share a timestamp.
+
+== LF JSON format
+
+The primary exchange format is LF JSON.
+The first level contains the items, the second level their properties, and each property holds a list of timestamped values:
+
+[source,json]
+----
+{
+  "http://example.org/resource1": {
+    "http://example.org/properties/p1": [
+      { "value": 20.4, "time": 1619424246120 },
+      { "value": 20.3, "time": 1619424246100 }
+    ],
+    "http://example.org/properties/p2": [
+      { "value": { "msg": "Error 1", "nr": 1 }, "time": 1619424246100 }
+    ]
+  }
+}
+----
+
+The force measured by a strain gauge looks like this:
+
+[source,json]
+----
+{
+  "https://example.org/Press/Frame/StrainGauge": {
+    "p:force": [{ "value": 7.10096884, "time": 1541521440000 }]
+  }
+}
+----
+
+The format is specified in the https://linkedfactory.github.io/specification/[LinkedFactory specification].
+For the parameters of the HTTP API see xref:reference:time-series-api.adoc[].
+
+== RDF encoding of measurements
+
+In plain RDF, a measurement is represented as a blank node with value and time:
+
+----
+S P [ <kvin:value> O ; <kvin:time> T ] .
+----
+
+The strain gauge example in this encoding:
+
+----
+@base <https://example.org/Press/Frame/> .
+
+<StrainGauge> <p:force> [ <kvin:value> 7.10096884 ; <kvin:time> 1541521440000 ] .
+----
+
+SPARQL queries use the same pattern inside `SERVICE <kvin:>` to read measurements from the KVIN store.
+See xref:how-to:query-data.adoc[].
+
+== Descriptions and measurements are stored separately
+
+Asset descriptions live in the RDF repository managed by eniLINK, measurements in the KVIN store.
+Both use the same IRIs, which is what lets a single query combine them.
+See xref:explanation:architecture.adoc[] and xref:explanation:storage-and-persistence.adoc[].

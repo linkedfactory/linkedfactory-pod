@@ -1,0 +1,39 @@
+= Quickstart
+:description: Start a local development Pod and retrieve your first measurements.
+
+This walkthrough is for an isolated development machine, not a production deployment.
+
+== Start the container
+
+[source,bash]
+----
+docker run --name linkedfactory-pod \
+  --publish 127.0.0.1:8080:8080 \
+  --volume linkedfactory-pod-workspace:/linkedfactory-pod/workspace \
+  linkedfactory/linkedfactory-pod
+----
+
+The command runs in the foreground.
+Use a second terminal for HTTP requests.
+For repeatable deployments, select a tested image tag or digest rather than relying on the image's default tag.
+
+include::ROOT:partial$connection.adoc[]
+
+Open http://localhost:8080/linkedfactory/[the local Pod interface].
+Wait until it responds before sending data.
+
+[IMPORTANT]
+====
+Binding to loopback limits direct network exposure but does not harden the application.
+The supplied server configuration defines `admin` / `admin` and grants anonymous read, write, and control access to models.
+
+The workspace volume preserves files, but the supplied RDF model-set configuration is in-memory.
+See xref:explanation:architecture.adoc[] before relying on data persistence.
+====
+
+== Next steps
+
+Work through the tutorial xref:tutorials:first-asset.adoc[]: it writes measurements, describes the sensor, and combines both in one query.
+Until the tutorial is complete, follow xref:how-to:ingest-measurements.adoc[], xref:how-to:model-assets.adoc[], and xref:how-to:query-data.adoc[] in this order.
+
+Before moving beyond local development, read xref:how-to:secure-deployment.adoc[].

@@ -1,4 +1,0 @@
-* xref:ROOT:index.adoc[LinkedFactory Pod]
-** xref:ROOT:architecture.adoc[Architecture]
-** xref:ROOT:quickstart.adoc[Quickstart]
-** xref:ROOT:sources.adoc[Source baseline and compatibility]

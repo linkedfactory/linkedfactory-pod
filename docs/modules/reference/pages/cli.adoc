@@ -1,0 +1,25 @@
+= CLI
+:description: Commands and options of the KVIN command-line tool.
+
+Reference for the `CLI` tool. For typical use see xref:how-to:copy-data-with-cli.adoc[].
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+Sources in the repository:
+
+* `bundles/io.github.linkedfactory.core/src/main/java/io/github/linkedfactory/core/cli/CLI.java`
+
+== Global options
+
+`-s`, `--store`: location of the KVIN store.
+
+== copy
+
+Options and arguments.
+
+== fetch
+
+Options and arguments.

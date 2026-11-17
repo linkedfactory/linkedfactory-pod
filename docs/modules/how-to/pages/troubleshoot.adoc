@@ -1,0 +1,25 @@
+= Troubleshoot common problems
+:description: Find causes and fixes for common errors when writing and querying data.
+
+This page collects symptoms, causes, and fixes in one place.
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+== Measurements are not returned
+
+Model, item, property, time range, limit.
+
+== SPARQL returns no KVIN results
+
+`SERVICE <kvin:>` pattern, model selection.
+
+== Data is lost after a restart
+
+In-memory model set; see xref:explanation:storage-and-persistence.adoc[].
+
+== Requests are rejected
+
+Authentication and permissions; see xref:how-to:secure-deployment.adoc[].

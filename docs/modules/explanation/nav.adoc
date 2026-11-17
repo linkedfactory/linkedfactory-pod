@@ -1,0 +1,6 @@
+.Explanation
+* xref:explanation:kvin-data-model.adoc[KVIN data model]
+* xref:explanation:architecture.adoc[Architecture]
+* xref:explanation:semantic-concepts.adoc[Models, imports, and identifiers]
+* xref:explanation:storage-and-persistence.adoc[Storage and persistence]
+* xref:explanation:security-model.adoc[Security model]

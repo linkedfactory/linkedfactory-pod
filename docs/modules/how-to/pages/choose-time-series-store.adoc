@@ -1,0 +1,26 @@
+= Choose a time-series store
+:description: Select and configure the KVIN store implementation.
+
+Pod ships several KVIN store implementations. LevelDB is the default.
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+Sources in the repository:
+
+* `bundles/io.github.linkedfactory.service/src/main/java/io/github/linkedfactory/service/config/`
+* `bundles/io.github.linkedfactory.service/src/main/resources/OSGI-INF/io.github.linkedfactory.service-default.ttl`
+
+== Available stores
+
+LevelDB, Parquet, partitioned store (LevelDB for recent data, Parquet for archived data).
+
+== Select a store
+
+Where the store factory is configured.
+
+== Migrate data
+
+Use xref:how-to:copy-data-with-cli.adoc[].

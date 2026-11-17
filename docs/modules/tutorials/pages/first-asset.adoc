@@ -1,0 +1,33 @@
+= Your first asset: measurements meet RDF
+:description: Learn how Pod links asset descriptions and measurements by building a small example end to end.
+
+In this tutorial you store force measurements of a strain gauge, describe the sensor in RDF, and retrieve both in a single SPARQL query.
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+== What you need
+
+A running Pod from xref:ROOT:quickstart.adoc[]. Nothing else.
+
+== Write two measurements
+
+Send two values for `p:force` in LF JSON. Material: xref:how-to:ingest-measurements.adoc[].
+
+== Describe the sensor
+
+Add the strain gauge and its frame to a model. Material: xref:how-to:model-assets.adoc[].
+
+== Read the measurements
+
+Retrieve the values over HTTP.
+
+== Join description and measurements
+
+Select the sensor by its type and read its values with `SERVICE <kvin:>`. Material: xref:how-to:query-data.adoc[].
+
+== What you have learned
+
+Shared IRIs connect both storage paths. Next: xref:explanation:kvin-data-model.adoc[], xref:reference:time-series-api.adoc[].

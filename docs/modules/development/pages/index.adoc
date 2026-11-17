@@ -1,0 +1,26 @@
+= Development
+:description: Documentation for people who build, test, extend, and release LinkedFactory Pod.
+
+This part of the documentation is for contributors.
+If you want to use Pod, start with xref:ROOT:index.adoc[].
+
+Pod is an Eclipse Equinox/OSGi application on top of https://github.com/enilink/enilink[eniLINK], built with Maven and bnd.
+The code is written in Java and Scala.
+
+== Start here
+
+. xref:development:repository-structure.adoc[] gives an overview of the bundles and directories.
+. xref:development:build-and-run.adoc[] sets up a local build and a running instance.
+. xref:development:testing.adoc[] explains how tests are run in CI and locally.
+
+== Going deeper
+
+* xref:development:internals.adoc[] describes how KVIN stores, the RDF4J integration, and the service layer fit together.
+* xref:development:extending.adoc[] lists the extension points.
+* xref:development:benchmarks.adoc[] measures ingestion throughput.
+* xref:development:upstream-baseline.adoc[] maps Pod features to the eniLINK source code.
+
+== Contributing changes
+
+The contribution process is described in `CONTRIBUTING.md` in the repository root.
+Releases are described in xref:development:release.adoc[], the documentation workflow in xref:development:documentation.adoc[].

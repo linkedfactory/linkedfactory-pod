@@ -1,0 +1,49 @@
+= Build and run locally
+:description: Build Pod with Maven, start a local instance, and open the project in an IDE.
+
+== Prerequisites
+
+* JDK 21
+* Maven 3
+
+== Build
+
+Pod is a plain Maven project.
+A full build runs from the repository root:
+
+[source,bash]
+----
+mvn package
+----
+
+The runnable distribution is created in `server/target/assembly`.
+
+== Run
+
+. Change to `launch/equinox`.
+. Create or update the launch configuration:
++
+[source,bash]
+----
+mvn test -Pconfigure -DskipTests
+----
+. Start or restart the instance:
++
+[source,bash]
+----
+mvn test
+----
+
+Pod is available at http://localhost:8080/linkedfactory/.
+
+== Open the project in an IDE
+
+Any IDE with Java and Scala support works.
+
+* IntelliJ IDEA: `File > Project from existing sources...`
+* Eclipse: `File > Import > Maven > Existing Maven Projects`
+
+== Next steps
+
+* xref:development:testing.adoc[]
+* xref:development:benchmarks.adoc[]
