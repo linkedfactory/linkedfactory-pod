@@ -1,11 +1,3 @@
 .Development
-* xref:development:index.adoc[Overview]
-** xref:development:repository-structure.adoc[Repository structure]
-** xref:development:build-and-run.adoc[Build and run locally]
-** xref:development:testing.adoc[Testing]
-** xref:development:benchmarks.adoc[Benchmarks]
-** xref:development:internals.adoc[Architecture internals]
-** xref:development:extending.adoc[Extending Pod]
-** xref:development:release.adoc[Release process]
-** xref:development:documentation.adoc[Writing documentation]
-** xref:development:upstream-baseline.adoc[eniLINK source baseline]
+* xref:development:benchmarks.adoc[Benchmarks]
+* xref:development:upstream-baseline.adoc[eniLINK source baseline]

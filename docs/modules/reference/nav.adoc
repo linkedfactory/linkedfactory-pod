@@ -2,9 +2,6 @@
 * Pod interfaces
 ** xref:reference:http-interfaces.adoc[HTTP interfaces]
 ** xref:reference:time-series-api.adoc[Time-series API]
-** xref:reference:sparql-endpoint.adoc[SPARQL endpoint]
-** xref:reference:full-text-search.adoc[Full-text search]
-** xref:reference:cli.adoc[CLI]
 ** xref:reference:configuration.adoc[Configuration]
 * Platform (eniLINK)
 ** xref:reference:models-api.adoc[RDF model import and export]

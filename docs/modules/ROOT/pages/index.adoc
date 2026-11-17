@@ -58,28 +58,13 @@ An ordinary RDF query does not automatically scan the time-series store.
 
 == Choose a starting point
 
-[cols="1,3",options="header"]
-|===
-|You want to … |Start with
-
-|try Pod
-|xref:ROOT:installation.adoc[], then xref:ROOT:quickstart.adoc[] and the tutorial xref:tutorials:first-asset.adoc[]
-
-|integrate machines or applications
-|xref:how-to:ingest-measurements.adoc[], xref:how-to:query-data.adoc[], xref:reference:http-interfaces.adoc[]
-
-|describe assets
-|xref:explanation:semantic-concepts.adoc[], xref:how-to:model-assets.adoc[]
-
-|operate Pod
-|xref:how-to:secure-deployment.adoc[], xref:reference:configuration.adoc[], xref:explanation:storage-and-persistence.adoc[]
-
-|understand the concepts
-|xref:explanation:kvin-data-model.adoc[], xref:explanation:architecture.adoc[]
-
-|contribute to Pod
-|xref:development:index.adoc[]
-|===
+* xref:ROOT:quickstart.adoc[Start a local Pod and write a measurement].
+* xref:how-to:model-assets.adoc[Describe assets with RDF].
+* xref:how-to:query-data.adoc[Query measurements and asset descriptions].
+* xref:how-to:secure-deployment.adoc[Prepare authentication and permissions].
+* xref:reference:http-interfaces.adoc[Integrate an HTTP client].
+* xref:reference:models-api.adoc[Import or export asset-description models].
+* xref:reference:configuration.adoc[Configure storage, login, and query execution].
 
 == Platform integration beyond measurements
 

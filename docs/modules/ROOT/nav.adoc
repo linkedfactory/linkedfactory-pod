@@ -1,3 +1,2 @@
 * xref:ROOT:index.adoc[LinkedFactory Pod]
-** xref:ROOT:installation.adoc[Install Pod]
 ** xref:ROOT:quickstart.adoc[Quickstart]

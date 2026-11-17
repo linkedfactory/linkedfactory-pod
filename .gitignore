@@ -16,4 +16,3 @@ OSGI-INF
 !OSGI-INF/
 /docker/pod-data/
 /launch/**/workspace
-/build/

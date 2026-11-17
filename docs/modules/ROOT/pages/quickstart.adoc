@@ -31,9 +31,14 @@ The workspace volume preserves files, but the supplied RDF model-set configurati
 See xref:explanation:architecture.adoc[] before relying on data persistence.
 ====
 
-== Next steps
+== Write and read measurements
 
-Work through the tutorial xref:tutorials:first-asset.adoc[]: it writes measurements, describes the sensor, and combines both in one query.
-Until the tutorial is complete, follow xref:how-to:ingest-measurements.adoc[], xref:how-to:model-assets.adoc[], and xref:how-to:query-data.adoc[] in this order.
+Follow xref:how-to:ingest-measurements.adoc[] to write the sample observations.
+Then follow xref:how-to:query-data.adoc[] to retrieve them through HTTP and SPARQL.
 
-Before moving beyond local development, read xref:how-to:secure-deployment.adoc[].
+== Add semantic descriptions
+
+Use xref:how-to:model-assets.adoc[] to describe the sensor and its parent asset.
+The same sensor IRI connects this description with the ingested measurements.
+
+Before moving beyond local development, complete xref:how-to:secure-deployment.adoc[].

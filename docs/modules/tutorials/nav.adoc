@@ -1,2 +1,0 @@
-.Tutorials
-* xref:tutorials:first-asset.adoc[Your first asset]
