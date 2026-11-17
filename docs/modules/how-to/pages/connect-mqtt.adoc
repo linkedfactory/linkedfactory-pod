@@ -1,0 +1,29 @@
+= Connect an MQTT broker
+:description: Receive measurements from an MQTT broker and store them in Pod.
+
+Pod can subscribe to an MQTT broker and write incoming messages as measurements.
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+Sources in the repository:
+
+* `bundles/io.github.linkedfactory.service/src/main/scala/io/github/linkedfactory/service/mqtt/MqttEventBridge.scala`
+
+== Prerequisites
+
+Broker address, credentials, topic layout.
+
+== Configure the bridge
+
+Configuration keys and where to set them.
+
+== Map topics and payloads to items and properties
+
+How topics and message payloads become KVIN tuples.
+
+== Verify
+
+Read the values via xref:reference:time-series-api.adoc[].

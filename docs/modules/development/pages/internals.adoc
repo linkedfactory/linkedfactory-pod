@@ -1,0 +1,29 @@
+= Architecture internals
+:description: How Pod is implemented on OSGi, eniLINK, and RDF4J.
+
+Implementation view for contributors. The user view is in xref:explanation:architecture.adoc[].
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+== Bundles and their responsibilities
+
+core, service, opcua.
+
+== KVIN store implementations
+
+LevelDB, Parquet, partitioned, HTTP client.
+
+== RDF4J integration
+
+KVIN SAIL, `SERVICE <kvin:>`, FTS SAIL, AAS federation.
+
+== Service layer
+
+Lift module, REST routes, MQTT bridge, web views.
+
+== Configuration loading
+
+OSGi defaults and platform TTL.

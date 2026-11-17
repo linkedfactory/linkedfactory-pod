@@ -1,0 +1,79 @@
+= Full-text search
+:description: Configuration properties, backends, and protocol of the fts:FtsSail.
+
+The full-text search is configured as `fts:FtsSail` in the repository configuration.
+For a step-by-step setup see xref:how-to:enable-full-text-search.adoc[].
+
+Namespace: `http://linkedfactory.github.io/config/sail/fts#`
+
+== Configuration properties
+
+[cols="1,3",options="header"]
+|===
+|Property |Meaning
+
+|`fts:backend`
+|Backend implementation, see <<backends>>.
+
+|`fts:endpoint`
+|Base URL of an external search server.
+
+|`fts:bulkPath`
+|Path for bulk indexing requests, for example `/fts/bulk`. Pod sends changes there.
+
+|`fts:searchPath`
+|Path for search requests, for example `/fts/_search`.
+
+|`fts:defaultLimit`
+|Default number of results per query.
+
+|`fts:failOnError`
+|`true`: backend errors fail the operation. `false`: errors are logged.
+|===
+
+[#backends]
+== Backends
+
+[cols="1,3",options="header"]
+|===
+|Value |Status
+
+|`elastic`
+|Available. Uses `fts:endpoint` and an HTTP search backend such as Elasticsearch.
+
+|`lucene`
+|Planned.
+
+|`internal`
+|Planned. In-process indexing, ignores `fts:endpoint`.
+|===
+
+== SPARQL service
+
+[cols="1,3",options="header"]
+|===
+|Pattern |Meaning
+
+|`SERVICE <fts:>`
+|Search with the configured backend.
+
+|`SERVICE <fts:http://host:9200>`
+|Search with a different endpoint for this query. Internal backends ignore the address.
+
+|`?iri fts:keywords "…"`
+|Keywords to search for; binds matching IRIs.
+
+|`fts:score ?score`
+|Optional relevance score.
+|===
+
+Snippet bindings are optional and depend on the backend.
+
+== Bulk request format
+
+Pod sends a JSON object with an `operations` array.
+Each entry is one of `upsert`, `remove`, `clear`, or `clearContexts`.
+The named graph of a statement is sent as `context`.
+
+The payload format is not yet stable.
+Examples: `bundles/io.github.linkedfactory.core/src/test/resources/fts/`.

@@ -1,0 +1,25 @@
+= Storage and persistence
+:description: Where Pod keeps descriptions, measurements, files, and configuration, and what survives a restart.
+
+Pod uses separate storage for asset descriptions, measurements, metadata, and files. Each has its own persistence settings.
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+== Four kinds of data
+
+RDF models, model metadata, KVIN measurements, file attachments.
+
+== Default configuration
+
+In-memory model set, LevelDB KVIN store in the workspace.
+
+== Making everything persistent
+
+Which settings must change together.
+
+== Choosing a time-series store
+
+Trade-offs between LevelDB, Parquet, and partitioned stores.

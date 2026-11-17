@@ -1,0 +1,20 @@
+.How-to guides
+* Get data in
+** xref:how-to:ingest-measurements.adoc[Ingest measurements]
+** xref:how-to:connect-mqtt.adoc[Connect an MQTT broker]
+** xref:how-to:import-opcua-nodeset.adoc[Import an OPC UA NodeSet]
+** xref:how-to:copy-data-with-cli.adoc[Copy data with the CLI]
+* Describe assets
+** xref:how-to:model-assets.adoc[Model assets]
+* Query and search
+** xref:how-to:query-data.adoc[Query Pod data]
+** xref:how-to:enable-full-text-search.adoc[Enable full-text search]
+* Operate Pod
+** xref:how-to:deploy-with-docker-compose.adoc[Deploy with Docker Compose]
+** xref:how-to:choose-time-series-store.adoc[Choose a time-series store]
+** xref:how-to:troubleshoot.adoc[Troubleshoot common problems]
+* Platform (eniLINK)
+** xref:how-to:manage-models.adoc[Manage RDF and OWL models]
+** xref:how-to:use-sparql.adoc[Use the SPARQL interface]
+** xref:how-to:secure-deployment.adoc[Secure a deployment]
+** xref:how-to:use-web-ui.adoc[Navigate the web interface]

@@ -1,0 +1,31 @@
+= Deploy with Docker Compose
+:description: Run Pod with Docker Compose and persistent volumes.
+
+Docker Compose builds and runs Pod with workspace and deploy directories on the host.
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+Sources in the repository:
+
+* `docker/docker-compose.yml`
+* `docker/Dockerfile`
+* `docker/entrypoint.sh`
+
+== Start Pod
+
+`docker compose -f docker/docker-compose.yml up -d`
+
+== Persist data
+
+Volumes `pod-data/workspace` and `pod-data/deploy`; see xref:explanation:storage-and-persistence.adoc[].
+
+== Configure login
+
+The example sets `enilink.loginrequired=false`. Change it before exposing Pod; see xref:how-to:secure-deployment.adoc[].
+
+== Add a search server
+
+Optional, for xref:how-to:enable-full-text-search.adoc[].

@@ -1,0 +1,25 @@
+= Security model
+:description: How identity, model permissions, and endpoint protection fit together in Pod.
+
+Pod relies on eniLINK for authentication and model-level access control.
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+== Identity
+
+Local accounts, sessions, HTTP Basic, JAAS.
+
+== Model permissions
+
+Ownership, groups, ACL modes.
+
+== Endpoint boundary
+
+Which routes enforce which checks.
+
+== Development defaults
+
+Why the supplied configuration is not a production baseline.

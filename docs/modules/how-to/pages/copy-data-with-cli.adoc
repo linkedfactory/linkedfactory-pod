@@ -1,0 +1,25 @@
+= Copy data with the CLI
+:description: Copy or fetch KVIN data between stores with the command-line tool.
+
+The CLI works directly on KVIN stores, for example to migrate data or to export a range of values.
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+Sources in the repository:
+
+* `bundles/io.github.linkedfactory.core/src/main/java/io/github/linkedfactory/core/cli/CLI.java`
+
+== Run the CLI
+
+How to start it from the build output.
+
+== Copy a store
+
+Use the `copy` command.
+
+== Fetch values
+
+Use the `fetch` command.

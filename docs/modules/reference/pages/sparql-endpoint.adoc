@@ -1,0 +1,29 @@
+= SPARQL endpoint
+:description: Request forms, parameters, result formats, and errors of the /sparql endpoint.
+
+Reference for the eniLINK SPARQL endpoint as used by Pod. Procedures are in xref:how-to:use-sparql.adoc[].
+
+[NOTE]
+====
+This page is a placeholder. The outline below describes the planned content.
+====
+
+== Endpoint and request forms
+
+GET, POST form, POST query body; query and update.
+
+== Parameters
+
+`query`, `update`, `model`, further parameters.
+
+== Result formats
+
+Accept headers and media types.
+
+== Service extensions
+
+`SERVICE <kvin:>`, `SERVICE <fts:>` (see xref:reference:full-text-search.adoc[]), AAS federation.
+
+== Errors
+
+Status codes and messages.
