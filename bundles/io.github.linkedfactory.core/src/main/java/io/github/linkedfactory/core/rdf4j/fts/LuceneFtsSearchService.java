@@ -6,6 +6,7 @@ import org.eclipse.rdf4j.model.Resource;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.Value;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -15,112 +16,68 @@ import java.util.Set;
 
 public class LuceneFtsSearchService implements FtsSearchService {
 	private final LuceneFtsIndex index;
-	private final ThreadLocal<Transaction> txState = new ThreadLocal<>();
 
 	public LuceneFtsSearchService(LuceneFtsIndex index) {
 		this.index = index;
 	}
 
 	@Override
-	public void begin() {
-		txState.set(new Transaction());
-	}
-
-	@Override
-	public void addRemoveStatements(Set<Statement> added, Set<Statement> removed) {
-		Transaction tx = state();
+	public void addRemoveStatements(Set<Statement> added, Set<Statement> removed) throws IOException {
+		Map<String, List<LuceneFtsIndex.FieldValue>> addedEntries = new LinkedHashMap<>();
+		Map<String, List<LuceneFtsIndex.FieldValue>> removedEntries = new LinkedHashMap<>();
 		for (Statement statement : added) {
-			tx.add(statement);
+			append(addedEntries, statement);
 		}
 		for (Statement statement : removed) {
-			tx.remove(statement);
+			append(removedEntries, statement);
 		}
+		index.applyAddRemove(addedEntries, removedEntries);
 	}
 
 	@Override
-	public void clearContexts(Resource... contexts) {
-		state().clearContexts(contexts);
-	}
-
-	@Override
-	public void clear() {
-		state().clearAll();
-	}
-
-	@Override
-	public void commit() throws Exception {
-		Transaction tx = txState.get();
-		txState.remove();
-		if (tx == null) {
+	public void clearContexts(Resource... contexts) throws IOException {
+		if (contexts == null) {
 			return;
 		}
-		if (tx.clearAll) {
-			index.clearAll();
+		Set<String> contextValues = new LinkedHashSet<>();
+		for (Resource context : contexts) {
+			if (context != null) {
+				contextValues.add(context.stringValue());
+			}
 		}
-		if (!tx.clearedContexts.isEmpty()) {
-			index.clearContexts(tx.clearedContexts);
-		}
-		index.applyAddRemove(tx.added, tx.removed);
+		index.clearContexts(contextValues);
+	}
+
+	@Override
+	public void clear() throws IOException {
+		index.clearAll();
+	}
+
+	@Override
+	public void commit() throws IOException {
 		index.commit();
 	}
 
-	@Override
-	public void rollback() {
-		txState.remove();
-	}
-
-	private Transaction state() {
-		Transaction tx = txState.get();
-		if (tx == null) {
-			tx = new Transaction();
-			txState.set(tx);
+	private static void append(Map<String, List<LuceneFtsIndex.FieldValue>> target, Statement statement) {
+		Value object = statement.getObject();
+		boolean iri = object instanceof IRI;
+		if (!iri && !(object instanceof Literal)) {
+			return;
 		}
-		return tx;
-	}
-
-	private static final class Transaction {
-		private final Map<String, List<LuceneFtsIndex.FieldValue>> added = new LinkedHashMap<>();
-		private final Map<String, List<LuceneFtsIndex.FieldValue>> removed = new LinkedHashMap<>();
-		private final Set<String> clearedContexts = new LinkedHashSet<>();
-		private boolean clearAll;
-
-		void add(Statement statement) {
-			append(added, statement);
+		String value;
+		String language = null;
+		String datatype = null;
+		if (iri) {
+			value = object.stringValue();
+		} else {
+			Literal literal = (Literal) object;
+			value = literal.getLabel();
+			language = literal.getLanguage().orElse(null);
+			datatype = literal.getDatatype() == null ? null : literal.getDatatype().stringValue();
 		}
-
-		void remove(Statement statement) {
-			append(removed, statement);
-		}
-
-		void clearAll() {
-			clearAll = true;
-			added.clear();
-			removed.clear();
-			clearedContexts.clear();
-		}
-
-		void clearContexts(Resource... contexts) {
-			if (contexts == null) {
-				return;
-			}
-			for (Resource context : contexts) {
-				if (context != null) {
-					clearedContexts.add(context.stringValue());
-				}
-			}
-		}
-
-		private void append(Map<String, List<LuceneFtsIndex.FieldValue>> target, Statement statement) {
-			Value object = statement.getObject();
-			boolean iri = object instanceof IRI;
-			if (!iri && !(object instanceof Literal)) {
-				return;
-			}
-			String value = iri ? object.stringValue() : ((Literal) object).getLabel();
-			String context = statement.getContext() == null ? null : statement.getContext().stringValue();
-			LuceneFtsIndex.FieldValue entry = new LuceneFtsIndex.FieldValue(
-					statement.getPredicate().stringValue(), value, iri, context);
-			target.computeIfAbsent(statement.getSubject().stringValue(), key -> new ArrayList<>()).add(entry);
-		}
+		String context = statement.getContext() == null ? null : statement.getContext().stringValue();
+		LuceneFtsIndex.FieldValue entry = new LuceneFtsIndex.FieldValue(
+				statement.getPredicate().stringValue(), value, iri, context, language, datatype);
+		target.computeIfAbsent(statement.getSubject().stringValue(), key -> new ArrayList<>()).add(entry);
 	}
 }

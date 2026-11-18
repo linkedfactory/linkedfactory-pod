@@ -209,6 +209,120 @@ public class LuceneFtsIndexTest {
 	}
 
 	@Test
+	public void removingOneLanguageTaggedLiteralDoesNotRemoveAnotherWithSameLexicalValue() throws Exception {
+		IRI s1 = vf.createIRI("urn:item:1");
+		IRI title = vf.createIRI("urn:title");
+		Statement en = vf.createStatement(s1, title, vf.createLiteral("cat", "en"));
+		Statement fr = vf.createStatement(s1, title, vf.createLiteral("cat", "fr"));
+		commit(Set.of(en, fr), Set.of());
+		assertEquals(1, searchBackend.search(new FtsSearchRequest("cat", null, 10, null, false, null)).size());
+
+		commit(Set.of(), Set.of(en));
+
+		assertEquals("removing the @en literal must not remove the distinct @fr literal with the same lexical value",
+				1, searchBackend.search(new FtsSearchRequest("cat", null, 10, null, false, null)).size());
+	}
+
+	@Test
+	public void removingPlainLiteralDoesNotRemoveLanguageTaggedLiteralWithSameLexicalValue() throws Exception {
+		IRI s1 = vf.createIRI("urn:item:1");
+		IRI title = vf.createIRI("urn:title");
+		Statement plain = vf.createStatement(s1, title, vf.createLiteral("cat"));
+		Statement en = vf.createStatement(s1, title, vf.createLiteral("cat", "en"));
+		commit(Set.of(plain, en), Set.of());
+		assertEquals(1, searchBackend.search(new FtsSearchRequest("cat", null, 10, null, false, null)).size());
+
+		commit(Set.of(), Set.of(plain));
+
+		assertEquals("removing the plain literal must not remove the distinct @en literal with the same lexical value",
+				1, searchBackend.search(new FtsSearchRequest("cat", null, 10, null, false, null)).size());
+	}
+
+	@Test
+	public void removingTypedLiteralDoesNotRemoveDifferentlyTypedLiteralWithSameLexicalValue() throws Exception {
+		IRI s1 = vf.createIRI("urn:item:1");
+		IRI title = vf.createIRI("urn:title");
+		Statement asString = vf.createStatement(s1, title, vf.createLiteral("42", org.eclipse.rdf4j.model.vocabulary.XSD.STRING));
+		Statement asInt = vf.createStatement(s1, title, vf.createLiteral("42", org.eclipse.rdf4j.model.vocabulary.XSD.INT));
+		commit(Set.of(asString, asInt), Set.of());
+		assertEquals(1, searchBackend.search(new FtsSearchRequest("42", null, 10, null, false, null)).size());
+
+		commit(Set.of(), Set.of(asString));
+
+		assertEquals("removing the xsd:string literal must not remove the distinct xsd:int literal with the same lexical value",
+				1, searchBackend.search(new FtsSearchRequest("42", null, 10, null, false, null)).size());
+	}
+
+	@Test
+	public void operationsWithinOneTransactionApplyInOriginalOrder() throws Exception {
+		IRI s1 = vf.createIRI("urn:item:1");
+		IRI s2 = vf.createIRI("urn:item:2");
+		IRI title = vf.createIRI("urn:title");
+		IRI ctx = vf.createIRI("urn:ctx:a");
+		Statement before = vf.createStatement(s1, title, vf.createLiteral("fox"), ctx);
+		Statement after = vf.createStatement(s2, title, vf.createLiteral("hound"), ctx);
+
+		searchService.begin();
+		searchService.addRemoveStatements(Set.of(before), Set.of());
+		searchService.clearContexts(ctx);
+		searchService.addRemoveStatements(Set.of(after), Set.of());
+		searchService.commit();
+
+		assertEquals("statement added before the context clear must not survive it",
+				0, searchBackend.search(new FtsSearchRequest("fox", null, 10, null, false, null)).size());
+		assertEquals("statement added after the context clear must survive",
+				1, searchBackend.search(new FtsSearchRequest("hound", null, 10, null, false, null)).size());
+	}
+
+	@Test
+	public void failedOperationDoesNotMakePartialUpdateVisibleAndRetryConverges() throws Exception {
+		Path failingDir = Files.createTempDirectory("lucene-fts-atomicity-");
+		try (FailingLuceneFtsIndex failingIndex = new FailingLuceneFtsIndex(failingDir)) {
+			LuceneFtsSearchService failingService = new LuceneFtsSearchService(failingIndex);
+			LuceneFtsSearchBackend failingBackend = new LuceneFtsSearchBackend(failingIndex);
+
+			IRI s1 = vf.createIRI("urn:item:1");
+			IRI s2 = vf.createIRI("urn:item:2");
+			IRI title = vf.createIRI("urn:title");
+			IRI ctx = vf.createIRI("urn:ctx:a");
+			IRI otherCtx = vf.createIRI("urn:ctx:b");
+			Statement baseline = vf.createStatement(s1, title, vf.createLiteral("fox"), ctx);
+
+			failingService.begin();
+			failingService.addRemoveStatements(Set.of(baseline), Set.of());
+			failingService.commit();
+			assertEquals(1, failingBackend.search(new FtsSearchRequest("fox", null, 10, null, false, null)).size());
+
+			Statement newStatement = vf.createStatement(s2, title, vf.createLiteral("hound"), otherCtx);
+			failingService.begin();
+			failingService.addRemoveStatements(Set.of(newStatement), Set.of());
+			try {
+				failingService.clearContexts(ctx);
+				throw new AssertionError("Expected the simulated backend failure to propagate");
+			} catch (IOException expected) {
+				// simulated failure partway through the update, as the real backend could throw
+			}
+
+			assertEquals("a partially applied update must not become visible before a successful commit",
+					0, failingBackend.search(new FtsSearchRequest("hound", null, 10, null, false, null)).size());
+			assertEquals("the baseline statement committed before the failed attempt must be unaffected",
+					1, failingBackend.search(new FtsSearchRequest("fox", null, 10, null, false, null)).size());
+
+			failingService.begin();
+			failingService.addRemoveStatements(Set.of(newStatement), Set.of());
+			failingService.clearContexts(ctx);
+			failingService.commit();
+
+			assertEquals("the retried update's clearContexts must take effect once it succeeds",
+					0, failingBackend.search(new FtsSearchRequest("fox", null, 10, null, false, null)).size());
+			assertEquals("the retried update's add must take effect once it succeeds",
+					1, failingBackend.search(new FtsSearchRequest("hound", null, 10, null, false, null)).size());
+		} finally {
+			deleteRecursively(failingDir);
+		}
+	}
+
+	@Test
 	public void concurrentCommitsOnSharedServiceDoNotLoseStatements() throws Exception {
 		int threads = 4;
 		int perThread = 50;
@@ -258,6 +372,23 @@ public class LuceneFtsIndexTest {
 				} catch (IOException ignored) {
 				}
 			});
+		}
+	}
+
+	private static final class FailingLuceneFtsIndex extends LuceneFtsIndex {
+		private boolean failOnce = true;
+
+		FailingLuceneFtsIndex(Path indexDir) throws IOException {
+			super(indexDir);
+		}
+
+		@Override
+		public void clearContexts(Set<String> contexts) throws IOException {
+			if (failOnce) {
+				failOnce = false;
+				throw new IOException("Simulated backend failure");
+			}
+			super.clearContexts(contexts);
 		}
 	}
 }

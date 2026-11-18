@@ -51,7 +51,8 @@ public class LuceneFtsIndex implements AutoCloseable {
 	private final SearcherManager searcherManager;
 	private final Object lock = new Object();
 
-	public record FieldValue(String field, String value, boolean iri, String context) {
+	public record FieldValue(String field, String value, boolean iri, String context, String language,
+			String datatype) {
 	}
 
 	public LuceneFtsIndex(Path indexDir) throws IOException {
@@ -212,15 +213,21 @@ public class LuceneFtsIndex implements AutoCloseable {
 	}
 
 	private static String encode(FieldValue entry) {
-		return entry.field() + SEP + (entry.iri() ? '1' : '0') + SEP + (entry.context() == null ? "" : entry.context()) + SEP + entry.value();
+		return entry.field() + SEP + (entry.iri() ? '1' : '0') + SEP
+				+ (entry.context() == null ? "" : entry.context()) + SEP
+				+ (entry.language() == null ? "" : entry.language()) + SEP
+				+ (entry.datatype() == null ? "" : entry.datatype()) + SEP
+				+ entry.value();
 	}
 
 	private static List<FieldValue> decodeEntries(String[] raw) {
 		List<FieldValue> result = new ArrayList<>(raw.length);
 		for (String s : raw) {
-			String[] parts = s.split(String.valueOf(SEP), 4);
+			String[] parts = s.split(String.valueOf(SEP), 6);
 			String context = parts[2].isEmpty() ? null : parts[2];
-			result.add(new FieldValue(parts[0], parts[3], "1".equals(parts[1]), context));
+			String language = parts[3].isEmpty() ? null : parts[3];
+			String datatype = parts[4].isEmpty() ? null : parts[4];
+			result.add(new FieldValue(parts[0], parts[5], "1".equals(parts[1]), context, language, datatype));
 		}
 		return result;
 	}
