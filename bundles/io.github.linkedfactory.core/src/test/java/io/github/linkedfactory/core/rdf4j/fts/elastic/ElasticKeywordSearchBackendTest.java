@@ -1,9 +1,11 @@
-package io.github.linkedfactory.core.rdf4j.fts;
+package io.github.linkedfactory.core.rdf4j.fts.elastic;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchHit;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchRequest;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;

@@ -1,0 +1,139 @@
+package io.github.linkedfactory.core.rdf4j.fts;
+
+import io.github.linkedfactory.core.rdf4j.fts.config.FtsSailConfig;
+import io.github.linkedfactory.core.rdf4j.fts.config.FtsSailFactory;
+import org.eclipse.rdf4j.query.QueryLanguage;
+import org.eclipse.rdf4j.repository.sail.SailRepository;
+import org.eclipse.rdf4j.sail.memory.MemoryStore;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+public class LuceneFtsEndToEndTest {
+	private Path indexDir;
+	private SailRepository repository;
+	private FtsFederatedServiceResolver resolver;
+
+	@Before
+	public void setUp() throws IOException {
+		indexDir = Files.createTempDirectory("lucene-fts-e2e-");
+	}
+
+	@After
+	public void tearDown() {
+		if (resolver != null) {
+			resolver.shutDown();
+		}
+		if (repository != null) {
+			repository.shutDown();
+		}
+	}
+
+	@Test
+	public void indexedThroughFtsSailIsSearchableThroughDefaultFederatedServiceResolver() throws Exception {
+		FtsSailConfig config = new FtsSailConfig();
+		config.setBackend("lucene");
+		config.setIndexDir(indexDir.toString());
+		config.setOutboxDir(Files.createTempDirectory("lucene-fts-e2e-outbox-").toString());
+		config.setStoreIdentity("lucene-fts-e2e-store");
+
+		FtsSail sail = (FtsSail) new FtsSailFactory().getSail(config);
+		sail.setBaseSail(new MemoryStore());
+
+		repository = new SailRepository(sail);
+		resolver = new FtsFederatedServiceResolver(sail.getFederatedServiceConfig());
+		repository.setFederatedServiceResolver(resolver);
+		repository.init();
+
+		try (var connection = repository.getConnection()) {
+			var vf = connection.getValueFactory();
+			connection.begin();
+			connection.add(vf.createIRI("urn:item1"), vf.createIRI("urn:title"), vf.createLiteral("the quick brown fox"),
+					vf.createIRI("urn:graph:test"));
+			connection.commit();
+		}
+		awaitOutboxDrained(sail);
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  service <fts:> {
+					    ?iri fts:keywords "fox" .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				assertTrue(result.hasNext());
+				assertEquals("urn:item1", result.next().getValue("iri").stringValue());
+				assertFalse(result.hasNext());
+			}
+		}
+	}
+
+	private static void awaitOutboxDrained(FtsSail sail) throws Exception {
+		long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+		while (sail.getOutboxStatus().recordCount() != 0 && System.nanoTime() < deadline) {
+			Thread.sleep(10);
+		}
+		assertEquals(0, sail.getOutboxStatus().recordCount());
+	}
+
+	@Test
+	public void removedStatementIsNoLongerFoundAfterCommit() throws Exception {
+		FtsSailConfig config = new FtsSailConfig();
+		config.setBackend("lucene");
+		config.setIndexDir(indexDir.toString());
+		config.setOutboxDir(Files.createTempDirectory("lucene-fts-e2e-outbox-").toString());
+		config.setStoreIdentity("lucene-fts-e2e-store");
+
+		FtsSail sail = (FtsSail) new FtsSailFactory().getSail(config);
+		sail.setBaseSail(new MemoryStore());
+
+		repository = new SailRepository(sail);
+		resolver = new FtsFederatedServiceResolver(sail.getFederatedServiceConfig());
+		repository.setFederatedServiceResolver(resolver);
+		repository.init();
+
+		var title = repository.getValueFactory().createIRI("urn:title");
+		var item = repository.getValueFactory().createIRI("urn:item1");
+		var literal = repository.getValueFactory().createLiteral("the quick brown fox");
+		var graph = repository.getValueFactory().createIRI("urn:graph:test");
+
+		try (var connection = repository.getConnection()) {
+			connection.begin();
+			connection.add(item, title, literal, graph);
+			connection.commit();
+			awaitOutboxDrained(sail);
+
+			connection.begin();
+			connection.remove(item, title, literal);
+			connection.commit();
+		}
+		awaitOutboxDrained(sail);
+
+		try (var connection = repository.getConnection()) {
+			String query = """
+					prefix fts: <fts:>
+					select ?iri where {
+					  service <fts:> {
+					    ?iri fts:keywords "fox" .
+					  }
+					}
+					""";
+			var tupleQuery = connection.prepareTupleQuery(QueryLanguage.SPARQL, query);
+			try (var result = tupleQuery.evaluate()) {
+				assertFalse(result.hasNext());
+			}
+		}
+	}
+}

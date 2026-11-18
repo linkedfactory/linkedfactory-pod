@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.rdf4j.fts;
 
+import io.github.linkedfactory.core.rdf4j.fts.elastic.ElasticKeywordSearchBackendFactory;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.junit.Test;
 

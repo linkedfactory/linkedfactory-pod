@@ -1,9 +1,12 @@
-package io.github.linkedfactory.core.rdf4j.fts;
+package io.github.linkedfactory.core.rdf4j.fts.elastic;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchBackend;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchHit;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchRequest;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
