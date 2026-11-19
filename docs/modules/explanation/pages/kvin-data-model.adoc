@@ -1,0 +1,110 @@
+= KVIN data model
+:description: Why LinkedFactory extends RDF triples with time and context, and how measurements and asset descriptions relate.
+
+LinkedFactory is a data architecture for structuring time-series data with semantic descriptions of assets.
+The result is a connected digital representation of a technical system: its structure is described in RDF, and its measurements hang off the same identifiers.
+The KVIN data model is what makes this connection possible.
+
+image::ROOT:lf-linking.svg[LinkedFactory semantic linking,800]
+
+== Structure and measurements need different shapes
+
+An RDF knowledge graph is a good fit for describing the structure of a system.
+Components are identified by IRIs and linked to each other: a press has a frame, the frame carries a strain gauge, the strain gauge measures force.
+Each of these facts is a triple _(S, P, O)_ of subject, predicate, and object.
+
+Measurements do not fit this shape well.
+A sensor produces the same kind of fact over and over, distinguished only by the time at which it was observed.
+A triple has no place for that time, and storing every reading as a set of ordinary triples would fill the graph with millions of near-identical statements.
+
+== Adding time to the triple
+
+LinkedFactory keeps the subject and predicate of RDF and adds the timestamp *T*.
+The triple _(S, P, O)_ becomes the quad _(S, P, T, O)_:
+
+* *S* is the IRI of the component, for example the strain gauge.
+* *P* is the IRI of the measured property, for example `p:force`.
+* *T* is the time of the observation.
+* *O* is the measured value.
+
+The combination of *S*, *P*, and *T* identifies a value uniquely.
+This composite key can be stored in a key-value store, or mapped to the structure of a dedicated time-series database.
+Pod uses a LevelDB key-value store by default.
+
+If named graphs are used to manage several RDF datasets, a context *C* extends the model to _(C, S, P, T, O)_.
+This five-part tuple is called the *KVIN* data model.
+In Pod, the context is the model IRI that a request names in its `model` parameter.
+Pod also stores a sequence number with each value, so that several values with the same timestamp can be kept apart.
+
+== One identifier, two stores
+
+The important consequence is that the asset description and the measurements share their identifiers but not their storage.
+The RDF description of the strain gauge lives in the RDF repository managed by eniLINK.
+Its force readings live in the KVIN store.
+Both use `https://example.org/Press/Frame/StrainGauge` as the subject, which is why a single query can find the sensor by its type in RDF and then read its values from KVIN.
+
+This separation also explains some behaviour that can be surprising at first:
+
+* Writing a measurement does not create an RDF description of the item.
+* An ordinary SPARQL graph pattern does not see measurements. They are only reachable through `SERVICE <kvin:>`.
+* Persisting the KVIN store does not persist the RDF models, and the other way round.
+
+xref:explanation:architecture.adoc[] shows how the two storage paths are wired together in Pod.
+
+== Two representations of the same data
+
+Measurements are exchanged in the *LF JSON format*.
+It mirrors the key structure: the first level holds the items, the second level their properties, and each property holds a list of timestamped values.
+
+[source,json]
+----
+{
+  "http://example.org/resource1": {
+    "http://example.org/properties/p1": [
+      { "value": 20.4, "time": 1619424246120 },
+      { "value": 20.3, "time": 1619424246100 }
+    ],
+    "http://example.org/properties/p2": [
+      { "value": { "msg": "Error 1", "nr": 1 }, "time": 1619424246100 }
+    ]
+  }
+}
+----
+
+The force measured by the strain gauge looks like this:
+
+[source,json]
+----
+{
+  "https://example.org/Press/Frame/StrainGauge": {
+    "p:force": [{ "value": 7.10096884, "time": 1541521440000 }]
+  }
+}
+----
+
+LF JSON is not JSON-LD.
+It carries no `@context` and is not expanded into RDF; JSON-LD is used for asset descriptions instead (see xref:reference:json-ld.adoc[]).
+
+To stay compatible with RDF tools, a measurement can also be written as plain RDF.
+The time and value become properties of a blank node:
+
+----
+S P [ <kvin:value> O ; <kvin:time> T ] .
+----
+
+The strain gauge example in this encoding:
+
+----
+@base <https://example.org/Press/Frame/> .
+
+<StrainGauge> <p:force> [ <kvin:value> 7.10096884 ; <kvin:time> 1541521440000 ] .
+----
+
+This is the shape that SPARQL queries use inside `SERVICE <kvin:>`.
+Pod does not store measurements this way; the encoding is a view that lets SPARQL address KVIN data with familiar graph patterns.
+
+== Related pages
+
+* xref:reference:time-series-api.adoc[] describes the HTTP interface, LF JSON, and CSV in detail.
+* xref:how-to:ingest-measurements.adoc[] and xref:how-to:query-data.adoc[] show the model in use.
+* The format is defined in the https://github.com/linkedfactory/specification[LinkedFactory specification].

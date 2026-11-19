@@ -1,3 +1,4 @@
 .Explanation
+* xref:explanation:kvin-data-model.adoc[KVIN data model]
 * xref:explanation:architecture.adoc[Architecture]
 * xref:explanation:semantic-concepts.adoc[Models, imports, and identifiers]

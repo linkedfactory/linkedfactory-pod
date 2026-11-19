@@ -1,0 +1,158 @@
+= Enable full-text search
+:description: Index RDF literals in Elasticsearch and search them from SPARQL with SERVICE <fts:>.
+
+This guide connects Pod to an Elasticsearch server so that literal values in your models, such as labels and descriptions, can be found by keyword.
+After setup, SPARQL queries can combine a keyword search in `SERVICE <fts:>` with ordinary graph patterns.
+
+[WARNING]
+====
+The full-text search is new.
+The JSON documents Pod sends to the search server may still change between versions.
+====
+
+== Prerequisites
+
+* An Elasticsearch server that Pod can reach over HTTP, for example `http://localhost:9200`.
+* Write access to the platform configuration Pod starts with:
+** In the Docker image, `config.ttl` in the workspace volume.
+** In a local launch from `launch/equinox`, `configurations/default.ttl`.
++
+See xref:reference:configuration.adoc[] for how the configuration file is selected.
+
+== Create the search index
+
+Create an index with keyword fields for the identifiers and a text field for the literal value.
+The example uses the index name `linkedfactory`:
+
+[source,bash]
+----
+curl --fail-with-body -X PUT 'http://localhost:9200/linkedfactory' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "mappings": {
+      "properties": {
+        "subject":   { "type": "keyword" },
+        "predicate": { "type": "keyword" },
+        "value":     { "type": "text" },
+        "context":   { "type": "keyword" },
+        "datatype":  { "type": "keyword" },
+        "language":  { "type": "keyword" },
+        "sortValue": { "type": "keyword" }
+      }
+    }
+  }'
+----
+
+`subject` must be a keyword field: search results are grouped by subject, which Elasticsearch only supports on keyword fields.
+
+== Add the search layer to the data repository
+
+Replace the definition of `<urn:enilink:data>` in the platform configuration with a repository whose SAIL chain contains `fts:FtsSail` between the KVIN SAIL and the RDF store:
+
+[source,turtle]
+----
+@prefix models: <http://enilink.net/vocab/komma/models#> .
+@prefix rep: <http://www.openrdf.org/config/repository#> .
+@prefix sr: <http://www.openrdf.org/config/repository/sail#> .
+@prefix sail: <http://www.openrdf.org/config/sail#> .
+@prefix ns: <http://www.openrdf.org/config/sail/native#> .
+@prefix fts: <http://linkedfactory.github.io/config/sail/fts#> .
+
+<urn:enilink:data> a models:RepositoryModelSet ;
+  models:repository <urn:linkedfactory:data-repo> .
+
+<urn:linkedfactory:data-repo> a rep:Repository ;
+  rep:repositoryID "linkedfactory-data" ;
+  rep:repositoryImpl [
+    rep:repositoryType "openrdf:SailRepository" ;
+    sr:sailImpl [
+      sail:sailType "kvin:KvinSail" ;
+      sail:delegate [
+        sail:sailType "fts:FtsSail" ;
+        fts:backend "elastic" ;
+        fts:endpoint "http://localhost:9200" ;
+        fts:bulkPath "/linkedfactory/_bulk" ;
+        fts:searchPath "/linkedfactory/_search" ;
+        sail:delegate [
+          sail:sailType "openrdf:NativeStore" ;
+          ns:tripleIndexes "cspo,cpos,spoc,posc"
+        ]
+      ]
+    ]
+  ] .
+----
+
+Adjust `fts:endpoint` to your server and the index name in both paths to your index.
+Keep `/_bulk` at the end of `fts:bulkPath`; Pod derives the path for deletions from it.
+
+`configurations/default-with-search.ttl` in the repository contains a complete configuration with this repository.
+To keep the RDF data in memory instead, use `openrdf:MemoryStore` in place of `openrdf:NativeStore` and drop `ns:tripleIndexes`.
+
+All `fts:` properties, including timeouts, the local outbox directory, and excluded models, are listed in xref:reference:full-text-search.adoc[].
+
+== Restart Pod
+
+Restart Pod so that the repository is created with the new configuration.
+Check the log for errors from the FTS SAIL or from the HTTP connection to Elasticsearch.
+
+== Index some data
+
+Pod indexes literal values when statements are added to a model.
+Statements that existed before the search layer was configured are not indexed retroactively; re-import those models to index them.
+
+Add a label to test the setup, for example with the update from xref:how-to:use-sparql.adoc#_update_an_asset_description[Update an asset description].
+Then check that the document arrived in the index:
+
+[source,bash]
+----
+curl 'http://localhost:9200/linkedfactory/_refresh' -X POST
+curl 'http://localhost:9200/linkedfactory/_count'
+----
+
+The count must be greater than zero.
+
+== Search from SPARQL
+
+Run a query with `SERVICE <fts:>` against the same model:
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+
+curl --fail-with-body "$POD_URL/sparql" \
+  --header 'Accept: application/sparql-results+json' \
+  --data-urlencode "model=$POD_MODEL" \
+  --data-urlencode 'query=
+PREFIX fts: <fts:>
+SELECT ?iri ?score WHERE {
+  SERVICE <fts:> {
+    ?iri fts:keywords "strain gauge" ;
+         fts:score ?score .
+  }
+}'
+----
+
+The result lists the subjects whose literals match the keywords, with the best match first.
+
+Keyword search can be combined with ordinary graph patterns, for example to filter the hits by a property:
+
+[source,sparql]
+----
+PREFIX fts: <fts:>
+PREFIX dtsc: <https://example.org/dtsc/>
+
+SELECT ?iri ?score WHERE {
+  SERVICE <fts:> {
+    ?iri fts:keywords "some keywords" ;
+         fts:score ?score .
+  }
+  ?iri dtsc:weight ?weight .
+  FILTER (?weight > 50)
+}
+----
+
+== Next steps
+
+* xref:reference:full-text-search.adoc[] lists the configuration properties and all patterns supported in `SERVICE <fts:>`, such as `fts:field`, `fts:limit`, and `fts:snippet`.
+* xref:how-to:query-data.adoc[] shows how to combine asset descriptions with measurements.
