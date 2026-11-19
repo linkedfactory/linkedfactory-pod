@@ -1,33 +1,33 @@
-= Query Pod data
-:description: Retrieve measurements through HTTP and combine asset descriptions with KVIN data through SPARQL.
+= Query measurements and asset descriptions
+:description: Read measurements over HTTP, query them with SPARQL, and combine them with asset descriptions in one query.
 
-Use the time-series API when you already know an asset and property identifier.
-Use SPARQL when you need semantic selection, joins, or a tabular result.
+This guide reads the force measurements of the sample strain gauge, first over HTTP and then with SPARQL.
+The last step combines them with the RDF description of the sensor in a single query.
 
-[cols="1,2",options="header"]
+Which interface to use depends on what you know in advance:
+
+[cols="2,1",options="header"]
 |===
-|Requirement |Interface
+|You want to … |Use
 
-|Retrieve a known series as LF JSON or CSV
+|read a series whose item and property you know, as LF JSON or CSV
 |`/linkedfactory/values`
 
-|Search asset descriptions
+|search asset descriptions
 |`/sparql`
 
-|Combine RDF asset selection with measurements
+|select assets in RDF and read their measurements
 |`/sparql` with `SERVICE <kvin:>`
 |===
 
-== Prerequisites
+== Before you start
 
-* A running Pod.
-* The sample measurements from xref:how-to:ingest-measurements.adoc[].
-* An existing, accessible model.
-* Read access appropriate to your deployment.
+* Pod runs locally, see xref:ROOT:quickstart.adoc[].
+* The sample measurements from xref:how-to:ingest-measurements.adoc[] are stored.
+* For the last step, the sensor description from xref:how-to:model-assets.adoc[] is in the same model.
 
-include::ROOT:partial$connection.adoc[]
-
-Set the connection values in a shell:
+The examples use the defaults of a local development instance.
+Set them once in your shell:
 
 [source,bash]
 ----
@@ -35,15 +35,11 @@ export POD_URL='http://localhost:8080'
 export POD_MODEL='http://linkedfactory.github.io/data/'
 ----
 
-include::ROOT:partial$enilink-auth.adoc[]
+For another deployment, use its base URL and model IRI, and add the credentials as described in xref:how-to:secure-deployment.adoc[].
 
-The commands below omit authentication options for the isolated local development configuration.
-For a protected deployment, apply its approved authentication transport to every request.
-See xref:how-to:secure-deployment.adoc[] before using production data.
+== Read a series over HTTP
 
-== Retrieve measurements over HTTP
-
-Request the two sample observations:
+Request the two sample values:
 
 [source,bash]
 ----
@@ -58,45 +54,34 @@ curl --fail-with-body --get \
   --data-urlencode 'limit=10'
 ----
 
-The LF JSON response groups observations by item and property:
+Pod returns the values grouped by item and property, newest first:
 
 [source,json]
 ----
 {
   "https://example.org/Press/Frame/StrainGauge": {
     "p:force": [
-      {
-        "time": 1541521441000,
-        "value": 7.3
-      },
-      {
-        "time": 1541521440000,
-        "value": 7.10096884
-      }
+      { "time": 1541521441000, "value": 7.3 },
+      { "time": 1541521440000, "value": 7.10096884 }
     ]
   }
 }
 ----
 
-This example shows the identifying fields; responses can also contain sequence numbers.
-Do not require byte-for-byte JSON equality or depend on object-member ordering.
+Responses can also contain sequence numbers, and the order of fields can vary.
+Compare the values, not the JSON text.
 
-For CSV, repeat the request with `Accept: text/csv`.
+To get CSV instead, send the same request with `Accept: text/csv`.
 
-[TIP]
-====
-Use `--data-urlencode` for identifiers and query text.
-An IRI can contain characters that otherwise change the meaning of an HTTP query string.
-====
+`--data-urlencode` encodes IRIs correctly; use it for all identifiers.
+All parameters and formats are listed in xref:reference:time-series-api.adoc[].
 
-See xref:reference:time-series-api.adoc[] for parameters, limits, and formats.
+== Read the series with SPARQL
 
-== Query measurements through SPARQL
+The `/sparql` endpoint comes from eniLINK.
+Pod adds `SERVICE <kvin:>`, which makes measurements available as graph patterns (see xref:explanation:kvin-data-model.adoc[]).
 
-eniLINK supplies Pod's xref:how-to:use-sparql.adoc[SPARQL HTTP interface].
-Pod adds the `kvin:` service that exposes time-series observations as RDF-shaped query patterns.
-
-Create `measurements.rq`:
+Save this query as `measurements.rq`:
 
 [source,sparql]
 ----
@@ -118,7 +103,10 @@ ORDER BY DESC(?time)
 LIMIT 10
 ----
 
-Submit the query:
+`p:force` is a complete IRI with the scheme `p`, not a prefixed name.
+Write it in angle brackets: `<p:force>`.
+
+Run the query:
 
 [source,bash]
 ----
@@ -129,7 +117,7 @@ curl --fail-with-body \
   --data-urlencode 'query@measurements.rq'
 ----
 
-The result contains these bindings, newest first:
+The result contains both values, newest first:
 
 [cols="1,1",options="header"]
 |===
@@ -142,32 +130,21 @@ The result contains these bindings, newest first:
 |7.10096884
 |===
 
-Numeric lexical formatting can vary with serialization and stored numeric types.
+The number format can differ slightly, depending on how the value was stored and serialised.
 
-[NOTE]
-====
-`/sparql` and its request handling are eniLINK platform capabilities.
-`SERVICE <kvin:>`, `kvin:time`, and `kvin:value` are Pod's time-series integration.
+=== Limit the amount of data read
 
-The service IRI is handled by the installed query integration; it is not an ordinary HTTP URL.
-====
+The query has two limits with different effects:
 
-=== Understand the two limits
+* `kvin:from`, `kvin:to`, and `kvin:limit` control how many values Pod reads from the store for each series. Times are epoch milliseconds; both bounds are inclusive. Pod reads from the end of the range backwards, so `kvin:limit 10` returns the ten newest values in the range.
+* The `LIMIT` at the end only shortens the result table. It does not reduce the amount of data read.
 
-`kvin:limit` constrains the measurement fetch for a series.
-The outer SPARQL `LIMIT` constrains the final solution sequence.
+Always set a time range and `kvin:limit`, especially for series with many values.
 
-An outer `LIMIT` is not a substitute for bounded series retrieval.
-Use explicit time bounds and a suitable KVIN limit to control the work performed.
+== Combine the asset description with measurements
 
-The `from` and `to` values are epoch milliseconds.
-The KVIN fetch contract treats the interval as inclusive.
-
-== Join asset descriptions with measurements
-
-First add the RDF example from xref:how-to:model-assets.adoc[] to the same selected model.
-
-Create `asset-measurements.rq`:
+This query finds the strain gauge through its RDF description and reads its measurements.
+Save it as `asset-measurements.rq`:
 
 [source,sparql]
 ----
@@ -207,51 +184,48 @@ curl --fail-with-body \
   --data-urlencode 'query@asset-measurements.rq'
 ----
 
-The graph pattern outside `SERVICE` selects the sensor from its asset description.
-The service retrieves measurements using that sensor's exact IRI.
-eniLINK can include imported ontology models in the semantic query scope.
-See xref:explanation:semantic-concepts.adoc[] before assuming the selected model is an isolated graph.
+The patterns outside `SERVICE` select the sensor from the asset description.
+`SERVICE <kvin:>` then reads the measurements stored under the same sensor IRI.
 
-[IMPORTANT]
-====
-Matching labels or similar-looking URLs do not connect datasets.
-The item IRI, property IRI, and selected context must match the identifiers used during ingestion.
+The join only finds data if the IRIs match exactly: the item IRI and property IRI used when writing the measurements, and the model used in both requests.
+Similar labels or URLs are not enough.
 
-`p:force` is an absolute IRI using the `p` scheme in these examples, not an undeclared SPARQL prefix.
-Write it as `<p:force>` in SPARQL.
-====
+The query also sees ontologies that the model imports.
+xref:explanation:semantic-concepts.adoc[] explains how imports affect the query scope.
 
-== Diagnose missing results and errors
+== Fix empty results and errors
 
 [cols="1,2",options="header"]
 |===
 |Symptom |Check
 
-|HTTP retrieval is empty
-|Check the item, property, model, and epoch-millisecond bounds.
+|The HTTP request returns no values
+|Item, property, model, and the time range in epoch milliseconds.
 
-|The RDF-only query works, but the join is empty
-|Check that RDF resources and measurement items use identical IRIs, and that both datasets use the intended model context.
+|The RDF query works, but the combined query is empty
+|The RDF resources and the measurements use identical IRIs and the same model.
 
-|Measurements work, but asset selection is empty
-|Check that the RDF example was added to the selected model.
+|Measurements are found, but the sensor is not
+|The RDF description was added to the model given in `model`.
 
 |SPARQL reports `MISSING_MODEL`
-|Supply the `model` parameter explicitly.
+|Add the `model` parameter.
 
 |SPARQL reports `MODEL_NOT_FOUND`
-|Select an existing model; an IRI alone does not create one.
+|Use an existing model. Naming an IRI does not create a model.
 
 |SPARQL reports `MALFORMED_QUERY`
-|Check SPARQL syntax and prefix declarations.
+|SPARQL syntax and prefix declarations.
 
-|The request redirects to login or is denied
-|Check the configured authentication mechanism and xref:how-to:secure-deployment.adoc[access policy].
+|The request is redirected to the login or denied
+|Your credentials and permissions, see xref:how-to:secure-deployment.adoc[]. Ask for the permission you need instead of opening anonymous access.
 
-|The KVIN service is unavailable
-|Ask the operator to check the installed Pod bundles and the configured KVIN-enabled model set.
+|`SERVICE <kvin:>` is not available
+|Ask the operator to check that the Pod bundles are installed and the data model set supports KVIN.
 |===
 
-Do not work around permission failures by granting anonymous access.
-Confirm authorized and unauthorized behavior separately for the SPARQL and time-series endpoints.
-For request-body variants, RDF updates, and timeout errors, see xref:how-to:use-sparql.adoc[].
+== Next steps
+
+* xref:reference:time-series-api.adoc[]: all parameters, formats, and error codes of the HTTP interface
+* xref:how-to:use-sparql.adoc[]: request variants, updates, and timeouts of the SPARQL endpoint
+* xref:how-to:enable-full-text-search.adoc[]: find assets by keyword

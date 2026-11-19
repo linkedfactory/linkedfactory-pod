@@ -4,7 +4,7 @@
 * Describe assets
 ** xref:how-to:model-assets.adoc[Model assets]
 * Query and search
-** xref:how-to:query-data.adoc[Query Pod data]
+** xref:how-to:query-data.adoc[Query measurements and asset descriptions]
 ** xref:how-to:enable-full-text-search.adoc[Enable full-text search]
 * Platform (eniLINK)
 ** xref:how-to:manage-models.adoc[Manage RDF and OWL models]
