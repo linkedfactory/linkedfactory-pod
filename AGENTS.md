@@ -26,6 +26,7 @@ The rules you must not break:
 4. **Verify against the code.** Check every statement about behaviour, defaults, parameters, and paths against the source and configuration files in this repository.
 5. **No placeholders.** Do not add empty pages, outlines, or planning documents to the repository. Add a page only with its content.
 6. **Keep the navigation consistent.** Add new pages to the `nav.adoc` of their module. Cross-references name the module: `xref:how-to:query-data.adoc[]`.
-7. **Document with the change.** When code changes behaviour, interfaces, or configuration, update the documentation in the same change.
+7. **Keep it readable.** Follow the writing style in the guidelines: short sentences, instructions instead of disclaimers, admonitions only rarely, no implementation details on user pages. `docs/modules/how-to/pages/query-data.adoc` is the reference example.
+8. **Document with the change.** When code changes behaviour, interfaces, or configuration, update the documentation in the same change.
 
 Before finishing a documentation change, run the documentation build and fix all warnings.

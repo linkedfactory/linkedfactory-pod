@@ -1,0 +1,128 @@
+= SPARQL endpoint
+:description: Request forms, parameters, response formats, and errors of the /sparql endpoint.
+
+`/sparql` is provided by eniLINK.
+Pod extends it with `SERVICE <kvin:>` for measurements and `SERVICE <fts:>` for full-text search.
+For typical requests see xref:how-to:use-sparql.adoc[].
+
+== Request forms
+
+Every request needs the parameter `model` with the absolute IRI of an existing model the caller can access.
+SPARQL protocol dataset parameters do not replace it.
+
+[cols="1,2",options="header"]
+|===
+|Request |Content
+
+|GET `/sparql`
+|URL parameters `query` and `model`. Queries only.
+
+|POST, `application/x-www-form-urlencoded`
+|Form fields `query` and `model`, or `update` and `model`.
+
+|POST, `application/sparql-query`
+|Query as UTF-8 body; `model` in the URL.
+
+|POST, `application/sparql-update`
+|Update as UTF-8 body; `model` in the URL.
+|===
+
+A request contains either `query` or `update`, not both.
+
+== Response formats
+
+Select the format with the `Accept` header.
+
+[cols="1,2,1",options="header"]
+|===
+|Query form |Formats |Default
+
+|SELECT
+|`application/sparql-results+json`, `text/csv`
+|SPARQL results JSON
+
+|ASK
+|`application/sparql-results+json`
+|SPARQL results JSON
+
+|CONSTRUCT, DESCRIBE
+|`text/turtle` and other installed RDF formats
+|Turtle
+|===
+
+Which further formats are available depends on the installed RDF4J codecs.
+
+A browser request that accepts `text/html` is answered with the interactive SPARQL page instead of query results.
+
+A successful update returns `200` with an empty body.
+
+== Service extensions
+
+[cols="1,2",options="header"]
+|===
+|Service |Description
+
+|`SERVICE <kvin:>`
+|Reads measurements from the KVIN store, see xref:how-to:query-data.adoc[] and xref:explanation:kvin-data-model.adoc[].
+
+|`SERVICE <fts:>`
+|Full-text search, see xref:reference:full-text-search.adoc[].
+|===
+
+The service IRIs are handled inside Pod; they are not HTTP addresses.
+
+== Errors
+
+Errors are returned as plain text that starts with the error code.
+They do not use the JSON error format of the time-series API.
+
+[cols="1,1,2",options="header"]
+|===
+|Status |Code |Meaning
+
+|400
+|`MISSING_MODEL`
+|No model was given.
+
+|400
+|`MISSING_QUERY`
+|The query is missing or empty.
+
+|400
+|`MISSING_UPDATE`
+|The update is missing or empty.
+
+|400
+|`CONFLICTING_PARAMETERS`
+|The request contains both `query` and `update`.
+
+|400
+|`INVALID_QUERY_REQUEST`
+|The POST request does not use one of the request forms above.
+
+|400
+|`MALFORMED_QUERY`
+|The query cannot be parsed.
+
+|403
+|`FORBIDDEN`
+|The caller may not access the model.
+
+|404
+|`MODEL_NOT_FOUND`
+|The model does not exist.
+
+|406
+|`UNSUPPORTED_ACCEPT`
+|The requested response format is not supported.
+
+|503
+|`QUERY_TIMEOUT`
+|The query exceeded the query timeout.
+
+|500
+|`QUERY_EVALUATION_ERROR`, `INTERNAL_ERROR`
+|Evaluation or another server-side step failed.
+|===
+
+The query timeout is set with `config:queryTimeout`, see xref:reference:configuration.adoc#_query_timeout[Query timeout].

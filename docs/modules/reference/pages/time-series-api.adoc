@@ -1,5 +1,8 @@
 = Time-series API
-:description: Reference the implemented Pod measurement formats and retrieval parameters.
+:description: Routes, parameters, formats, and errors of the Pod time-series API.
+
+The time-series API reads and writes measurements in the KVIN store.
+For typical requests see xref:how-to:ingest-measurements.adoc[] and xref:how-to:query-data.adoc[].
 
 == Values endpoint
 
@@ -28,11 +31,9 @@
 |Delete selected measurements.
 |===
 
-[IMPORTANT]
-====
-Deletion is destructive.
-Always supply explicit model, item, property, and time bounds, and verify authorization before enabling this route for an integration.
-====
+DELETE removes the selected measurements permanently.
+Always give model, item, property, and time bounds explicitly.
+The route does not check model permissions, see xref:explanation:security-model.adoc[].
 
 == Retrieval parameters
 
@@ -65,17 +66,14 @@ Always supply explicit model, item, property, and time bounds, and verify author
 |Aggregation operator passed to the configured value store. Verify supported operators for that implementation.
 |===
 
-[NOTE]
-====
-Invalid or non-positive limits currently fall back to the default rather than providing a reliable validation error.
-Validate client input before sending requests.
-The per-series limit is not a global response-size bound across many series.
-====
+An invalid or non-positive `limit` falls back to the default without an error.
+The limit applies to each series separately, not to the whole response.
+Values are read from the end of the time range backwards, so a limit returns the newest values.
 
 == Response formats
 
 Request `Accept: application/json` for LF JSON or `Accept: text/csv` for CSV.
-Specify the header explicitly rather than depending on content-negotiation defaults.
+Set the header explicitly in clients.
 
 LF JSON has this structure:
 
@@ -150,7 +148,5 @@ Explicitly handled errors use a JSON object with `code`, `message`, and optional
 |Measurement deletion failed.
 |===
 
-Do not assume that every failure path returns this envelope.
-Inspect status, media type, and response completeness.
-
-For semantic joins and bounded SPARQL retrieval, see xref:how-to:query-data.adoc[].
+Other failures can return a different body.
+Check the status and `Content-Type` before parsing the response.

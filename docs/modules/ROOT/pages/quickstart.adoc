@@ -1,9 +1,9 @@
 = Quickstart
-:description: Start a local development Pod and retrieve your first measurements.
+:description: Start Pod locally with Docker and find the next steps.
 
-This walkthrough is for an isolated development machine, not a production deployment.
+This quickstart starts Pod on your machine with Docker.
 
-== Start the container
+== Start Pod
 
 [source,bash]
 ----
@@ -13,32 +13,32 @@ docker run --name linkedfactory-pod \
   linkedfactory/linkedfactory-pod
 ----
 
-The command runs in the foreground.
-Use a second terminal for HTTP requests.
-For repeatable deployments, select a tested image tag or digest rather than relying on the image's default tag.
+The container runs in the foreground; use a second terminal for the next steps.
+Open http://localhost:8080/linkedfactory/ and wait until the page appears.
 
-include::ROOT:partial$connection.adoc[]
+The local instance uses these defaults, which the rest of the documentation also uses:
 
-Open http://localhost:8080/linkedfactory/[the local Pod interface].
-Wait until it responds before sending data.
+* Base URL: `http://localhost:8080`
+* Default model: `http://linkedfactory.github.io/data/`
 
-[IMPORTANT]
-====
-Binding to loopback limits direct network exposure but does not harden the application.
-The supplied server configuration defines `admin` / `admin` and grants anonymous read, write, and control access to models.
+Without a tag, Docker uses `latest`, which is the newest snapshot build.
+For repeatable setups, use one of the release tags listed on https://hub.docker.com/r/linkedfactory/linkedfactory-pod/tags[Docker Hub].
 
-The workspace volume preserves files, but the supplied RDF model-set configuration is in-memory.
-See xref:explanation:architecture.adoc[] before relying on data persistence.
-====
+== Know the development defaults
+
+This setup is meant for your own machine:
+
+* Every caller may read and change everything, and there is an administrator `admin` with the password `admin`.
+* Measurements are kept in the workspace volume, but the RDF models are held in memory and lost when the container stops.
+
+xref:how-to:secure-deployment.adoc[] describes what to change before others can reach Pod.
 
 == Write and read measurements
 
-Follow xref:how-to:ingest-measurements.adoc[] to write the sample observations.
-Then follow xref:how-to:query-data.adoc[] to retrieve them through HTTP and SPARQL.
+Follow xref:how-to:ingest-measurements.adoc[] to write sample measurements of a strain gauge.
+Then read them with xref:how-to:query-data.adoc[].
 
-== Add semantic descriptions
+== Describe the sensor
 
-Use xref:how-to:model-assets.adoc[] to describe the sensor and its parent asset.
-The same sensor IRI connects this description with the ingested measurements.
-
-Before moving beyond local development, complete xref:how-to:secure-deployment.adoc[].
+xref:how-to:model-assets.adoc[] describes the strain gauge and its frame in RDF.
+Because the description uses the same IRI as the measurements, the last step of xref:how-to:query-data.adoc[] can combine both.

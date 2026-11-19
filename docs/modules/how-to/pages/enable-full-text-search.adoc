@@ -4,13 +4,9 @@
 This guide connects Pod to an Elasticsearch server so that literal values in your models, such as labels and descriptions, can be found by keyword.
 After setup, SPARQL queries can combine a keyword search in `SERVICE <fts:>` with ordinary graph patterns.
 
-[WARNING]
-====
-The full-text search is new.
-The JSON documents Pod sends to the search server may still change between versions.
-====
+The full-text search is new; the documents Pod sends to the search server may still change between versions.
 
-== Prerequisites
+== Before you start
 
 * An Elasticsearch server that Pod can reach over HTTP, for example `http://localhost:9200`.
 * Write access to the platform configuration Pod starts with:

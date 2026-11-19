@@ -1,133 +1,105 @@
-= RDF model import and export
-:description: Import, export, replace, and delete Pod asset-description models through eniLINK.
+= Model API
+:description: Routes, parameters, formats, behaviour, and status codes of the eniLINK model API on /models and /vocab.
 
-Use eniLINK's model API to load asset descriptions, exchange ontologies, or export RDF.
-These operations act on semantic models, not on Pod measurement values.
+The model API of eniLINK imports, exports, replaces, and deletes models (named graphs).
+It works on RDF only; measurements and attached files are not affected.
+For step-by-step use see xref:how-to:manage-models.adoc[].
 
-include::ROOT:partial$upstream-scope.adoc[]
-include::ROOT:partial$enilink-auth.adoc[]
+== Routes
 
-== Routes and operations
+`/models` and `/vocab` are handled identically.
 
-`/models` and `/vocab` use the same RDF model handler.
-Supply an absolute model IRI with the `model` parameter.
-
-[cols="1,2",options="header"]
+[cols="1,3",options="header"]
 |===
-|Request |Behavior
+|Request |Behaviour
 
-|GET `/models?model=...`
-|Export the selected model using a registered RDF writer.
+|GET `/models?model=…`
+|Exports the model in the format requested with `Accept`.
 
-|POST `/models?model=...` with an RDF body
-|Load RDF into the model, creating it if needed and permitted. Existing statements are retained.
+|POST `/models?model=…` with RDF body
+|Adds the statements to the model. Creates the model if it does not exist and the caller may create it. Existing statements stay.
 
-|PUT `/models?model=...` with an RDF body
-|Clear the existing model, then load the supplied RDF. Create the model if absent and permitted.
+|PUT `/models?model=…` with RDF body
+|Clears the model, then loads the document. Creates the model if it does not exist.
 
-|DELETE `/models?model=...`
-|Clear and remove the model and its model metadata.
+|DELETE `/models?model=…`
+|Removes the model and its metadata.
 
 |OPTIONS `/models`
-|Return an empty successful response; this is not a model-listing operation.
+|Returns an empty `200` response.
+
+|GET `/models` without `model`
+|Returns the browser page listing the models, not a data format.
 |===
 
-The handler also accepts `query` on model GET and POST requests when wired with its SPARQL handler.
-Prefer the explicit xref:how-to:use-sparql.adoc[SPARQL interface] for query clients.
-GET `/models` without a model selection is the browser model-list page, not a JSON collection endpoint.
+== Parameters
 
-== Import an asset description
+[cols="1,3",options="header"]
+|===
+|Parameter |Meaning
 
-Save the Turtle example from xref:how-to:model-assets.adoc[] as `assets.ttl`.
-For the isolated development configuration:
+|`model`
+|Absolute IRI of the model. Percent-encode characters such as `&` and `#`.
 
-[source,bash]
-----
-export POD_URL='http://localhost:8080'
-export POD_MODEL='http://linkedfactory.github.io/data/'
+|`type`
+|Overrides the media type derived from the request headers.
 
-curl --fail-with-body \
-  "$POD_URL/models?model=$POD_MODEL" \
-  --header 'Content-Type: text/turtle' \
-  --data-binary @assets.ttl
-----
+|`query`
+|SPARQL query on GET and POST. Use the xref:reference:sparql-endpoint.adoc[SPARQL endpoint] instead in clients.
+|===
 
-The example model IRI can be used literally in this query string.
-Percent-encode model parameter values containing reserved characters such as `&` or `#`.
-For production, add the deployment's verified authentication options.
+Without `model`, the model is derived from the request URL, for example `/models/example`.
+The model IRI then depends on the host name and proxy the client used, and file extensions in the path influence model lookup and creation.
+Always pass `model` explicitly, without a file extension, and select formats with headers.
 
-A successful import returns HTTP `200`.
-Verify the statements with SPARQL rather than expecting an RDF response body.
-POST adds RDF; it is not a resource-level replacement operation.
-Repeated documents containing anonymous blank nodes can create additional structures.
+== Formats
 
-For JSON-LD, use `Content-Type: application/ld+json` and the payload from xref:reference:json-ld.adoc[].
-The upstream tests cover JSON-LD import and export.
-The corresponding codec must still be installed.
+Imports read the format from `Content-Type`, exports from `Accept`.
+Without these headers, the file extension in the path is used.
 
-== Export a model
+[cols="1,1",options="header"]
+|===
+|Format |Media type
 
-[source,bash]
-----
-curl --fail-with-body --get \
-  "$POD_URL/models" \
-  --header 'Accept: text/turtle' \
-  --data-urlencode "model=$POD_MODEL" \
-  --output assets-export.ttl
-----
+|Turtle
+|`text/turtle`
 
-Use `Accept: application/ld+json` to request JSON-LD when a writer is registered.
-An export is an RDF graph representation, not an archive of the KVIN store, binary attachments, or all administrative metadata.
+|JSON-LD
+|`application/ld+json`, see xref:reference:json-ld.adoc[]
+|===
 
-== Select the model and format explicitly
+Further RDF formats are available when the corresponding RDF4J codec is installed.
+A browser request that accepts `text/html` gets an ontology overview page instead of RDF.
 
-Without `model`, a path such as `/models/example` identifies a model using the request URL.
-This can make graph identity depend on the public host or proxy URL.
-The implementation also uses filename extensions during model lookup and creation.
-Prefer explicit model IRIs without serialization suffixes, and select formats with headers.
+== Behaviour
 
-The `type` parameter can override content-type selection.
-Otherwise the handler uses request headers, registered RDF content types, and supported filename extensions.
-For automated clients, send `Content-Type` on imports and `Accept` on exports.
-Browser requests accepting HTML can be rewritten to an ontology presentation.
+* *POST* adds statements. Blank nodes are new on every import, so importing the same document twice duplicates structures that use blank nodes.
+* *PUT* is not transactional. The model is cleared before the document is read; if the document is invalid or its media type unsupported, the model stays empty.
+* *DELETE* removes the RDF model and its metadata. Measurements stored under the model IRI and files stay.
+* *Export* contains the RDF statements of the model only: no measurements, files, or permissions.
+* A caller who creates a model with credentials becomes its owner, see xref:explanation:security-model.adoc[].
 
-== Replacement and deletion precautions
+== Status codes
 
-[IMPORTANT]
-====
-PUT clears the model before validating and loading the new representation.
-An unsupported media type or invalid document can therefore leave existing data cleared.
-Do not assume transactional replacement or rollback.
-
-Validate input and export a backup before replacement.
-Use a staging model when preparing a production change.
-====
-
-DELETE removes the RDF model and its metadata; it is not a request to delete matching KVIN measurements or attachment files.
-Coordinate lifecycle changes across the interfaces.
-
-== Response handling
-
-[cols="1,2",options="header"]
+[cols="1,3",options="header"]
 |===
 |Status |Meaning
 
 |200
-|The requested import, replacement, or deletion completed.
+|Import, replacement, deletion, or export succeeded. Imports return no body.
 
 |400
-|Invalid model selection or RDF input, depending on the request path.
+|Invalid model selection or invalid RDF.
 
 |403
-|The resolved model is not accessible to the caller.
+|The caller may not access the model.
 
 |404
-|The requested model was not found for export or deletion.
+|The model does not exist (export, deletion).
 
 |415
-|No suitable RDF reader or writer was selected.
+|No reader or writer for the requested format.
 |===
 
-These are not the time-series API's JSON error objects.
-Also handle infrastructure errors and incomplete streamed exports.
-See xref:how-to:manage-models.adoc[] for imports and model organization.
+Errors do not use the JSON error format of the time-series API.
+Large exports are streamed and can fail after the status line was sent; check that the export is complete.

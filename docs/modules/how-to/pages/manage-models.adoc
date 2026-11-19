@@ -1,62 +1,110 @@
-= Manage Pod RDF and OWL models
-:description: Use eniLINK model management to organize Pod asset descriptions and ontologies.
+= Create and manage models
+:description: Create a model (named graph), add and replace its content, export it, and delete it.
 
-A model is an RDF dataset identified by an IRI.
-A model set groups models and connects them to the configured repository.
+In Pod, asset descriptions live in *models*.
+A model is a named graph identified by an IRI, for example `http://linkedfactory.github.io/data/`.
+The same IRI is the context under which measurements are stored, so ingestion, queries, and the asset description must name the same model.
+xref:explanation:semantic-concepts.adoc[] explains models, imports, and identifiers in more detail.
 
-For a Pod integrator, model selection determines which asset descriptions are queried and supplies the context used by Pod's time-series integration.
+This guide uses the model API of eniLINK on `/models`.
+All requests and status codes are listed in xref:reference:models-api.adoc[].
 
-== Work with an existing model
+== Before you start
 
-. Open the xref:how-to:use-web-ui.adoc[web interface].
-. Select the intended model using the available model-management view.
-. Confirm its IRI and your access permissions.
-. Add asset descriptions or import the required ontology using the supplied editing facilities.
-. Verify the statements with xref:how-to:use-sparql.adoc[a SPARQL query].
+* Pod runs, and you have write access, see xref:explanation:security-model.adoc[]. The local development configuration allows everything.
+* Set the connection values:
++
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='https://example.org/models/press'
+----
 
-The exact editor controls depend on the eniLINK bundles installed by the deployment.
+== Choose the model IRI
 
-include::ROOT:partial$connection.adoc[]
+Use an absolute IRI without a file extension such as `.ttl`, for example `https://example.org/models/press`.
+The IRI is a name; it does not need to resolve to a web page.
+Always pass it explicitly with the `model` parameter.
 
-[NOTE]
-====
-Creating or importing an ontology is an eniLINK model-management operation.
-Linking its resources to timestamped observations is a Pod workflow.
-See xref:how-to:model-assets.adoc[].
-====
+== Create the model
 
-== Keep model selection explicit
+A model is created when RDF is imported into it for the first time.
+Save an asset description as `assets.ttl`, for example the one from xref:how-to:model-assets.adoc[], and import it:
 
-Pass `model` in automated requests.
-Use the same intended model for measurement ingestion, measurement retrieval, and semantic joins.
+[source,bash]
+----
+curl --fail-with-body \
+  "$POD_URL/models?model=$POD_MODEL" \
+  --header 'Content-Type: text/turtle' \
+  --data-binary @assets.ttl
+----
 
-A model IRI is an identifier, not necessarily a dereferenceable web address.
-Passing an unknown IRI to SPARQL or the measurement API does not create a model.
-An authorized RDF import through the xref:reference:models-api.adoc[model API] can create one.
+Pod answers with `200`.
+If you sent credentials, you become the owner of the new model and may administer its permissions.
 
-== Import, export, and organize models
+Naming an unknown IRI in a SPARQL query or a time-series request does not create a model; Pod answers `MODEL_NOT_FOUND` or `INVALID_MODEL`.
 
-Use POST `/models?model=...` to add RDF asset descriptions or vocabulary definitions.
-Use GET with an explicit RDF `Accept` header to export a model.
-Turtle and JSON-LD examples are provided in xref:reference:models-api.adoc[] and xref:reference:json-ld.adoc[].
+Models can also be created at startup: every `.ttl` or `.owl` file in the directory set with the OSGi property `net.enilink.models.dir` becomes a model.
+See xref:reference:configuration.adoc[].
 
-PUT is whole-model replacement, not a partial resource edit.
-It clears existing statements before loading the new document.
-DELETE removes the RDF model, not the matching measurement values or attachment files.
+== Check the model
 
-Use `owl:imports` to make vocabulary models available from an asset model.
-See xref:explanation:semantic-concepts.adoc[] for import scope, local ontology mappings, and the difference between imports and inference.
+List all models you can access by opening `$POD_URL/models` in a browser.
+To check the content, run a SPARQL query against the model as described in xref:how-to:use-sparql.adoc[].
 
-== Persistence and inference
+== Add statements
 
-The supplied server configuration selects `models:KvinMemoryModelSet` and disables inference.
-Operators must configure an appropriate persistent model set if RDF descriptions must survive a restart.
+Each further `POST` adds its statements to the model; existing statements stay.
+For single changes, use a SPARQL update, see xref:how-to:use-sparql.adoc#_update_an_asset_description[Update an asset description].
 
-[IMPORTANT]
-====
-Back up the RDF repository, model metadata, configuration, and time-series storage according to their respective storage requirements.
-A time-series backup alone is not a complete Pod backup.
-====
+Blank nodes are new on every import.
+If you import the same document twice, structures with blank nodes appear twice, so give assets stable IRIs.
 
-Use xref:how-to:secure-deployment.adoc[] to restrict who can change models and permissions.
-See xref:reference:configuration.adoc[] for the data/metadata model-set configuration and startup model lookup.
+== Replace the content
+
+`PUT` deletes the model's content and then loads the new document:
+
+[source,bash]
+----
+curl --fail-with-body -X PUT \
+  "$POD_URL/models?model=$POD_MODEL" \
+  --header 'Content-Type: text/turtle' \
+  --data-binary @assets.ttl
+----
+
+The model is cleared before the new document is read.
+If the document is invalid or its media type is not supported, the model stays empty.
+Export a backup first, as described in the next step.
+
+== Export the model
+
+[source,bash]
+----
+curl --fail-with-body --get "$POD_URL/models" \
+  --header 'Accept: text/turtle' \
+  --data-urlencode "model=$POD_MODEL" \
+  --output model-backup.ttl
+----
+
+The export contains the RDF statements of the model only, not its measurements, attached files, or permissions.
+
+== Delete the model
+
+[source,bash]
+----
+curl --fail-with-body -X DELETE "$POD_URL/models?model=$POD_MODEL"
+----
+
+This removes the RDF model and its metadata.
+Measurements stored under the model IRI and attached files stay.
+
+== Use a vocabulary from another model
+
+To use classes and properties defined in a separate vocabulary model, import it with `owl:imports`.
+xref:explanation:semantic-concepts.adoc#_import_vocabularies_into_an_asset_model[Import vocabularies into an asset model] shows how and explains what imports change in queries.
+
+== Next steps
+
+* xref:how-to:model-assets.adoc[]: describe assets in the new model
+* xref:how-to:grant-access-with-groups.adoc[]: control who may read or change the model
+* xref:reference:configuration.adoc[]: keep models across restarts; the shipped configuration holds them in memory

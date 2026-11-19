@@ -50,11 +50,13 @@ The documentation is in [`docs/`](docs/modules/ROOT/pages/index.adoc).
 | To … | Read |
 |---|---|
 | get a first overview | [Overview](docs/modules/ROOT/pages/index.adoc), [Quickstart](docs/modules/ROOT/pages/quickstart.adoc) |
-| understand the data model | [KVIN data model](docs/modules/explanation/pages/kvin-data-model.adoc), [Architecture](docs/modules/explanation/pages/architecture.adoc) |
+| understand the concept and its limits | [KVIN data model](docs/modules/explanation/pages/kvin-data-model.adoc), [Architecture and limits](docs/modules/explanation/pages/architecture.adoc) |
 | write and read measurements | [Ingest measurements](docs/modules/how-to/pages/ingest-measurements.adoc), [Query measurements and asset descriptions](docs/modules/how-to/pages/query-data.adoc), [Time-series API](docs/modules/reference/pages/time-series-api.adoc) |
-| describe assets in RDF | [Model assets](docs/modules/how-to/pages/model-assets.adoc), [Models, imports, and identifiers](docs/modules/explanation/pages/semantic-concepts.adoc) |
+| create models (named graphs) and describe assets | [Create and manage models](docs/modules/how-to/pages/manage-models.adoc), [Describe assets in RDF](docs/modules/how-to/pages/model-assets.adoc) |
+| control who may read or change data | [Grant access to models with groups](docs/modules/how-to/pages/grant-access-with-groups.adoc), [Users, groups, and permissions](docs/modules/explanation/pages/security-model.adoc) |
 | search literal values by keyword | [Enable full-text search](docs/modules/how-to/pages/enable-full-text-search.adoc) |
-| configure and secure Pod | [Configuration](docs/modules/reference/pages/configuration.adoc), [Secure a deployment](docs/modules/how-to/pages/secure-deployment.adoc) |
+| run Pod for others | [Secure a deployment](docs/modules/how-to/pages/secure-deployment.adoc), [Configuration](docs/modules/reference/pages/configuration.adoc) |
+| integrate a client | [HTTP interfaces](docs/modules/reference/pages/http-interfaces.adoc) |
 
 ## Contributing
 

@@ -1,92 +1,68 @@
-= Use Pod's SPARQL interface
-:description: Submit queries to the eniLINK SPARQL endpoint used by LinkedFactory Pod.
+= Query and update models with SPARQL
+:description: Send SPARQL queries and updates to Pod with curl.
 
-Pod uses eniLINK's `/sparql` interface for querying RDF asset descriptions.
-Pod's KVIN integration extends query execution with access to measurements.
+This guide sends SPARQL queries and updates to a model.
+Queries that read measurements are covered in xref:how-to:query-data.adoc[].
 
-== Submit a SELECT query
+== Before you start
 
-In the isolated local development configuration:
+* Pod runs, see xref:ROOT:quickstart.adoc[].
+* You have read access to the model, and write access for updates.
+
+The examples use the defaults of a local development instance:
 
 [source,bash]
 ----
 export POD_URL='http://localhost:8080'
 export POD_MODEL='http://linkedfactory.github.io/data/'
+----
 
-curl --fail-with-body \
-  "$POD_URL/sparql" \
+For another deployment, use its base URL and model IRI, and add credentials as described in xref:how-to:secure-deployment.adoc[].
+
+== Send a query
+
+[source,bash]
+----
+curl --fail-with-body "$POD_URL/sparql" \
   --header 'Accept: application/sparql-results+json' \
   --data-urlencode "model=$POD_MODEL" \
   --data-urlencode 'query=SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 20'
 ----
 
-This is a form-encoded POST with separate `query` and `model` parameters.
+The `model` parameter is always required.
+The query sees the statements of this model and of the models it imports, see xref:explanation:semantic-concepts.adoc[].
 
-include::ROOT:partial$enilink-auth.adoc[]
+== Send a query from a file
 
-== Supported request forms
-
-All forms below require an absolute, nonempty `model` parameter identifying an existing accessible model.
-
-[cols="1,2",options="header"]
-|===
-|Request |Payload
-
-|GET `/sparql`
-|URL parameters `query` and `model`.
-
-|POST with `application/x-www-form-urlencoded`
-|Form fields `query` and `model` for a query, or `update` and `model` for an update.
-
-|POST with `application/sparql-query`
-|Raw UTF-8 query body; provide `model` in the URL query string.
-
-|POST with `application/sparql-update`
-|Raw UTF-8 update body; provide `model` in the URL query string.
-|===
-
-Do not combine `query` and `update` in one request.
-GET is not the update interface.
-Do not assume that SPARQL protocol dataset parameters replace `model`; the registered handler requires a selected model.
-
-For a raw query, save a SELECT query as `assets.rq`:
+For longer queries, save the query as `assets.rq` and send it as the request body:
 
 [source,bash]
 ----
-curl --fail-with-body \
-  "$POD_URL/sparql?model=$POD_MODEL" \
+curl --fail-with-body "$POD_URL/sparql?model=$POD_MODEL" \
   --header 'Content-Type: application/sparql-query' \
   --header 'Accept: application/sparql-results+json' \
   --data-binary @assets.rq
 ----
 
-This literal URL works for the example model IRI above.
-Percent-encode reserved query-string characters when using other model IRIs.
+Percent-encode the model IRI in the URL if it contains characters such as `&` or `#`.
 
-== Choose the response format
+== Choose the result format
 
-For SELECT results, request `application/sparql-results+json` for structured bindings or `text/csv` for tabular output.
+Set the `Accept` header explicitly:
 
-SPARQL results JSON is not LF JSON and is not JSON-LD.
-ASK produces a boolean result; request `application/sparql-results+json`.
-CONSTRUCT and DESCRIBE produce RDF graphs; request `text/turtle` or another registered RDF writer format.
+* `application/sparql-results+json` or `text/csv` for SELECT
+* `application/sparql-results+json` for ASK
+* `text/turtle` for CONSTRUCT and DESCRIBE
 
-When no specific format is requested, upstream defaults to SPARQL results JSON for SELECT and ASK, and Turtle for graph results.
-Available alternatives depend on installed RDF4J codecs.
-Use explicit headers in automated clients.
-
-Browser requests accepting `text/html` are rewritten to the interactive SPARQL page.
-That response is a UI, not machine-readable query output.
+Without an `Accept` header, a browser gets the interactive query page instead of results.
 
 == Update an asset description
 
-SPARQL Update modifies RDF statements in the selected model.
-For an existing model and a caller with appropriate write access, this example adds a label:
+This update adds a label to the strain gauge:
 
 [source,bash]
 ----
-curl --fail-with-body \
-  "$POD_URL/sparql" \
+curl --fail-with-body "$POD_URL/sparql" \
   --data-urlencode "model=$POD_MODEL" \
   --data-urlencode 'update=INSERT DATA {
     <https://example.org/Press/Frame/StrainGauge>
@@ -95,85 +71,26 @@ curl --fail-with-body \
   }'
 ----
 
-The upstream handler returns an empty HTTP `200` response after a successful update.
-Read back the statements to verify the intended change.
-Use `application/sparql-update` with a raw body when submitting an update file.
+A successful update returns `200` with an empty body.
+Query the model to check the change.
 
-[IMPORTANT]
-====
-An RDF update is not a KVIN measurement write.
-Use xref:reference:time-series-api.adoc[] to ingest observations.
-Review DELETE and other destructive updates carefully and back up the selected model first.
-====
+To send an update from a file, use `Content-Type: application/sparql-update` and the file as body.
 
-== Query measurements
+Updates change RDF statements only; measurements are written with the time-series API, see xref:how-to:ingest-measurements.adoc[].
+Before a `DELETE` update, export the model as a backup, see xref:how-to:manage-models.adoc#_export_the_model[Export the model].
 
-Use `SERVICE <kvin:>` rather than assuming measurements are ordinary stored triples.
-See xref:how-to:query-data.adoc[] for bounded queries and joins.
+== Fix errors
 
-== Request errors
+The error codes are listed in xref:reference:sparql-endpoint.adoc#_errors[SPARQL endpoint].
+The most common ones:
 
-The upstream handler and compatibility tests establish these error cases:
+* `MISSING_MODEL`: add the `model` parameter.
+* `MODEL_NOT_FOUND`: the model does not exist; create it first.
+* `FORBIDDEN`: you lack the permission for this model.
+* `QUERY_TIMEOUT`: restrict the query, or raise the timeout in the configuration.
 
-[cols="1,1,2",options="header"]
-|===
-|HTTP status |Error prefix |Meaning
+== Next steps
 
-|400
-|`MISSING_MODEL`
-|No model was supplied.
-
-|400
-|`MISSING_QUERY`
-|The query was missing or empty.
-
-|400
-|`MISSING_UPDATE`
-|An update field or update body was empty.
-
-|400
-|`CONFLICTING_PARAMETERS`
-|The request supplied both `query` and `update`.
-
-|400
-|`INVALID_QUERY_REQUEST`
-|The POST did not use a recognized request form.
-
-|400
-|`MALFORMED_QUERY`
-|The query could not be parsed.
-
-|404
-|`MODEL_NOT_FOUND`
-|The selected model does not exist.
-
-|403
-|`FORBIDDEN`
-|The caller cannot access the resolved model.
-
-|406
-|`UNSUPPORTED_ACCEPT`
-|The requested response type is unsupported.
-
-|503
-|`QUERY_TIMEOUT`
-|A recognized query interruption exceeded the execution limit.
-
-|500
-|`QUERY_EVALUATION_ERROR` or `INTERNAL_ERROR`
-|Evaluation or another server-side operation failed.
-|===
-
-These tested errors use plain-text bodies beginning with the error prefix.
-Do not parse them as the time-series API's JSON error envelope.
-
-[IMPORTANT]
-====
-SPARQL Update modifies RDF data and requires an appropriate write policy.
-A successful SELECT does not demonstrate that updates are authorized or denied correctly.
-Verify both paths before deployment.
-====
-
-See xref:reference:configuration.adoc[] for the query-timeout setting and xref:explanation:semantic-concepts.adoc[] for ontology-import query scope.
-
-include::ROOT:partial$upstream-scope.adoc[]
+* xref:reference:sparql-endpoint.adoc[]: all request forms, formats, and errors
+* xref:how-to:query-data.adoc[]: query measurements with `SERVICE <kvin:>`
+* xref:how-to:enable-full-text-search.adoc[]: search by keyword

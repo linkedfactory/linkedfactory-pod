@@ -1,0 +1,127 @@
+= Users, groups, and permissions
+:description: How Pod identifies callers, how model permissions work with W3C Web ACL and groups, and which interfaces they protect.
+
+Pod takes its security from eniLINK.
+eniLINK identifies callers, keeps users and groups, and decides per model who may read or change it.
+The rules are written in the https://www.w3.org/wiki/WebAccessControl[W3C Web Access Control] (Web ACL) vocabulary, the same RDF that describes everything else in Pod.
+
+This page explains the concept and its limits.
+xref:how-to:grant-access-with-groups.adoc[] and xref:how-to:secure-deployment.adoc[] show how to apply it.
+
+== Identity: who is calling
+
+Users are RDF resources in the `enilink:user:` namespace, for example `enilink:user:reader`.
+They are defined in the platform configuration, together with their password:
+
+[source,turtle]
+----
+@prefix user: <enilink:user:> .
+@prefix auth: <http://enilink.net/vocab/auth#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+user:reader a foaf:Agent ; auth:password "change-me" .
+----
+
+eniLINK recognises a caller in two ways:
+
+* *HTTP Basic*: a client sends user name and password with each request. eniLINK checks them against the local accounts. This is the usual way for scripts and collectors.
+* *Browser login*: the login page uses the JAAS login context configured in `config.ttl` (in Pod: `LinkedFactory-POD` with eniLINK's `EnilinkLoginModule`, see `configurations/jaas.conf`). The identity is then kept in the HTTP session.
+
+The two ways are independent.
+If the JAAS configuration authenticates against a directory such as LDAP, that applies to the browser login only; HTTP Basic still checks the local accounts.
+
+A caller without credentials is `enilink:user:anonymous`.
+eniLINK has no built-in OAuth or token service; if you need bearer tokens, a gateway in front of Pod has to handle them.
+
+== Permissions: what a caller may do
+
+A permission is an `acl:Authorization` resource with three parts: who (`acl:agent`), what (`acl:accessTo`), and which mode (`acl:mode`).
+The resource is a *model*, that is, a named graph identified by its IRI.
+
+[source,turtle]
+----
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+
+<urn:pod:authorization:reader>
+    a acl:Authorization ;
+    acl:agent <enilink:user:reader> ;
+    acl:accessTo <http://linkedfactory.github.io/data/> ;
+    acl:mode acl:Read .
+----
+
+[cols="1,3",options="header"]
+|===
+|Mode |Allows
+
+|`acl:Read`
+|Reading the model.
+
+|`acl:Append`
+|Adding statements without changing existing ones.
+
+|`acl:Write`
+|Changing the model. Does not include reading.
+
+|`acl:Control`
+|Reading, changing, and administering the model's permissions.
+|===
+
+Combine modes as needed: a user who should read and change a model needs `acl:Read` and `acl:Write`.
+
+Instead of a single model, `acl:accessToClass <http://enilink.net/vocab/komma/models#Model>` applies a permission to all models.
+Permissions are additive: a new, narrower rule does not cancel a broader one that already exists.
+
+=== Groups
+
+A group is a `foaf:Group` in the `enilink:group:` namespace whose members are listed with `foaf:member`.
+An authorization whose `acl:agent` is a group applies to all its members.
+This is the practical way to manage access: assign permissions to a few groups such as readers, collectors, and modellers, and add users to them.
+
+eniLINK ships one group, `enilink:group:Administrators`.
+Its members may read, write, and control all models and administer all groups.
+
+=== Owners
+
+When an authenticated user creates a model, eniLINK records that user as the model's owner.
+The owner has `acl:Control` on the model, independent of any authorization.
+When a model is handed over to someone else, check its owner as well as its authorizations.
+
+=== Where permissions live
+
+Users, groups, and authorizations are part of the platform configuration (`config.ttl`).
+At startup, eniLINK copies them into its metadata, which is kept apart from the models with asset data.
+Writing ACL statements into an ordinary asset model therefore has no effect on access.
+
+== What the permissions protect
+
+Model permissions are checked wherever eniLINK reads or writes RDF models:
+
+* SPARQL queries and updates on `/sparql`
+* model import, export, replacement, and deletion on `/models` and `/vocab`
+* the browser views for models and resources
+
+Two interfaces are not covered by model permissions:
+
+* The *time-series API* (`/linkedfactory/values` and the discovery routes) reads and writes the KVIN store directly. Its handler does not check model permissions for each request.
+* The *file service* (`/files`) does not check permissions per stored file. Restricting the RDF statement that links a file does not restrict the download.
+
+Protect these interfaces at the network level, for example with a reverse proxy that only lets authorised clients reach them.
+
+The JVM property `enilink.loginrequired=true` makes the browser interface require a login.
+It does not add permission checks to the interfaces above.
+
+== Development defaults
+
+The configuration shipped with Pod is meant for a local machine:
+
+* It defines the user `admin` with the password `admin` as member of the administrators group.
+* It grants `enilink:user:anonymous` read, write, and control access to all models.
+
+Every caller can therefore do everything.
+xref:how-to:secure-deployment.adoc[] lists the changes needed before Pod is reachable by others.
+
+== Related pages
+
+* xref:how-to:grant-access-with-groups.adoc[]
+* xref:how-to:secure-deployment.adoc[]
+* xref:reference:configuration.adoc[] for the login configuration and `enilink.loginrequired`
