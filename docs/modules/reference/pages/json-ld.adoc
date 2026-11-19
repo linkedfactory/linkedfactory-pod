@@ -1,12 +1,13 @@
 = JSON-LD asset descriptions
-:description: Represent Pod asset descriptions as JSON-LD without confusing them with LF JSON measurements.
+:description: The JSON-LD form of Pod asset descriptions, and how it differs from LF JSON.
 
-JSON-LD represents RDF asset descriptions using JSON syntax.
-Its identifiers can be shared with Pod measurement items.
+JSON-LD expresses RDF in JSON syntax.
+Pod accepts it for asset descriptions on the model API.
+Measurements use LF JSON instead, see <<_difference_from_lf_json>>.
 
-== Example description
+== Example
 
-This document represents the same asset relationships as the Turtle example in xref:how-to:model-assets.adoc[]:
+This document describes the same assets as the Turtle example in xref:how-to:model-assets.adoc[]:
 
 [source,json]
 ----
@@ -37,48 +38,42 @@ This document represents the same asset relationships as the Turtle example in x
 }
 ----
 
-== Loading the description
+== Import and export
 
-eniLINK's xref:reference:models-api.adoc[model API] supports RDF import and export, including JSON-LD when its codec is installed.
-The upstream model API tests cover this format.
-
-Save the example as `assets.jsonld`.
-For the isolated development configuration:
+JSON-LD is imported and exported through `/models` or `/vocab`, like Turtle:
 
 [source,bash]
 ----
-export POD_URL='http://localhost:8080'
-export POD_MODEL='http://linkedfactory.github.io/data/'
-
 curl --fail-with-body \
   "$POD_URL/models?model=$POD_MODEL" \
   --header 'Content-Type: application/ld+json' \
   --data-binary @assets.jsonld
 ----
 
-The example model IRI is safe in this literal query string; encode reserved characters for other model IRIs.
-For protected deployments, add the verified authentication options.
-Request `Accept: application/ld+json` on a model GET to export JSON-LD.
+For an export, send `Accept: application/ld+json` with a GET request.
+All operations, including `PUT` and `DELETE`, are described in xref:reference:models-api.adoc[].
 
-include::ROOT:partial$upstream-scope.adoc[]
-
-[IMPORTANT]
-====
-Use `/models` or `/vocab` for RDF model ingestion.
-Do not invent `/assets` or post this document to `/linkedfactory/values`.
-
-If the installed model importer does not support JSON-LD, convert the document with approved RDF tooling and import a supported RDF format.
-====
-
-Use xref:how-to:manage-models.adoc[] to choose the target model and xref:how-to:use-sparql.adoc[] to verify the resulting statements.
-
-Model POST adds statements; PUT clears the existing graph before loading.
-Do not use PUT for a partial asset update.
-See xref:reference:models-api.adoc[] for replacement precautions and media-type errors.
+JSON-LD support requires the JSON-LD codec in the Pod distribution.
+If it is missing, convert the document to Turtle and import that.
 
 == Difference from LF JSON
 
-LF JSON groups observations by item and property, with timestamped values.
-JSON-LD uses JSON-LD keywords and contexts to express RDF.
+[cols="1,2,2",options="header"]
+|===
+| |JSON-LD |LF JSON
 
-Sharing an item IRI connects the descriptions and observations; sharing JSON syntax does not make their payload contracts interchangeable.
+|Describes
+|Assets and their relationships (RDF)
+|Measurements with timestamps
+
+|Structure
+|`@context`, `@id`, `@type`, `@graph`
+|Item, then property, then a list of values
+
+|Endpoint
+|`/models`, `/vocab`
+|`/linkedfactory/values`
+|===
+
+Both can use the same item IRIs; that is what connects descriptions and measurements.
+Send JSON-LD only to the model API and LF JSON only to the time-series API.

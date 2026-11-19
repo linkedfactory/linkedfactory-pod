@@ -1,20 +1,29 @@
-= Model assets
-:description: Describe industrial assets using RDF identifiers shared with measurement series.
+= Describe assets in RDF
+:description: Describe machines and sensors in RDF with the same IRIs that their measurements use.
 
-An asset model records what equipment exists and how its components relate.
-Measurements describe how selected properties change over time.
+This guide describes the sample press frame and its strain gauge in RDF.
+Because the description uses the same sensor IRI as the measurements, queries can later combine both.
 
-== Choose shared identifiers
+== Before you start
 
-Use the same sensor IRI in RDF and in measurement payloads.
-Avoid generating a new identifier each time a collector starts.
+* Pod runs, see xref:ROOT:quickstart.adoc[].
+* You know the model to use. The examples use the default model of a local instance, `http://linkedfactory.github.io/data/`. To create your own, see xref:how-to:manage-models.adoc[].
+
+== Choose stable IRIs
+
+Give each asset one IRI and use it everywhere: in the RDF description and as the item in every measurement.
+Do not generate new identifiers when a collector restarts.
+
+The namespaces used in the examples:
 
 include::ROOT:partial$namespaces.adoc[]
 
-== Add an asset description
+The `ex:` terms are made up for the example.
+Pod does not require a particular ontology; use the vocabulary of your domain.
 
-Select the intended Pod model through the xref:how-to:manage-models.adoc[eniLINK model-management interface].
-Add or import this Turtle description using the editing facilities available in your deployment:
+== Write the description
+
+Save the description as `assets.ttl`:
 
 [source,turtle]
 ----
@@ -32,21 +41,26 @@ Add or import this Turtle description using the editing facilities available in 
     rdfs:label "Frame strain gauge" .
 ----
 
-For a reproducible HTTP import, save this example as `assets.ttl` and follow xref:reference:models-api.adoc[].
-The equivalent JSON-LD payload and import request are in xref:reference:json-ld.adoc[].
+`lf:contains` builds the hierarchy that the Pod web interface shows.
 
-[NOTE]
-====
-The `ex:` classes are illustrative application terms.
-This example does not claim that Pod ships a required manufacturing ontology.
+== Import it into the model
 
-eniLINK manages the RDF model and ontology imports.
-Pod connects those resources with measurements through shared identifiers.
-====
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
 
-== Verify the description
+curl --fail-with-body \
+  "$POD_URL/models?model=$POD_MODEL" \
+  --header 'Content-Type: text/turtle' \
+  --data-binary @assets.ttl
+----
 
-Run this query against the model where you added the statements:
+To import JSON-LD instead, see xref:reference:json-ld.adoc[].
+
+== Check the description
+
+Run this query against the model, as described in xref:how-to:use-sparql.adoc[]:
 
 [source,sparql]
 ----
@@ -60,19 +74,16 @@ WHERE {
 }
 ----
 
-See xref:how-to:use-sparql.adoc[] for the HTTP request shape.
+The result contains the strain gauge with its label.
 
-== Extend the model deliberately
+== Extend the description
 
-Reuse suitable domain vocabularies for asset types, units, and observed properties.
-Record the unit associated with each measurement property rather than expecting a numeric value to carry that meaning.
-Use xref:explanation:semantic-concepts.adoc[ontology imports] to share vocabulary definitions.
-For manuals and calibration reports, upload bytes with xref:reference:files-api.adoc[] and record the returned URL in the asset graph.
+* Record the unit of each measured property in RDF; the measured values carry numbers only.
+* Reuse existing domain vocabularies for asset types, units, and properties, and share them between models with `owl:imports`, see xref:explanation:semantic-concepts.adoc[].
+* Inference is switched off in the shipped configuration. Subclass relations and other OWL axioms do not produce additional query results.
+* Attach manuals or calibration reports by uploading them with xref:reference:files-api.adoc[] and adding the returned URL to the asset.
 
-[IMPORTANT]
-====
-The supplied model configuration disables inference.
-Do not assume that OWL imports or subclass declarations automatically produce inferred query results.
-====
+== Next steps
 
-Continue with xref:how-to:query-data.adoc[] to join this asset description with measurements.
+* xref:how-to:query-data.adoc[]: combine the description with measurements
+* xref:how-to:manage-models.adoc[]: replace, export, or delete the model

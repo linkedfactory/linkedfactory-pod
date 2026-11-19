@@ -1,16 +1,11 @@
-= Source baseline and compatibility
-:description: Trace the eniLINK capabilities used by Pod to their upstream implementation.
+= eniLINK source baseline
+:description: The eniLINK revision the documentation is based on, and where each eniLINK feature used by Pod is implemented.
 
-The platform documentation describes eniLINK through its use in LinkedFactory Pod.
-It is based on https://github.com/enilink/enilink/tree/{enilink-source-revision}[eniLINK revision {enilink-source-revision}].
-The Pod build declares an eniLINK snapshot dependency; a snapshot version alone does not identify an immutable upstream revision.
+The pages about eniLINK functionality are based on https://github.com/enilink/enilink/tree/{enilink-source-revision}[eniLINK revision {enilink-source-revision}].
+Pod's build depends on an eniLINK snapshot version, which can point to a newer revision; when updating the documentation, check the behaviour against the revision actually used and update the attribute `enilink-source-revision` in `docs/antora.yml`.
 
-[IMPORTANT]
-====
-Source availability is not deployment availability.
-Check the installed bundles, RDF readers and writers, configuration, and endpoint permissions in the Pod distribution you run.
-This documentation does not claim that optional upstream functionality is enabled by default.
-====
+A Pod distribution can contain a different eniLINK build or leave out optional bundles and RDF codecs.
+Features described here are therefore only available if the distribution includes them.
 
 == Implementation references
 

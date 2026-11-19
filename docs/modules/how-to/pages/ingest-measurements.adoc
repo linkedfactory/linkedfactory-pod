@@ -1,47 +1,40 @@
 = Ingest measurements
-:description: Write timestamped measurements using the LinkedFactory JSON format.
+:description: Write timestamped measurements to Pod in the LF JSON format.
 
-Use the time-series API to attach observations to an item IRI and a property IRI.
-Choose stable identifiers before connecting a collector.
+This guide writes two force measurements of the sample strain gauge to Pod.
+Each measurement belongs to an item IRI, such as the sensor, and a property IRI, such as `p:force`.
 
-include::ROOT:partial$connection.adoc[]
+== Before you start
 
-== Prepare an LF JSON payload
+* Pod runs, see xref:ROOT:quickstart.adoc[].
+* You have chosen stable IRIs for your items and properties, see xref:how-to:model-assets.adoc#_choose_stable_iris[Choose stable IRIs].
 
-Create `measurements.json`:
+The examples use the defaults of a local development instance.
+For another deployment, use its base URL and model IRI, and add credentials as described in xref:how-to:secure-deployment.adoc[].
+
+== Write the payload
+
+Save the measurements as `measurements.json`:
 
 [source,json]
 ----
 {
   "https://example.org/Press/Frame/StrainGauge": {
     "p:force": [
-      {
-        "value": 7.10096884,
-        "time": 1541521440000
-      },
-      {
-        "value": 7.3,
-        "time": 1541521441000
-      }
+      { "value": 7.10096884, "time": 1541521440000 },
+      { "value": 7.3, "time": 1541521441000 }
     ]
   }
 }
 ----
 
-The outer key identifies the sensor.
-The nested key identifies the measured property.
-Each observation supplies a value and an epoch-millisecond timestamp.
+The outer key is the item, the inner key the property.
+Each value has a timestamp in epoch milliseconds.
 
-[IMPORTANT]
-====
-This is LF JSON, not a generic JSON-LD document.
-Do not add an `@context` and assume the measurement endpoint performs JSON-LD expansion.
-See xref:reference:json-ld.adoc[] for the separate asset-description format.
-====
+This is the LF JSON format described in xref:explanation:kvin-data-model.adoc[].
+It is not JSON-LD; do not add an `@context`.
 
-== Submit the payload
-
-These commands target the isolated development configuration.
+== Send it to Pod
 
 [source,bash]
 ----
@@ -54,21 +47,18 @@ curl --fail-with-body \
   --data-binary @measurements.json
 ----
 
-The example model IRI is safe in this literal URL.
-For other model IRIs, construct the URL with proper query-parameter encoding.
+The model must already exist; otherwise Pod answers `400` with `INVALID_MODEL`.
+If your model IRI contains characters such as `&` or `#`, percent-encode it in the URL.
 
-include::ROOT:partial$enilink-auth.adoc[]
+To send CSV or InfluxDB line protocol instead, see xref:reference:time-series-api.adoc[].
 
-== Verify ingestion
+== Check the result
 
-Read the same item and property using xref:how-to:query-data.adoc[].
-Check the returned timestamps and numeric values; do not rely solely on an empty successful response body.
+A successful request returns an empty body.
+Read the values back as shown in xref:how-to:query-data.adoc#_read_a_series_over_http[Read a series over HTTP] and compare timestamps and values.
 
-[NOTE]
-====
-Pod stores the observations in its configured KVIN store.
-eniLINK supplies the surrounding model context.
-A caller-supplied `model` must resolve to an existing, accessible model.
-====
+== Next steps
 
-For CSV ingestion and retrieval parameters, see xref:reference:time-series-api.adoc[].
+* xref:how-to:model-assets.adoc[]: describe the sensor in RDF
+* xref:how-to:query-data.adoc[]: read and combine the data
+* xref:reference:time-series-api.adoc[]: all formats and parameters

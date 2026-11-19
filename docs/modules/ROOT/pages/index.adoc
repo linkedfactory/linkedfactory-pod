@@ -1,86 +1,74 @@
 = LinkedFactory Pod
-:description: Connect industrial asset descriptions and time-series measurements using LinkedFactory Pod.
+:description: LinkedFactory Pod connects descriptions of industrial assets with their time-series measurements.
 
 LinkedFactory Pod connects descriptions of industrial assets with their measurements.
-Use it to describe equipment, ingest observations, and query relationships and measurements through shared identifiers.
+You describe machines and sensors in RDF, write their measurements over HTTP, and query both together.
 
-Pod implements the https://github.com/linkedfactory/specification[LinkedFactory architecture] on top of https://github.com/enilink/enilink[eniLINK].
-You work with one application: eniLINK supplies its semantic platform capabilities, while Pod adds industrial data services and time-series integration.
+Pod is the reference implementation of the https://github.com/linkedfactory/specification[LinkedFactory architecture].
+It is built on the semantic platform https://github.com/enilink/enilink[eniLINK].
 
-== What belongs where?
+== How it works
 
-[cols="1,2,2",options="header"]
+An asset such as `https://example.org/Press/Frame/StrainGauge` appears in two places:
+
+* in an RDF *model*, with its type, label, and relationships to other assets
+* in the *KVIN store*, as the item of measurement series such as `p:force`
+
+Both use the same IRI.
+A SPARQL query can therefore find the sensor by its description and read its measurements in one step.
+xref:explanation:kvin-data-model.adoc[] explains the data model, xref:explanation:architecture.adoc[] the building blocks and their limits.
+
+== What comes from where
+
+[cols="2,1",options="header"]
 |===
-|Capability |What you use it for |Provided by
+|Capability |Provided by
 
-|RDF and OWL models
-|Describe machines, components, properties, and their relationships.
-|eniLINK model management
+|RDF and OWL models, model API
+|eniLINK
 
-|Triple-store integration and SPARQL
-|Store and query asset descriptions.
-|eniLINK, extended by Pod's KVIN integration
+|SPARQL endpoint
+|eniLINK, extended by Pod with `SERVICE <kvin:>` and `SERVICE <fts:>`
 
-|Users and model permissions
-|Identify callers and control access to semantic models.
-|eniLINK security configuration
+|Users, groups, and permissions
+|eniLINK
 
-|Web application framework
-|Browse resources and work with semantic models.
-|eniLINK, with Pod-specific views
+|Web interface
+|eniLINK, with Pod's asset views
 
-|Time-series ingestion and retrieval
-|Associate timestamped values with asset and property identifiers.
-|LinkedFactory Pod
+|Time-series API and KVIN store
+|Pod
 
-|Combined semantic and measurement queries
-|Find assets in RDF and retrieve their measurements in the same query.
-|Pod's KVIN service through eniLINK's SPARQL interface
+|Full-text search
+|Pod
 |===
 
-== One identifier connects descriptions and measurements
+== Where to start
 
-An asset such as `https://example.org/Press/Frame/StrainGauge` can appear in both:
+[cols="1,2",options="header"]
+|===
+|You want to … |Read
 
-* An RDF model containing its type, label, and relationships.
-* A measurement series identified by that asset IRI and a property IRI such as `p:force`.
+|try Pod
+|xref:ROOT:quickstart.adoc[]
 
-RDF describes relationships as subject, predicate, and object.
-Pod's KVIN data model adds time to associate a value with an item and property.
-A context can distinguish datasets; sequence numbers can distinguish measurements sharing a timestamp.
-xref:explanation:kvin-data-model.adoc[] explains the model and its formats.
+|write and read measurements
+|xref:how-to:ingest-measurements.adoc[], xref:how-to:query-data.adoc[]
 
-[NOTE]
-====
-RDF descriptions and time-series measurements are related but are not interchangeable storage representations.
-Writing a measurement does not establish a complete asset ontology.
-An ordinary RDF query does not automatically scan the time-series store.
-====
+|describe assets
+|xref:how-to:manage-models.adoc[], xref:how-to:model-assets.adoc[]
 
-== Choose a starting point
+|control who may do what
+|xref:how-to:grant-access-with-groups.adoc[], xref:explanation:security-model.adoc[]
 
-* xref:ROOT:quickstart.adoc[Start a local Pod and write a measurement].
-* xref:how-to:model-assets.adoc[Describe assets with RDF].
-* xref:how-to:query-data.adoc[Query measurements and asset descriptions].
-* xref:how-to:secure-deployment.adoc[Prepare authentication and permissions].
-* xref:reference:http-interfaces.adoc[Integrate an HTTP client].
-* xref:reference:models-api.adoc[Import or export asset-description models].
-* xref:reference:configuration.adoc[Configure storage, login, and query execution].
-* xref:how-to:enable-full-text-search.adoc[Search literal values by keyword].
+|run Pod for others
+|xref:how-to:secure-deployment.adoc[], xref:reference:configuration.adoc[]
 
-To build, test, or change Pod itself, start with xref:development:build-and-run.adoc[].
+|integrate a client
+|xref:reference:http-interfaces.adoc[]
 
-== Platform integration beyond measurements
+|build or change Pod itself
+|xref:development:build-and-run.adoc[]
+|===
 
-Use eniLINK's RDF model API for Turtle and JSON-LD asset descriptions and its file API for binary attachments.
-The SPARQL endpoint supports semantic queries and RDF updates; Pod adds KVIN measurement queries to that interface.
-These APIs have different payloads, lifecycle semantics, and authorization requirements.
-
-Start with xref:explanation:semantic-concepts.adoc[] to distinguish model, asset, ontology, and measurement identifiers.
-See xref:development:upstream-baseline.adoc[] for the upstream implementation baseline and optional-feature boundaries.
-
-[IMPORTANT]
-====
-The supplied development configuration is not a production security baseline.
-Review anonymous access, administrator credentials, persistent storage, TLS, and endpoint authorization before exposing a Pod.
-====
+The pages on eniLINK functionality describe eniLINK as of the revision listed in xref:development:upstream-baseline.adoc[].

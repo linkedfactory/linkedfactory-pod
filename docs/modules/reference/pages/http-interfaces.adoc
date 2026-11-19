@@ -1,74 +1,93 @@
 = HTTP interfaces
-:description: Identify the Pod time-series routes and the underlying SPARQL interface.
+:description: Overview of all HTTP routes of Pod, their formats, and their error formats.
 
-include::ROOT:partial$connection.adoc[]
+A local instance listens on `http://localhost:8080`.
+The default model is `http://linkedfactory.github.io/data/`.
 
-== Interface map
+== Routes
 
-[cols="1,1,2",options="header"]
+[cols="1,1,2,1",options="header"]
 |===
-|Path |Methods |Purpose
+|Path |Methods |Purpose |Provided by
 
 |`/linkedfactory/values`
 |GET, POST, DELETE
-|Retrieve, insert, or delete measurements.
+|Read, write, or delete measurements, see xref:reference:time-series-api.adoc[].
+|Pod
 
 |`/linkedfactory/properties`
 |GET
-|Discover measured properties for an item.
+|List the measured properties of an item.
+|Pod
 
 |`/linkedfactory/**`
 |GET
-|Discover descendants; `**` is the handler's literal discovery suffix.
+|List descendants of an item; `**` is a literal suffix.
+|Pod
 
 |`/sparql`
 |GET, POST
-|eniLINK SPARQL queries and supported updates.
+|SPARQL queries and updates, see xref:reference:sparql-endpoint.adoc[].
+|eniLINK, extended by Pod
 
-|`/models`, `/vocab` with `model`
+|`/models`, `/vocab`
 |GET, POST, PUT, DELETE, OPTIONS
-|eniLINK RDF model import, export, replacement, and removal.
+|Import, export, replace, and delete models, see xref:reference:models-api.adoc[].
+|eniLINK
 
 |`/files`
 |POST, OPTIONS
-|eniLINK multipart attachment upload.
+|Upload attachments, see xref:reference:files-api.adoc[].
+|eniLINK
 
 |`+/files/{key}+`
 |GET, HEAD
-|Retrieve attachment bytes or headers.
+|Download attachments.
+|eniLINK
 |===
 
-For the values route, POST with `application/x-www-form-urlencoded` performs retrieval.
-POST with a measurement payload performs insertion.
+`POST /linkedfactory/values` reads measurements when the body is a form (`application/x-www-form-urlencoded`) and writes them when the body is LF JSON, CSV, or line protocol.
 
-See xref:reference:models-api.adoc[] and xref:reference:files-api.adoc[] for the platform API contracts.
-Optional xref:reference:ldp.adoc[LDP handlers] use application-registered paths; do not assume a default `/ldp` route.
+eniLINK also contains support for the Linked Data Platform; it has no route unless a deployment registers one, see xref:reference:ldp.adoc[].
 
-include::ROOT:partial$upstream-scope.adoc[]
+Which routes check model permissions is described in xref:explanation:security-model.adoc#_what_the_permissions_protect[What the permissions protect].
 
-[IMPORTANT]
-====
-A gateway must not treat every POST as an insertion or every SPARQL POST as read-only.
-Classify requests according to the actual endpoint contract and enforce an appropriate policy.
-====
+== Formats
 
-include::ROOT:partial$enilink-auth.adoc[]
+[cols="1,2",options="header"]
+|===
+|Format |Used for
 
-== Representations
+|LF JSON, CSV
+|Measurements on `/linkedfactory/values`
 
-* LF JSON and CSV carry time-series data.
-* SPARQL results JSON and CSV carry SELECT bindings.
-* Turtle and JSON-LD carry asset-description models through the model API.
-* Binary attachments use multipart upload and byte-stream download.
+|SPARQL results JSON, CSV
+|Results of SELECT and ASK queries
 
-JSON-LD is not the time-series ingestion format.
+|Turtle, JSON-LD
+|Models on `/models`
 
-See xref:reference:time-series-api.adoc[], xref:how-to:use-sparql.adoc[], and xref:reference:json-ld.adoc[].
+|Multipart form data, byte stream
+|Attachments on `/files`
+|===
+
+JSON-LD describes assets; it is not accepted as measurement format.
 
 == Errors
 
-The time-series handler returns JSON error objects for explicitly handled failures.
-The SPARQL endpoint's tested request errors use plain text.
+[cols="1,2",options="header"]
+|===
+|Interface |Error body
 
-Always inspect the HTTP status and `Content-Type` before decoding the body.
-Streaming responses can fail after headers have been sent; HTTP success alone does not prove a complete export.
+|Time-series API
+|JSON object with `code`, `message`, and optional `details`
+
+|SPARQL endpoint
+|Plain text starting with the error code
+
+|Model API, file service
+|Depends on the error; see the respective page
+|===
+
+Check the status and `Content-Type` before parsing an error body.
+Streamed responses such as large exports can fail after the status line was sent, so also check that a response is complete.

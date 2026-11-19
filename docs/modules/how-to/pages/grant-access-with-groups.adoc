@@ -1,0 +1,115 @@
+= Grant access to models with groups
+:description: Create users and groups and give each group read or write access to a model using W3C Web ACL.
+
+This guide sets up two groups for one model: readers, who may query it, and modellers, who may also change it.
+Users get their access by being members of a group.
+The concept behind it is explained in xref:explanation:security-model.adoc[].
+
+== Before you start
+
+* You can edit the platform configuration and restart Pod.
+** Docker image: `config.ttl` in the workspace volume
+** Local launch from `launch/equinox`: `configurations/default.ttl`
+* The model exists, here `http://linkedfactory.github.io/data/`. See xref:how-to:manage-models.adoc[].
+
+== Define the users
+
+Add one entry per user to the platform configuration:
+
+[source,turtle]
+----
+@prefix user: <enilink:user:> .
+@prefix auth: <http://enilink.net/vocab/auth#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+user:reader a foaf:Agent ; auth:password "change-me" .
+user:modeller a foaf:Agent ; auth:password "change-me-too" .
+----
+
+== Define the groups
+
+[source,turtle]
+----
+@prefix group: <enilink:group:> .
+
+group:PodReaders a foaf:Group ;
+    foaf:member user:reader .
+
+group:PodModellers a foaf:Group ;
+    foaf:member user:modeller .
+----
+
+A user can be a member of several groups.
+
+== Grant the groups access to the model
+
+[source,turtle]
+----
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+
+<urn:pod:auth:readers> a acl:Authorization ;
+    acl:agent group:PodReaders ;
+    acl:accessTo <http://linkedfactory.github.io/data/> ;
+    acl:mode acl:Read .
+
+<urn:pod:auth:modellers> a acl:Authorization ;
+    acl:agent group:PodModellers ;
+    acl:accessTo <http://linkedfactory.github.io/data/> ;
+    acl:mode acl:Read, acl:Write .
+----
+
+`acl:Write` does not include reading, so the modellers get both modes.
+To grant access to every model instead of one, replace `acl:accessTo <…>` with `acl:accessToClass <http://enilink.net/vocab/komma/models#Model>`.
+
+== Remove the anonymous full access
+
+The shipped configuration gives every caller full access to all models.
+As long as this rule exists, the groups make no difference.
+Delete it from the configuration:
+
+[source,turtle]
+----
+<enilink:auth:anonymousAll> a acl:Authorization ; acl:agent user:anonymous ;
+                         acl:accessToClass <http://enilink.net/vocab/komma/models#Model> ;
+                         acl:mode acl:Read, acl:Write, acl:Control .
+----
+
+== Restart Pod
+
+eniLINK reads users, groups, and permissions at startup.
+Restart Pod after changing them.
+
+== Check the result
+
+Query the model as `reader`; curl asks for the password:
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+
+curl --user reader "$POD_URL/sparql" \
+  --header 'Accept: application/sparql-results+json' \
+  --data-urlencode "model=$POD_MODEL" \
+  --data-urlencode 'query=ASK { ?s ?p ?o }'
+----
+
+The request succeeds.
+The same request without `--user` returns `403` with `FORBIDDEN`.
+
+An update as `reader` is rejected, as `modeller` it succeeds:
+
+[source,bash]
+----
+curl --user modeller "$POD_URL/sparql" \
+  --data-urlencode "model=$POD_MODEL" \
+  --data-urlencode 'update=INSERT DATA { <urn:test> <http://www.w3.org/2000/01/rdf-schema#label> "test" }'
+----
+
+These permissions apply to SPARQL, the model API, and the browser views.
+The time-series API and the file service do not check them; protect those as described in xref:how-to:secure-deployment.adoc[].
+
+== Next steps
+
+* xref:how-to:secure-deployment.adoc[]: the remaining steps before Pod is reachable by others
+* xref:explanation:security-model.adoc[]: modes, owners, and which interfaces are protected

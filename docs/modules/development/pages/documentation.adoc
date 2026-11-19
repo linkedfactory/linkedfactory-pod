@@ -99,11 +99,23 @@ If content does not fit the type of the page you are editing, put it on a page o
 * Every page starts with a title and a `:description:` attribute.
 * Cross-references always name the module: `xref:how-to:query-data.adoc[]`.
 * Shared snippets go to `ROOT/partials`, images to `ROOT/images`.
-* Add every new page to the `nav.adoc` of its module. Pages that describe eniLINK functionality are grouped under "Platform (eniLINK)".
+* Add every new page to the `nav.adoc` of its module, in the group of the task it belongs to. If a feature comes from eniLINK, say so in the first paragraph of the page.
 * Check statements against the code and configuration in the repository, not only against other documentation.
 * Do not add placeholder pages or outlines. A page is added when its content is written.
-* Use admonitions (`NOTE`, `IMPORTANT`, `WARNING`) only for information whose omission causes harm, such as default credentials or data loss.
+* Use admonitions (`NOTE`, `IMPORTANT`, `WARNING`) rarely. State limits and risks once, as plain sentences where the reader needs them, and link to the page that explains them.
 * Update the documentation in the same pull request as the code change it describes.
+
+== Writing style
+
+The documentation should be quick to read for people who use Pod for the first time.
+xref:how-to:query-data.adoc[] is the model for this style.
+
+* Say what to do, not what not to assume. "Compare the values, not the JSON text" instead of "Do not require byte-for-byte equality".
+* Use short sentences and everyday words. Prefer verbs to nouns ("check the status" instead of "status verification").
+* Describe behaviour as users see it. Implementation details such as class names or internal request handlers belong in the `development` module.
+* Start how-to guides with "Before you start", listing only what is really needed.
+* Use the local development defaults in examples (`http://localhost:8080`, model `http://linkedfactory.github.io/data/`) and the strain gauge example, and say once how to adapt them.
+* Give each fact one home and link to it from other pages instead of repeating it.
 
 == Build the documentation locally
 

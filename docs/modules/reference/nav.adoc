@@ -1,11 +1,10 @@
 .Reference
-* Pod interfaces
-** xref:reference:http-interfaces.adoc[HTTP interfaces]
-** xref:reference:time-series-api.adoc[Time-series API]
-** xref:reference:full-text-search.adoc[Full-text search]
-** xref:reference:configuration.adoc[Configuration]
-* Platform (eniLINK)
-** xref:reference:models-api.adoc[RDF model import and export]
-** xref:reference:files-api.adoc[File attachments]
-** xref:reference:json-ld.adoc[JSON-LD asset descriptions]
-** xref:reference:ldp.adoc[Linked Data Platform]
+* xref:reference:http-interfaces.adoc[HTTP interfaces]
+* xref:reference:time-series-api.adoc[Time-series API]
+* xref:reference:sparql-endpoint.adoc[SPARQL endpoint]
+* xref:reference:full-text-search.adoc[Full-text search]
+* xref:reference:models-api.adoc[Model API]
+* xref:reference:json-ld.adoc[JSON-LD asset descriptions]
+* xref:reference:files-api.adoc[File service]
+* xref:reference:configuration.adoc[Configuration]
+* xref:reference:ldp.adoc[Linked Data Platform]

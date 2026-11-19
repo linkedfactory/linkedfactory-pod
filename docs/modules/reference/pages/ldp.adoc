@@ -1,44 +1,48 @@
-= Optional Linked Data Platform integration
-:description: Understand when eniLINK's LDP support applies to a Pod deployment.
+= Linked Data Platform
+:description: The optional Linked Data Platform support in eniLINK and what a deployment needs to expose it.
 
-eniLINK contains Linked Data Platform support for RDF resources and containers.
-A Pod extension can use it to expose resource-oriented asset APIs in addition to the model API.
+eniLINK contains support for the W3C Linked Data Platform (LDP), which manages RDF resources and containers over HTTP.
+A Pod deployment can use it to offer resource-oriented access to asset descriptions in addition to the model API.
 
-include::ROOT:partial$upstream-scope.adoc[]
+== Availability
 
-[IMPORTANT]
-====
-There is no universal `/ldp` endpoint established by these sources.
-The generic LDP service registration in the Lift boot code is commented out.
-An application must install the relevant bundle, register an `LDPHelper` handler, and select its path, root model, and container configuration.
+LDP has no route in a standard Pod.
+The generic registration in eniLINK is disabled, so there is no `/ldp` endpoint.
+To use LDP, an application installs the LDP bundle and registers an `LDPHelper` handler with its own path, root model, and container configuration.
 
-Do not treat the presence of the LDP bundle or its cache configuration as proof of an exposed LDP API.
-====
+The presence of the LDP bundle alone does not mean that an LDP API is reachable.
+For the directly available way to import and export models, use xref:reference:models-api.adoc[].
 
-== Concepts for Pod integrators
+== Concepts
 
-An RDF source represents resource statements.
-A basic container groups resources through containment.
-A direct container additionally defines membership relationships.
-These are HTTP resource-management concepts, not Pod's KVIN item/property/time representation.
+[cols="1,3",options="header"]
+|===
+|Term |Meaning
 
-The upstream helper can register OPTIONS, HEAD, GET, POST, PUT, PATCH, and DELETE handling under an application-selected path.
-Its representation support includes Turtle and JSON-LD; patch support uses `text/ldpatch`.
-Actual operations remain subject to the configured container handler and implementation constraints.
+|RDF source
+|A resource whose state is a set of RDF statements.
 
-== Integrating with an enabled deployment
+|Basic container
+|Groups resources through containment.
 
-. Obtain the registered container URL and supported operations from the operator.
-. Inspect response headers such as `Link`, `Location`, and any advertised method or media-type information.
-. Preserve returned resource URLs rather than constructing resource identifiers from a guessed route.
-. Follow the endpoint's conditional-update requirements, including `If-Match` where required.
-. Verify authorization and concurrency behavior before modifying asset descriptions.
+|Direct container
+|Additionally defines membership relations.
+|===
 
-[NOTE]
-====
-The upstream helper contains implementation-specific constraints and incomplete areas.
-This page does not assert complete W3C LDP conformance or a production-ready API for every Pod build.
-Use xref:reference:models-api.adoc[] for the directly registered model import/export workflow.
-====
+These are concepts for managing resources over HTTP.
+They are unrelated to the KVIN structure of measurements and to xref:reference:files-api.adoc[file attachments].
 
-LDP RDF resources are distinct from xref:reference:files-api.adoc[file attachments] and xref:reference:time-series-api.adoc[measurement series].
+== Operations and formats
+
+An `LDPHelper` handler can serve OPTIONS, HEAD, GET, POST, PUT, PATCH, and DELETE under its path.
+Representations are Turtle and JSON-LD; PATCH uses `text/ldpatch`.
+Which operations work depends on the container handler of the deployment.
+The implementation has known gaps and does not claim full LDP conformance.
+
+== Using an LDP endpoint
+
+When a deployment has registered an LDP handler:
+
+* Get the container URL and the supported operations from the operator.
+* Use the URLs returned in `Location` and `Link` headers instead of constructing them.
+* Send `If-Match` where the endpoint requires conditional updates.
