@@ -51,7 +51,7 @@ The documentation is in [`docs/`](docs/modules/ROOT/pages/index.adoc).
 |---|---|
 | get a first overview | [Overview](docs/modules/ROOT/pages/index.adoc), [Quickstart](docs/modules/ROOT/pages/quickstart.adoc) |
 | understand the data model | [KVIN data model](docs/modules/explanation/pages/kvin-data-model.adoc), [Architecture](docs/modules/explanation/pages/architecture.adoc) |
-| write and read measurements | [Ingest measurements](docs/modules/how-to/pages/ingest-measurements.adoc), [Query Pod data](docs/modules/how-to/pages/query-data.adoc), [Time-series API](docs/modules/reference/pages/time-series-api.adoc) |
+| write and read measurements | [Ingest measurements](docs/modules/how-to/pages/ingest-measurements.adoc), [Query measurements and asset descriptions](docs/modules/how-to/pages/query-data.adoc), [Time-series API](docs/modules/reference/pages/time-series-api.adoc) |
 | describe assets in RDF | [Model assets](docs/modules/how-to/pages/model-assets.adoc), [Models, imports, and identifiers](docs/modules/explanation/pages/semantic-concepts.adoc) |
 | search literal values by keyword | [Enable full-text search](docs/modules/how-to/pages/enable-full-text-search.adoc) |
 | configure and secure Pod | [Configuration](docs/modules/reference/pages/configuration.adoc), [Secure a deployment](docs/modules/how-to/pages/secure-deployment.adoc) |
