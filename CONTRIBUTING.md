@@ -1,93 +1,83 @@
 # Contributing to LinkedFactory Pod
 
 LinkedFactory Pod is the reference implementation of the [LinkedFactory architecture](https://github.com/linkedfactory/specification).
-This guide describes how to set up a development environment, build and test Pod, and submit changes.
+This file describes how to contribute changes. Documentation for using Pod starts in the [README](README.md).
 
-> **Open points** are marked with `TODO`. They still have to be agreed on by the maintainers.
+> Points marked `TODO` have not been decided by the maintainers yet.
 
-## Prerequisites
+## Get started
 
-- JDK 21 (CI uses Eclipse Temurin)
-- Maven 3
-- Docker (optional, for building and running the container image)
+| Topic | Page |
+|---|---|
+| Prerequisites, build, local instance, Docker image, IDE setup | [Build and run Pod from source](docs/modules/development/pages/build-and-run.adoc) |
+| Bundles, directories, Maven profiles, CI workflows | [Repository structure](docs/modules/development/pages/repository-structure.adoc) |
+| Ingestion benchmarks | [Benchmarks](docs/modules/development/pages/benchmarks.adoc) |
+| Writing and building documentation | [Documentation guidelines](docs/modules/development/pages/documentation.adoc) |
+| Which eniLINK revision the documentation is based on | [eniLINK source baseline](docs/modules/development/pages/upstream-baseline.adoc) |
 
-## Build
+In short: JDK 21 and Maven 3 are required, `mvn verify` builds and tests everything.
 
-Pod is a plain Maven project. A full build runs from the repository root:
+## Report bugs and propose changes
 
-```sh
-mvn package
-```
+Use [GitHub issues](https://github.com/linkedfactory/linkedfactory-pod/issues) for bug reports and feature requests.
+Open an issue before starting a larger change, so the approach can be discussed first.
 
-## Run locally
+## Make a change
 
-```sh
-cd launch/equinox
-mvn test -Pconfigure -DskipTests   # create or update the launch configuration
-mvn test                           # (re-)start the Pod instance
-```
+1. Create a branch from `main`. Include the issue number in the branch name, for example `gh-123-support-csv-separator`.
+2. Start each commit message with the issue number, for example `GH-123 Support custom CSV separators`.
+3. Keep each pull request focused on one topic.
+4. Add or update tests in `src/test` of the affected bundle. Every code change is expected to come with tests.
+5. Update the documentation in the same pull request if behaviour, interfaces, or configuration change. Follow the [documentation guidelines](docs/modules/development/pages/documentation.adoc).
+6. Run `mvn verify` locally. CI runs the same command for every pull request to `main`.
+7. Open a pull request against `main` and complete the checklist in the pull request template.
 
-Pod is then available at <http://localhost:8080/linkedfactory/>.
+The naming and commit conventions follow those of [RDF4J](https://github.com/eclipse-rdf4j/rdf4j). They are good practice, not enforced rules.
 
-## Set up an IDE
+## Review and merge
 
-Any IDE that supports Java and Scala projects works.
-
-- **IntelliJ IDEA:** `File > Project from existing sources...`
-- **Eclipse:** `File > Import > Maven > Existing Maven Projects`
-
-## Tests
-
-```sh
-mvn verify
-```
-
-The workflow [`.github/workflows/verify.yml`](.github/workflows/verify.yml) runs `mvn verify` for every push and pull request to `main`.
-Make sure it passes locally before you open a pull request.
-
-Benchmarks for KVIN ingestion are described in [docs/modules/development/pages/benchmarks.adoc](docs/modules/development/pages/benchmarks.adoc).
-
-- `TODO` Define which changes require new or updated tests.
-
-## Submitting changes
-
-1. Create a branch from `main`.
-2. Keep each pull request focused on one topic.
-3. Update the documentation in [`docs/`](docs/) in the same pull request when behaviour, APIs, or configuration change.
-4. Open a pull request against `main`.
-
-- `TODO` Where to report bugs and discuss larger changes before starting (GitHub issues, discussions, other channel).
-- `TODO` Branch naming and commit message conventions.
-- `TODO` Review process: who reviews, how many approvals are needed, who merges.
+The project currently has one maintainer, who reviews and merges pull requests.
+Pull requests are usually merged with rebase, and squashed where that gives a cleaner history.
 
 ## Code style
 
-- `TODO` Formatting rules for Java and Scala (formatter configuration, line length, imports).
+There is no formatter configuration yet. Follow the style of the surrounding code.
 
 ## License
 
 Pod is licensed under the [Apache License 2.0](LICENSE). Contributions are accepted under the same license.
 
-Source files carry the header from [`releng/license-header.txt`](releng/license-header.txt). To add or update the headers of Java and Scala sources, run:
+Java and Scala sources carry the header from [`releng/license-header.txt`](releng/license-header.txt). To add or update headers:
 
 ```sh
 mvn process-sources -Pupdate-licenses
 ```
 
-- `TODO` Whether contributors have to sign a CLA or a DCO sign-off (`git commit -s`).
+No contributor license agreement (CLA) or DCO sign-off is required.
 
 ## Documentation
 
-The documentation is an [Antora](https://antora.org) component written in AsciiDoc in [`docs/`](docs/), organised by Diátaxis type (how-to, reference, explanation) plus a development section.
-
-- `TODO` How to build and preview the documentation locally and where it is published.
+The documentation in `docs/` is built with Antora and published on GitHub Pages whenever `main` changes. Pull requests that touch the documentation are built as a check. Details are in the [documentation guidelines](docs/modules/development/pages/documentation.adoc).
 
 ## Releases
 
-Releases are made by the maintainers. [`releng/update-version.sh`](releng/update-version.sh) updates the project version, [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) publishes the Maven artifacts to GitHub Packages, and [`.github/workflows/docker.yml`](.github/workflows/docker.yml) publishes the Docker image to Docker Hub.
+Releases are made by the maintainer, either manually or through the `snapshots` branch.
 
-- `TODO` Describe the release steps and versioning scheme.
+- Pushing to `snapshots` publishes snapshot Maven artifacts to GitHub Packages and a Docker image to Docker Hub.
+- For a release, [`releng/update-version.sh`](releng/update-version.sh) sets the release version, commits it, and creates the tag `v<version>`; it can also set the next development version:
+
+  ```sh
+  releng/update-version.sh -r 1.3.0 -d 1.4.0-SNAPSHOT
+  ```
+
+  The script does not push. Pushing the tag publishes the Maven artifacts and the Docker image.
+
+Versions have the form `major.minor.patch`, with pre-releases such as `1.3.0-beta.1`.
 
 ## Security issues
 
-- `TODO` How to report vulnerabilities privately instead of opening a public issue.
+`TODO` How to report vulnerabilities privately instead of opening a public issue.
+
+## Working with coding agents
+
+[AGENTS.md](AGENTS.md) contains the instructions for AI coding agents working in this repository, including the documentation rules.

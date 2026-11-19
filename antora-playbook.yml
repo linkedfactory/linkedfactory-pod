@@ -1,0 +1,18 @@
+# Builds the Pod documentation from the local working tree into build/site.
+site:
+  title: LinkedFactory Pod
+  start_page: linkedfactory-pod::index.adoc
+content:
+  sources:
+  - url: .
+    branches: HEAD
+    start_path: docs
+ui:
+  bundle:
+    url: https://github.com/linkedfactory/linkedfactory-docs-ui/blob/build/ui-bundle.zip?raw=true
+    snapshot: true
+runtime:
+  log:
+    failure_level: warn
+output:
+  dir: build/site

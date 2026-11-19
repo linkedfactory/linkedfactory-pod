@@ -48,6 +48,7 @@ An asset such as `https://example.org/Press/Frame/StrainGauge` can appear in bot
 RDF describes relationships as subject, predicate, and object.
 Pod's KVIN data model adds time to associate a value with an item and property.
 A context can distinguish datasets; sequence numbers can distinguish measurements sharing a timestamp.
+xref:explanation:kvin-data-model.adoc[] explains the model and its formats.
 
 [NOTE]
 ====
@@ -65,6 +66,9 @@ An ordinary RDF query does not automatically scan the time-series store.
 * xref:reference:http-interfaces.adoc[Integrate an HTTP client].
 * xref:reference:models-api.adoc[Import or export asset-description models].
 * xref:reference:configuration.adoc[Configure storage, login, and query execution].
+* xref:how-to:enable-full-text-search.adoc[Search literal values by keyword].
+
+To build, test, or change Pod itself, start with xref:development:build-and-run.adoc[].
 
 == Platform integration beyond measurements
 

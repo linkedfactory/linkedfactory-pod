@@ -46,6 +46,7 @@ Validate each exposed route as described in xref:how-to:secure-deployment.adoc[]
 
 eniLINK manages RDF and OWL models through a configured repository.
 Pod's KVIN store manages time-series values associated with item, property, context, time, and sequence identifiers.
+xref:explanation:kvin-data-model.adoc[] explains this model.
 
 The default service configuration selects a LevelDB-backed value store.
 Other storage implementations require explicit configuration.

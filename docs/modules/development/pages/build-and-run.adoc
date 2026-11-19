@@ -1,0 +1,74 @@
+= Build and run Pod from source
+:description: Build Pod with Maven, start a local instance, build the server distribution and Docker image, and open the project in an IDE.
+
+This guide sets up a working copy of Pod for development: a build, a running instance, and an IDE project.
+
+== Prerequisites
+
+* JDK 21
+* Maven 3
+* Docker, only for building the container image
+
+== Build the bundles
+
+Pod is a plain Maven project.
+Run a full build from the repository root:
+
+[source,bash]
+----
+mvn package
+----
+
+To run the tests as well, use `mvn verify`.
+This is the command the CI runs for every pull request.
+
+== Start a local instance
+
+. Change to `launch/equinox`.
+. Create or update the launch configuration:
++
+[source,bash]
+----
+mvn test -Pconfigure -DskipTests
+----
+. Start or restart Pod:
++
+[source,bash]
+----
+mvn test
+----
+
+Pod is available at http://localhost:8080/linkedfactory/.
+
+The local instance reads its platform configuration from `configurations/default.ttl`.
+Edit that file to try other repository or login settings; xref:reference:configuration.adoc[] describes the options.
+
+== Build the server distribution and Docker image
+
+The `server` profile builds the Karaf server distribution in `server/target/assembly`:
+
+[source,bash]
+----
+mvn package -Pserver
+----
+
+Build the Docker image from the repository root:
+
+[source,bash]
+----
+docker build -f docker/Dockerfile -t linkedfactory/linkedfactory-pod:local .
+----
+
+Alternatively, `docker/docker-compose.yml` builds the image and starts it with the workspace and deploy directories mounted from `docker/pod-data/`.
+
+== Open the project in an IDE
+
+Any IDE with Java and Scala support works.
+
+* IntelliJ IDEA: `File > Project from existing sources...`
+* Eclipse: `File > Import > Maven > Existing Maven Projects`
+
+== Next steps
+
+* xref:development:repository-structure.adoc[] explains where the code lives.
+* xref:development:benchmarks.adoc[] measures ingestion throughput.
