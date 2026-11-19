@@ -3,8 +3,6 @@
 LinkedFactory Pod is the reference implementation of the [LinkedFactory architecture](https://github.com/linkedfactory/specification).
 This file describes how to contribute changes. Documentation for using Pod starts in the [README](README.md).
 
-> Points marked `TODO` have not been decided by the maintainers yet.
-
 ## Get started
 
 | Topic | Page |
@@ -19,7 +17,7 @@ In short: JDK 21 and Maven 3 are required, `mvn verify` builds and tests everyth
 
 ## Report bugs and propose changes
 
-Use [GitHub issues](https://github.com/linkedfactory/linkedfactory-pod/issues) for bug reports and feature requests.
+Use [GitHub issues](https://github.com/linkedfactory/linkedfactory-pod/issues) for bug reports and feature requests. Security vulnerabilities are reported privately, see [SECURITY.md](SECURITY.md).
 Open an issue before starting a larger change, so the approach can be discussed first.
 
 ## Make a change
@@ -76,7 +74,7 @@ Versions have the form `major.minor.patch`, with pre-releases such as `1.3.0-bet
 
 ## Security issues
 
-`TODO` How to report vulnerabilities privately instead of opening a public issue.
+Do not report vulnerabilities in public issues. Report them privately as described in [SECURITY.md](SECURITY.md).
 
 ## Working with coding agents
 
