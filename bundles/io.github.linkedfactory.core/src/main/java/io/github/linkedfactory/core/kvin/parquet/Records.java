@@ -6,7 +6,6 @@ import io.github.linkedfactory.core.kvin.util.Values;
 import io.github.linkedfactory.core.kvin.util.Varint;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
-import scala.Array;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

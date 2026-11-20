@@ -1,0 +1,56 @@
+package io.github.linkedfactory.core.kvin;
+
+import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
+import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDbArchiver;
+import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
+import io.github.linkedfactory.core.kvin.util.KvinTupleGenerator;
+import org.apache.commons.io.FileUtils;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+
+import static org.junit.Assert.assertTrue;
+
+public class KvinLevelDbArchiverTest {
+	File archiveTempDir;
+	File leveldbTempDir;
+	KvinLevelDb databaseStore;
+	KvinParquet archiveStore;
+
+	@Before
+	public void setup() throws IOException {
+		archiveTempDir = Files.createTempDirectory("archive").toFile();
+		leveldbTempDir = Files.createTempDirectory("level0db-test").toFile();
+		databaseStore = new KvinLevelDb(leveldbTempDir);
+		archiveStore = new KvinParquet(archiveTempDir.getAbsolutePath() + "/");
+		addTestData();
+	}
+
+	@After
+	public void cleanup() throws IOException {
+		FileUtils.deleteDirectory(new File(archiveTempDir.getPath()));
+		FileUtils.deleteDirectory(new File(leveldbTempDir.getPath()));
+	}
+
+	void addTestData() {
+		databaseStore.put(new KvinTupleGenerator()
+				.setStartTime(1697407200000L)
+				.setItems(10)
+				.setPropertiesPerItem(10)
+				.setValuesPerProperty(10)
+				.setItemPattern("http://localhost:8080/linkedfactory/demofactory/new-week/{}")
+				.setPropertyPattern("http://example.org/{}")
+				.generate());
+	}
+
+	@Test
+	public void testLevelDbToParquetArchival() {
+		KvinLevelDbArchiver dbArchiver = new KvinLevelDbArchiver(databaseStore, archiveStore);
+		dbArchiver.archive();
+		assertTrue(new File(archiveTempDir.getPath()).listFiles().length > 0);
+	}
+}

@@ -13,13 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.github.linkedfactory.core.kvin.leveldb
+package io.github.linkedfactory.core.kvin.leveldb;
 
-import java.io.File
+import io.github.linkedfactory.core.kvin.Kvin;
+
+import java.io.File;
 
 /**
  * Simple benchmark for the LevelDB-based time series store.
  */
-object KvinLevelDbBenchmark extends KvinBenchmarkBase {
-  override def createStore = new KvinLevelDb(new File("/tmp/kvin-test-" + System.currentTimeMillis + "/"))
+public class KvinLevelDbBenchmark extends KvinBenchmarkBase {
+	public static void main(String[] args) throws InterruptedException {
+		new KvinLevelDbBenchmark().run();
+	}
+
+	@Override
+	protected Kvin createStore() {
+		return new KvinLevelDb(new File("/tmp/kvin-test-" + System.currentTimeMillis() + "/"));
+	}
 }
