@@ -45,7 +45,7 @@ public abstract class KvinLevelDbBase {
 	protected static final int LONG_BYTES = Long.BYTES;
 	protected static final ByteOrder BYTE_ORDER = ByteOrder.BIG_ENDIAN;
 
-	protected static final Pattern TTL = Pattern.compile("(?:^|&)ttl=([0-9]+)(ns|us|ms|s|m|d)");
+	protected static final Pattern TTL = Pattern.compile("(?:^|&)ttl=([0-9]+)(ns|us|ms|s|m|d)(?=&|$)");
 
 	protected final Set<ByteBuffer> waitingForTTL = Collections.newSetFromMap(new ConcurrentHashMap<>());
 	protected final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
@@ -144,7 +144,7 @@ public abstract class KvinLevelDbBase {
 
 	/**
 	 * Returns the time to live in milliseconds that is encoded in the query part
-	 * of the given URI, e.g. <code>?ttl=5s</code>.
+	 * of the given URI, e.g. <code>?ttl=5s</code> or <code>?a=b&amp;ttl=2d</code>.
 	 *
 	 * @param uri the URI
 	 * @return the time to live or an empty value if the URI has no TTL
@@ -155,7 +155,7 @@ public abstract class KvinLevelDbBase {
 			return OptionalLong.empty();
 		}
 		Matcher matcher = TTL.matcher(query);
-		if (!matcher.matches()) {
+		if (!matcher.find()) {
 			return OptionalLong.empty();
 		}
 		long d = Long.parseLong(matcher.group(1));
@@ -165,7 +165,7 @@ public abstract class KvinLevelDbBase {
 			case "ms" -> d;
 			case "s" -> d * 1000L;
 			case "m" -> d * 60000L;
-			case "d" -> d * 1440000L;
+			case "d" -> d * 86400000L;
 			default -> throw new IllegalStateException("Unknown time unit: " + matcher.group(2));
 		});
 	}
