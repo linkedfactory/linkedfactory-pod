@@ -1,7 +1,7 @@
 # Builds the Pod documentation from the local working tree into build/site.
 site:
   title: LinkedFactory Pod
-  start_page: linkedfactory-pod::index.adoc
+  start_page: ROOT::index.adoc
 content:
   sources:
   - url: .
