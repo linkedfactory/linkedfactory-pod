@@ -241,30 +241,6 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 		return idBytes;
 	}
 
-	public void deleteId(URI uri, EntryType entryType) {
-		ReentrantReadWriteLock lock = lockFor(uri);
-		boolean hadReadLock = acquireWriteLock(lock);
-		try {
-			byte[] key = uriKey((byte) entryType.id(), uri);
-			ids.delete(key);
-		} finally {
-			releaseWriteLock(lock, hadReadLock);
-		}
-	}
-
-	public void deleteId(URI item, URI property, URI context) {
-		ReentrantReadWriteLock lock = lockFor(item);
-		boolean hadReadLock = acquireWriteLock(lock);
-		try {
-			byte[] key = toId(item, property, context, false, null);
-			ids.delete(key);
-
-			// TODO also delete inverse indexes etc.
-		} finally {
-			releaseWriteLock(lock, hadReadLock);
-		}
-	}
-
 	public URI contextOrDefault(URI context) {
 		return context == null ? Kvin.DEFAULT_CONTEXT : context;
 	}
@@ -345,12 +321,6 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 				if (batch != null && count % DELETE_BATCH_SIZE != 0) {
 					values.write(batch, new WriteOptions().sync(false));
 				}
-
-				it.seek(itemId);
-				if (!it.hasNext()) {
-					// no more values for item in the given context exist
-					deleteId(item, EntryType.SubjectToId);
-				}
 			} finally {
 				it.close();
 				if (batch != null) {
@@ -408,25 +378,7 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 					closeUnchecked(batch);
 				}
 			}
-			// this needs to be a new iterator else some values are found even if all where deleted before (bug?!)
-			DBIterator checkValuesIt = values.iterator();
-			try {
-				boolean hadReadLock = acquireWriteLock(lock);
-				try {
-					// test if some other values exist for this item and property
-					checkValuesIt.seek(idTimePrefix);
-					boolean someValuesExist = checkValuesIt.hasNext() && startsWith(checkValuesIt.next().getKey(), id);
-					// if no values exist then delete the corresponding ID
-					if (!someValuesExist) {
-						deleteId(item, property, context);
-					}
-				} finally {
-					releaseWriteLock(lock, hadReadLock);
-				}
-				return count;
-			} finally {
-				checkValuesIt.close();
-			}
+			return count;
 		} finally {
 			lock.readLock().unlock();
 		}
