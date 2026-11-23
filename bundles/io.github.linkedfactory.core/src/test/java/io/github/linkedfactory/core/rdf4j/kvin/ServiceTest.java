@@ -402,14 +402,13 @@ public class ServiceTest {
 	}
 
 	@Before
-	public void init() {
+	public void init() throws IOException {
 		createStore();
 		createRepository();
 	}
 
-	void createStore() {
-		storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis() + "-" + new Random().nextInt(1000) + "/");
-		storeDirectory.deleteOnExit();
+	void createStore() throws IOException {
+		storeDirectory = Files.createTempDirectory("leveldb-test-").toFile();
 		store = new KvinLevelDb(storeDirectory);
 	}
 

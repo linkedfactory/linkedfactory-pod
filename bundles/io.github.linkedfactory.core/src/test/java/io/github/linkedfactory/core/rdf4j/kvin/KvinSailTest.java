@@ -36,7 +36,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.Random;
 
 public class KvinSailTest {
 	final URI valueProperty = URIs.createURI("property:value");
@@ -63,14 +62,13 @@ public class KvinSailTest {
 	}
 
 	@Before
-	public void init() {
+	public void init() throws IOException {
 		createStore();
 		createRepository();
 	}
 
-	void createStore() {
-		storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis() + "-" + new Random().nextInt(1000) + "/");
-		storeDirectory.deleteOnExit();
+	void createStore() throws IOException {
+		storeDirectory = Files.createTempDirectory("leveldb-test-").toFile();
 		store = new KvinLevelDb(storeDirectory);
 	}
 
