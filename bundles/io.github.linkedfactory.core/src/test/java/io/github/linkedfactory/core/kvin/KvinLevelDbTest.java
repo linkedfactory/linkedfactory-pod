@@ -24,11 +24,11 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
@@ -44,9 +44,8 @@ import static org.junit.Assert.fail;
  */
 public class KvinLevelDbTest extends KvinTestBase {
 	@Before
-	public void createStore() {
-		storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis() + "-" + new Random().nextInt(1000) + "/");
-		storeDirectory.deleteOnExit();
+	public void createStore() throws IOException {
+		storeDirectory = Files.createTempDirectory("leveldb-test-").toFile();
 		store = new KvinLevelDb(storeDirectory);
 	}
 

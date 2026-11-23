@@ -20,7 +20,6 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files, Path, SimpleFileVisitor}
 import jakarta.servlet.http.HttpServletRequest
 
-import scala.util.Random
 import scala.compiletime.uninitialized
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters.*
@@ -62,8 +61,7 @@ object KvinServiceTest {
   }
 
   def createStore(): Unit = {
-    storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis + "-" + Random.nextInt(1000) + "/")
-    storeDirectory.deleteOnExit()
+    storeDirectory = Files.createTempDirectory("leveldb-test-").toFile
     store = new KvinLevelDb(storeDirectory)
   }
 

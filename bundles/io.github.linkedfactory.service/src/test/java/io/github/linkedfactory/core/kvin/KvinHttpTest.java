@@ -59,7 +59,6 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Random;
 
 public class KvinHttpTest extends Mockito {
 
@@ -109,9 +108,8 @@ public class KvinHttpTest extends Mockito {
 		modelSet = null;
 	}
 
-	private void createStore() {
-		storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis() + "-" + new Random().nextInt(1000) + "/");
-		storeDirectory.deleteOnExit();
+	private void createStore() throws IOException {
+		storeDirectory = Files.createTempDirectory("leveldb-test-").toFile();
 		store = new KvinLevelDb(storeDirectory);
 	}
 

@@ -41,10 +41,13 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.Random;
+import java.util.stream.Stream;
 
 public class RemoteServiceTest {
 	static final int START_TIME = 1000;
@@ -83,14 +86,13 @@ public class RemoteServiceTest {
 	int kvinHttpFetchCall = 0;
 
 	@Before
-	public void init() {
+	public void init() throws IOException {
 		createStore();
 		createRepository();
 	}
 
-	void createStore() {
-		storeDirectory = new File("/tmp/leveldb-test-" + System.currentTimeMillis() + "-" + new Random().nextInt(1000) + "/");
-		storeDirectory.deleteOnExit();
+	void createStore() throws IOException {
+		storeDirectory = Files.createTempDirectory("leveldb-test-").toFile();
 		store = new KvinLevelDb(storeDirectory);
 	}
 
@@ -255,5 +257,16 @@ public class RemoteServiceTest {
 	@After
 	public void closeRepository() {
 		repository.shutDown();
+	}
+
+	@After
+	public void closeStore() throws IOException {
+		store.close();
+		store = null;
+		try (Stream<Path> paths = Files.walk(storeDirectory.toPath())) {
+			for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+				Files.delete(path);
+			}
+		}
 	}
 }
