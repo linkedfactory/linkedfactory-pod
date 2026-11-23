@@ -158,16 +158,21 @@ public abstract class KvinLevelDbBase {
 		if (!matcher.find()) {
 			return OptionalLong.empty();
 		}
-		long d = Long.parseLong(matcher.group(1));
-		return OptionalLong.of(switch (matcher.group(2)) {
-			case "ns" -> d / 1000000L;
-			case "us" -> d / 1000L;
-			case "ms" -> d;
-			case "s" -> d * 1000L;
-			case "m" -> d * 60000L;
-			case "d" -> d * 86400000L;
-			default -> throw new IllegalStateException("Unknown time unit: " + matcher.group(2));
-		});
+		try {
+			long d = Long.parseLong(matcher.group(1));
+			return OptionalLong.of(switch (matcher.group(2)) {
+				case "ns" -> d / 1000000L;
+				case "us" -> d / 1000L;
+				case "ms" -> d;
+				case "s" -> Math.multiplyExact(d, 1000L);
+				case "m" -> Math.multiplyExact(d, 60000L);
+				case "d" -> Math.multiplyExact(d, 86400000L);
+				default -> throw new IllegalStateException("Unknown time unit: " + matcher.group(2));
+			});
+		} catch (ArithmeticException | NumberFormatException e) {
+			// the TTL does not fit into a long value of milliseconds
+			return OptionalLong.empty();
+		}
 	}
 
 	protected void asyncRemoveByTtl(DB db, byte[] prefix, long ttl) {
@@ -182,13 +187,17 @@ public abstract class KvinLevelDbBase {
 
 	protected void removeByTtl(DB db, byte[] prefix, long ttl) {
 		long now = System.currentTimeMillis();
+		if (ttl > now) {
+			// no value can be older than the TTL, and a negative time would
+			// be encoded as a key that does not sort before the stored values
+			return;
+		}
 		long eldest = now - ttl;
 		byte[] idTimePrefix = new byte[prefix.length + Varint.MAX_BYTES];
 		ByteBuffer bb = ByteBuffer.wrap(idTimePrefix).order(ByteOrder.BIG_ENDIAN);
 		bb.put(prefix);
 		writeVarint(bb, eldest);
-		DBIterator it = db.iterator();
-		try {
+		try (DBIterator it = db.iterator()) {
 			it.seek(idTimePrefix);
 			while (it.hasNext()) {
 				Map.Entry<byte[], byte[]> entry = it.next();
@@ -198,8 +207,6 @@ public abstract class KvinLevelDbBase {
 				}
 				db.delete(key);
 			}
-		} finally {
-			it.close();
 		}
 	}
 
