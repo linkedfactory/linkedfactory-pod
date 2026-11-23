@@ -34,7 +34,9 @@ import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
@@ -121,6 +123,38 @@ public class KvinLevelDbTest extends KvinTestBase {
 
 		List<Long> nextIdsLoaded = Arrays.stream(((KvinLevelDb) store).nextIds).map(AtomicLong::get).toList();
 		assertEquals(nextIds, nextIdsLoaded);
+	}
+
+	@Test
+	public void testIdsAreKeptAfterDelete() {
+		KvinLevelDb db = (KvinLevelDb) store;
+		URI item = itemUri(1);
+		URI otherItem = itemUri(2);
+		URI ctx = URIs.createURI("ctx:1");
+		store.put(new KvinTuple(item, valueProperty, ctx, 100, 1),
+				new KvinTuple(item, valueProperty, ctx, 200, 2),
+				new KvinTuple(otherItem, valueProperty, ctx, 100, 3));
+		byte[] valueId = db.toId(item, valueProperty, ctx, false, null);
+
+		// delete all values of the item and property
+		assertEquals(2, store.delete(item, valueProperty, ctx, Long.MAX_VALUE, 0));
+		assertEquals(List.of(), fetched(item, valueProperty, ctx));
+		assertEquals(List.of(otherItem), store.descendants(URIs.createURI("http://example.org/"), ctx).toList());
+
+		// delete all values of the item in the context
+		store.put(new KvinTuple(item, valueProperty, ctx, 300, 4));
+		assertTrue(store.delete(item, ctx));
+		assertEquals(List.of(), fetched(item, valueProperty, ctx));
+		assertEquals(List.of(otherItem), store.descendants(URIs.createURI("http://example.org/"), ctx).toList());
+
+		// the IDs of item, context and property are kept and reused, also after re-opening the store
+		recreateStore();
+		db = (KvinLevelDb) store;
+		assertArrayEquals(valueId, db.toId(item, valueProperty, ctx, false, null));
+
+		store.put(new KvinTuple(item, valueProperty, ctx, 400, 5));
+		assertEquals(List.of(new KvinTuple(item, valueProperty, ctx, 400, 5)), fetched(item, valueProperty, ctx));
+		assertArrayEquals(valueId, db.toId(item, valueProperty, ctx, false, null));
 	}
 
 	private List<KvinTuple> fetched(URI item, URI property, URI context) {
