@@ -32,8 +32,16 @@ public class KvinLevelDbArchiverTest {
 
 	@After
 	public void cleanup() throws IOException {
-		FileUtils.deleteDirectory(new File(archiveTempDir.getPath()));
-		FileUtils.deleteDirectory(new File(leveldbTempDir.getPath()));
+		try {
+			try {
+				databaseStore.close();
+			} finally {
+				archiveStore.close();
+			}
+		} finally {
+			FileUtils.deleteDirectory(archiveTempDir);
+			FileUtils.deleteDirectory(leveldbTempDir);
+		}
 	}
 
 	void addTestData() {
