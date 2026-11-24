@@ -12,11 +12,15 @@ import org.junit.rules.TemporaryFolder;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.OptionalLong;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.iq80.leveldb.impl.Iq80DBFactory.factory;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public class KvinLevelDbBaseTest {
 	final KvinLevelDbBase base = new KvinLevelDbBase() {
@@ -117,6 +121,41 @@ public class KvinLevelDbBaseTest {
 			assertNotNull(db.get(recent));
 			assertNotNull(db.get(other));
 		}
+	}
+
+	@Test
+	public void testAsyncRemoveByTtlAfterFailure() throws Exception {
+		AtomicInteger calls = new AtomicInteger();
+		KvinLevelDbBase failing = new KvinLevelDbBase() {
+			@Override
+			protected void removeByTtl(DB db, byte[] prefix, long ttl) {
+				if (calls.incrementAndGet() == 1) {
+					throw new IllegalStateException("removal failed");
+				}
+			}
+		};
+		try {
+			byte[] prefix = {1};
+			failing.asyncRemoveByTtl(null, prefix, 1000);
+			failing.executor.submit(() -> {}).get();
+			assertTrue(failing.waitingForTTL.isEmpty());
+
+			// the next removal for the same prefix is executed again
+			failing.asyncRemoveByTtl(null, prefix, 1000);
+			failing.executor.submit(() -> {}).get();
+			assertEquals(2, calls.get());
+			assertTrue(failing.waitingForTTL.isEmpty());
+		} finally {
+			failing.executor.shutdown();
+		}
+	}
+
+	@Test
+	public void testAsyncRemoveByTtlAfterShutdown() {
+		base.executor.shutdown();
+		byte[] prefix = {1};
+		assertThrows(RejectedExecutionException.class, () -> base.asyncRemoveByTtl(null, prefix, 1000));
+		assertTrue(base.waitingForTTL.isEmpty());
 	}
 
 	@Test

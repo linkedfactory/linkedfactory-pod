@@ -20,6 +20,8 @@ import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
 import org.iq80.leveldb.DB;
 import org.iq80.leveldb.DBIterator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -34,6 +36,7 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -42,6 +45,8 @@ import java.util.regex.Pattern;
  * Common base functions for LevelDB based value stores.
  */
 public abstract class KvinLevelDbBase {
+	private static final Logger log = LoggerFactory.getLogger(KvinLevelDbBase.class);
+
 	protected static final int LONG_BYTES = Long.BYTES;
 	protected static final ByteOrder BYTE_ORDER = ByteOrder.BIG_ENDIAN;
 
@@ -181,10 +186,20 @@ public abstract class KvinLevelDbBase {
 	protected void asyncRemoveByTtl(DB db, byte[] prefix, long ttl) {
 		ByteBuffer key = ByteBuffer.wrap(prefix);
 		if (waitingForTTL.add(key)) {
-			executor.submit(() -> {
-				removeByTtl(db, prefix, ttl);
+			try {
+				executor.execute(() -> {
+					try {
+						removeByTtl(db, prefix, ttl);
+					} catch (RuntimeException e) {
+						log.error("Removing values by TTL failed", e);
+					} finally {
+						waitingForTTL.remove(key);
+					}
+				});
+			} catch (RejectedExecutionException e) {
 				waitingForTTL.remove(key);
-			});
+				throw e;
+			}
 		}
 	}
 
