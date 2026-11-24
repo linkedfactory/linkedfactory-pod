@@ -131,6 +131,11 @@ public class KvinParquet implements Kvin {
 		} catch (IOException e) {
 			log.error("Error while repairing unfinished transaction", e);
 		}
+		try {
+			Compactor.recover(Paths.get(this.archiveLocation));
+		} catch (IOException | KvinException e) {
+			log.error("Error while finishing interrupted compaction", e);
+		}
 	}
 
 	static boolean anyBetween(long[] values, long min, long max) {

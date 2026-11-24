@@ -79,7 +79,6 @@ public class ParquetHelpers {
 			.name("value").type().stringType().noDefault().endRecord();
 
 	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
-	static Pattern fileOrDotFileWithSeqNr = Pattern.compile("^\\.?([^.].*)__([0-9]+)\\..*$");
 	static Configuration configuration = new Configuration();
 
 	static {
@@ -231,27 +230,6 @@ public class ParquetHelpers {
 			});
 		}
 		return fileMap;
-	}
-
-	public static void deleteMappingFiles(java.nio.file.Path folder, Set<String> types)
-			throws IOException {
-		if (Files.isDirectory(folder)) {
-			Files.list(folder).forEach(p -> {
-				String name = p.getFileName().toString();
-				Matcher m = fileOrDotFileWithSeqNr.matcher(name);
-				if (m.matches()) {
-					String type = m.group(1);
-					if (types.contains(type)) {
-						// delete file
-						try {
-							Files.delete(p);
-						} catch (IOException e) {
-							log.error("Unable to delete file", e);
-						}
-					}
-				}
-			});
-		}
 	}
 
 	public static KvinTuple recordToTuple(URI item, URI property, URI context, KvinRecord record) throws IOException {
