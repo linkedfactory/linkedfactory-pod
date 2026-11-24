@@ -153,6 +153,42 @@ public class LuceneFtsIndexTest {
 	}
 
 	@Test
+	public void clearContextsOnASubjectWithAMixOfContextsKeepsOnlyTheUnrelatedEntries() throws Exception {
+		IRI s1 = vf.createIRI("urn:item:1");
+		IRI title = vf.createIRI("urn:title");
+		IRI body = vf.createIRI("urn:body");
+		IRI ctxA = vf.createIRI("urn:ctx:a");
+		Statement inContext = vf.createStatement(s1, title, vf.createLiteral("fox"), ctxA);
+		Statement noContext = vf.createStatement(s1, body, vf.createLiteral("hound"));
+		commit(Set.of(inContext, noContext), Set.of());
+		assertEquals(1, searchBackend.search(new FtsSearchRequest("fox", null, 10, null, false, null)).size());
+		assertEquals(1, searchBackend.search(new FtsSearchRequest("hound", null, 10, null, false, null)).size());
+
+		searchService.begin();
+		searchService.clearContexts(ctxA);
+		searchService.commit();
+
+		assertEquals("the context-scoped entry must be cleared",
+				0, searchBackend.search(new FtsSearchRequest("fox", null, 10, null, false, null)).size());
+		assertEquals("the entry without a context on the same subject must survive",
+				1, searchBackend.search(new FtsSearchRequest("hound", null, 10, null, false, null)).size());
+	}
+
+	@Test
+	public void clearContextsIgnoresSubjectsThatOnlyHaveEntriesWithoutAContext() throws Exception {
+		IRI s1 = vf.createIRI("urn:item:1");
+		IRI title = vf.createIRI("urn:title");
+		IRI ctxA = vf.createIRI("urn:ctx:a");
+		commit(Set.of(vf.createStatement(s1, title, vf.createLiteral("fox"))), Set.of());
+
+		searchService.begin();
+		searchService.clearContexts(ctxA);
+		searchService.commit();
+
+		assertEquals(1, searchBackend.search(new FtsSearchRequest("fox", null, 10, null, false, null)).size());
+	}
+
+	@Test
 	public void boostAndLimitAreHonored() throws Exception {
 		IRI title = vf.createIRI("urn:title");
 		Set<Statement> adds = new java.util.LinkedHashSet<>();
