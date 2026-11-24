@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.kvin.iceberg;
 
+import com.google.common.cache.CacheBuilder;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -11,6 +12,7 @@ import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.parquet.column.ColumnReader;
 import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -45,6 +47,63 @@ public class KvinIcebergReadOptimizationTest {
 
 	private Table table() {
 		return new HadoopTables(new Configuration()).load(directory.toPath().resolve("iceberg").toString());
+	}
+
+	@Test
+	public void splitFilesWithCachedFootersReadEachRowGroupOnce() throws Exception {
+		table().updateProperties()
+				.set(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, "4096")
+				.set(TableProperties.SPLIT_SIZE, "4096")
+				.commit();
+		int count = 20_000;
+		List<KvinTuple> tuples = new ArrayList<>();
+		for (int time = 0; time < count; time++) {
+			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+		}
+		store.put(tuples);
+		Table table = table();
+		var footers = CacheBuilder.newBuilder().<String, ParquetMetadata>build();
+		// Reading every split of every file must return each row exactly once.
+		for (int round = 0; round < 2; round++) {
+			int splits = 0, files;
+			var times = new java.util.HashSet<Long>();
+			var locations = new java.util.HashSet<String>();
+			try (var combined = table.newScan().planTasks()) {
+				for (var group : combined) {
+					for (var task : group.files()) {
+						splits++;
+						locations.add(task.file().location());
+						try (var reader = new SeriesSkippingReader(table.schema(), task, Expressions.alwaysTrue(), footers)) {
+							while (reader.hasNext()) {
+								assertTrue(times.add((Long) reader.next().get(3)));
+							}
+						}
+					}
+				}
+			}
+			files = locations.size();
+			assertTrue("expected split files, got " + splits + " splits for " + files + " files", splits > files);
+			assertEquals(count, times.size());
+			assertEquals(files, footers.size());
+		}
+		// twice: the second fetch uses cached footers
+		for (int round = 0; round < 2; round++) {
+			try (var values = store.fetch(item, property, null, 0)) {
+				List<Long> times = values.toList().stream().map(tuple -> tuple.time).toList();
+				assertEquals(count, times.size());
+				for (int i = 0; i < count; i++) {
+					assertEquals(count - 1 - i, (long) times.get(i));
+				}
+			}
+			try (var values = store.fetch(item, property, null, 1)) {
+				assertEquals(count - 1, values.next().time);
+				assertFalse(values.hasNext());
+			}
+			try (var values = store.fetch(item, property, null, 12_345, 12_345, 0, 0, null)) {
+				assertEquals(12_345L, values.next().value);
+				assertFalse(values.hasNext());
+			}
+		}
 	}
 
 	@Test
@@ -83,7 +142,8 @@ public class KvinIcebergReadOptimizationTest {
 		store.put(tuples);
 		Table table = table();
 		try (var tasks = table.newScan().planFiles();
-			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(), Expressions.alwaysTrue())) {
+			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(), Expressions.alwaysTrue(),
+					 CacheBuilder.newBuilder().<String, ParquetMetadata>build())) {
 			var first = reader.next();
 			var field = SeriesSkippingReader.class.getDeclaredField("columns");
 			field.setAccessible(true);
@@ -117,7 +177,8 @@ public class KvinIcebergReadOptimizationTest {
 		store.put(tuples);
 		table.refresh();
 		try (var tasks = table.newScan().planFiles();
-			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(), Expressions.alwaysTrue())) {
+			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(), Expressions.alwaysTrue(),
+					 CacheBuilder.newBuilder().<String, ParquetMetadata>build())) {
 			var first = reader.next();
 			var field = SeriesSkippingReader.class.getDeclaredField("reader");
 			field.setAccessible(true);

@@ -97,10 +97,14 @@ public class KvinIcebergTest {
 		return spy;
 	}
 
-	private PriorityQueue<?> cursors(IExtendedIterator<KvinTuple> values) throws ReflectiveOperationException {
+	private Object records(IExtendedIterator<KvinTuple> values) throws ReflectiveOperationException {
 		var base = values.getClass().getDeclaredField("base");
 		base.setAccessible(true);
-		Object records = base.get(values);
+		return base.get(values);
+	}
+
+	private PriorityQueue<?> cursors(IExtendedIterator<KvinTuple> values) throws ReflectiveOperationException {
+		Object records = records(values);
 		for (var field : records.getClass().getDeclaredFields()) {
 			if (field.getType() == PriorityQueue.class) {
 				field.setAccessible(true);
@@ -110,40 +114,49 @@ public class KvinIcebergTest {
 		throw new AssertionError("Missing merge queue");
 	}
 
+	private Object recordField(IExtendedIterator<KvinTuple> values, String name) throws ReflectiveOperationException {
+		Object records = records(values);
+		var field = records.getClass().getDeclaredField(name);
+		field.setAccessible(true);
+		return field.get(records);
+	}
+
 	@Test
-	public void singleSeriesLimitClosesReadersWithoutAdvancing() throws Exception {
+	public void singleSeriesLimitOpensOnlyNewestFile() throws Exception {
 		store.put(new KvinTuple(item, property, null, 3, 0, "new"),
 				new KvinTuple(item, property, null, 1, 0, "old"));
 		store.put(new KvinTuple(item, property, null, 2, 0, "middle"));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 1)) {
 			PriorityQueue<?> cursors = cursors(values);
-			assertEquals(2, cursors.size());
-			List<CloseableIterator<?>> readers = new ArrayList<>();
-			List<CloseableIterable<?>> resources = new ArrayList<>();
-			for (Object cursor : cursors) {
-				var field = cursor.getClass().getDeclaredField("iterator");
-				field.setAccessible(true);
-				CloseableIterator<?> reader = mock(CloseableIterator.class);
-				field.set(cursor, reader);
-				readers.add(reader);
-				var rowsField = cursor.getClass().getDeclaredField("rows");
-				rowsField.setAccessible(true);
-				CloseableIterable<?> rows = spy((CloseableIterable<?>) rowsField.get(cursor));
-				rowsField.set(cursor, rows);
-				resources.add(rows);
-			}
+			assertEquals(0, recordField(values, "opened"));
 			assertTrue(values.hasNext());
 			assertTrue(values.hasNext());
 			assertTrue(cursors.isEmpty());
 			assertEquals("new", values.next().value);
 			assertFalse(values.hasNext());
-			for (CloseableIterator<?> reader : readers) {
-				verifyNoInteractions(reader);
-			}
-			values.close();
-			for (CloseableIterable<?> rows : resources) {
-				verify(rows, times(1)).close();
-			}
+			// the file holding only time 2 cannot contain a newer value
+			assertEquals(1, recordField(values, "opened"));
+		}
+	}
+
+	@Test
+	public void lazilyOpenedFilesMergeInOrder() {
+		URI secondProperty = URIs.createURI("urn:test:second");
+		store.put(new KvinTuple(item, property, null, 5, 0, 5), new KvinTuple(item, property, null, 1, 0, 1),
+				new KvinTuple(other, property, null, 9, 0, 9));
+		store.put(new KvinTuple(item, property, null, 4, 0, 4), new KvinTuple(item, property, null, 2, 0, 2),
+				new KvinTuple(item, secondProperty, null, 7, 0, 7));
+		store.put(new KvinTuple(item, property, null, 3, 0, 3), new KvinTuple(item, secondProperty, null, 6, 0, 6));
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
+			assertEquals(List.of(5L, 4L, 3L, 2L, 1L), values.toList().stream().map(tuple -> tuple.time).toList());
+		}
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 4, 2, 0, 0, null)) {
+			assertEquals(List.of(4L, 3L, 2L), values.toList().stream().map(tuple -> tuple.time).toList());
+		}
+		try (IExtendedIterator<KvinTuple> values = store.fetch(item, null, null, 2)) {
+			List<KvinTuple> result = values.toList();
+			assertEquals(4, result.size());
+			assertEquals(List.of(5L, 4L, 7L, 6L), result.stream().map(tuple -> tuple.time).toList());
 		}
 	}
 
@@ -154,27 +167,22 @@ public class KvinIcebergTest {
 		store.put(new KvinTuple(item, property, null, 2, 0, 2));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 			PriorityQueue<?> cursors = cursors(values);
-			List<CloseableIterable<?>> resources = new ArrayList<>();
-			IllegalStateException failure = new IllegalStateException("read failed");
-			for (Object cursor : cursors) {
-				var field = cursor.getClass().getDeclaredField("iterator");
-				field.setAccessible(true);
-				CloseableIterator<?> reader = mock(CloseableIterator.class);
-				when(reader.hasNext()).thenThrow(failure);
-				field.set(cursor, reader);
-				var rowsField = cursor.getClass().getDeclaredField("rows");
-				rowsField.setAccessible(true);
-				CloseableIterable<?> rows = spy((CloseableIterable<?>) rowsField.get(cursor));
-				rowsField.set(cursor, rows);
-				resources.add(rows);
-			}
 			assertEquals(3L, values.next().time);
+			Object cursor = recordField(values, "pending");
+			IllegalStateException failure = new IllegalStateException("read failed");
+			var field = cursor.getClass().getDeclaredField("iterator");
+			field.setAccessible(true);
+			CloseableIterator<?> reader = mock(CloseableIterator.class);
+			when(reader.hasNext()).thenThrow(failure);
+			field.set(cursor, reader);
+			var rowsField = cursor.getClass().getDeclaredField("rows");
+			rowsField.setAccessible(true);
+			CloseableIterable<?> rows = spy((CloseableIterable<?>) rowsField.get(cursor));
+			rowsField.set(cursor, rows);
 			assertSame(failure, assertThrows(IllegalStateException.class, values::hasNext));
 			assertTrue(cursors.isEmpty());
 			assertFalse(values.hasNext());
-			for (CloseableIterable<?> rows : resources) {
-				verify(rows, times(1)).close();
-			}
+			verify(rows, times(1)).close();
 		}
 	}
 

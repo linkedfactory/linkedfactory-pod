@@ -148,7 +148,7 @@ Example with the default model and a LevelDB store:
 
 To use Iceberg instead of the default value store, configure `<store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ]`.
 KvinIceberg maintains a value table in `iceberg/` and separate URI-ID tables in `iceberg-ids/items/`, `iceberg-ids/properties/`, and `iceberg-ids/contexts/`, with bounded in-memory lookup caches.
-Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots, using a value-skipping Parquet reader for limited queries and Iceberg's generic Parquet readers otherwise.
+Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots and use a value-skipping Parquet reader.
 Use a new store directory rather than pointing it at an existing KvinParquet archive.
 Retention-period cleanup is not supported by KvinIceberg.
 
@@ -245,6 +245,9 @@ Caches are released when the store closes.
 Tables still refresh for every query, so caching immutable manifests does not delay visibility of committed writes from other instances; Parquet data is not cached.
 
 Fetches batch uncached item and property URI lookups, merge sorted files with constant-size per-series limit bookkeeping, and defer advancing a reader until another tuple is needed.
+Data files are opened lazily: planned files are ordered by the smallest matching key their column statistics allow (item, property, and latest time), and a file is opened only when that bound is not after the current merge head.
+A latest-value query on time-ordered data therefore usually opens a single file.
+Parquet footers are cached per data file (up to 4096 files); entries for files replaced by compaction or deletes are dropped.
 Limited reads skip value decoding for completed series and use the advancing series boundary to prune subsequent Parquet row groups.
 Non-aggregated queries with explicit properties close their readers as soon as every requested item/property combination has reached its limit.
 Queries without explicit properties, or with combinations that have fewer matching tuples than the limit, continue looking for remaining series.

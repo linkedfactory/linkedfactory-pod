@@ -1,5 +1,7 @@
 package io.github.linkedfactory.core.kvin.iceberg;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import io.github.linkedfactory.core.kvin.records.KvinRecordStore;
 import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import io.github.linkedfactory.core.kvin.KvinTuple;
@@ -38,9 +40,11 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.parquet.Parquet;
+import org.apache.iceberg.types.Conversions;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.StructLikeWrapper;
 import org.apache.parquet.column.ParquetProperties;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +58,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -95,6 +100,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private static final int DEFAULT_COMPACTION_MIN_FILES = 32;
 	private static final long DEFAULT_COMPACTION_TARGET_SIZE = 128L * 1024 * 1024;
 	private static final int COMPACTION_MAX_INPUT_FILES = 128;
+	private static final int FOOTER_CACHE_SIZE = 4096;
+	// Column statistics used to order and lazily open data files during fetches.
+	private static final List<String> FETCH_STATS_COLUMNS = List.of("itemId", "propertyId", "time");
 
 	private static final Schema SCHEMA = new Schema(Types.NestedField.required(1, "itemId", Types.LongType.get()), Types.NestedField.required(2, "contextId", Types.LongType.get()), Types.NestedField.required(3, "propertyId", Types.LongType.get()), Types.NestedField.required(4, "time", Types.LongType.get()), Types.NestedField.required(5, "seqNr", Types.IntegerType.get()), Types.NestedField.required(6, "first", Types.BooleanType.get()), Types.NestedField.optional(7, "valueInt", Types.IntegerType.get()), Types.NestedField.optional(8, "valueLong", Types.LongType.get()), Types.NestedField.optional(9, "valueFloat", Types.FloatType.get()), Types.NestedField.optional(10, "valueDouble", Types.DoubleType.get()), Types.NestedField.optional(11, "valueString", Types.StringType.get()), Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()), Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
 
@@ -106,6 +114,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 	private final Path root;
 	private final Table table;
+	// Data files are immutable, so cached footers never become stale.
+	private final Cache<String, ParquetMetadata> footers = CacheBuilder.newBuilder().maximumSize(FOOTER_CACHE_SIZE).build();
 
 	public IcebergRecordStore(String archiveLocation) {
 		this(archiveLocation, null);
@@ -345,6 +355,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 			// but replaced inputs and newly added row-level deletes must conflict.
 			table.newRewrite().validateFromSnapshot(snapshotId)
 					.rewriteFiles(inputs, replacements).commit();
+			invalidateFooters(inputs);
 		} catch (CommitStateUnknownException e) {
 			log.error("Iceberg compaction commit state is unknown; appended tuples remain committed and output files are retained", e);
 			throw e;
@@ -552,8 +563,35 @@ public class IcebergRecordStore implements KvinRecordStore {
 		return Long.parseLong(key.toString().substring("urn:kvin:id:".length()));
 	}
 
-	abstract static class RecordIterator extends NiceIterator<KvinRecord> {
-		abstract Set<Long> headProperties();
+	/**
+	 * A planned data file with the smallest key, in {@link #ROW_ORDER}, that any
+	 * matching row in it can have.
+	 */
+	private record PlannedFile(FileScanTask task, KvinRow bound) {
+	}
+
+	/**
+	 * Derives a lower bound for the matching rows of a file from its column
+	 * statistics, clamped by the query. The bound is valid lexicographically:
+	 * every matching row has itemId and propertyId at least as large, the
+	 * requested context, and a time no later than the bound's.
+	 */
+	private static KvinRow lowerBound(DataFile file, Set<Long> itemIds, long contextId, Set<Long> propertyIds, Long end) {
+		long item = Math.max(bound(file.lowerBounds(), 1, Long.MIN_VALUE), Collections.min(itemIds));
+		long property = bound(file.lowerBounds(), 3, Long.MIN_VALUE);
+		if (!propertyIds.isEmpty()) {
+			property = Math.max(property, Collections.min(propertyIds));
+		}
+		long time = bound(file.upperBounds(), 4, Long.MAX_VALUE);
+		if (end != null) {
+			time = Math.min(time, end);
+		}
+		return new KvinRow(item, contextId, property, time, Integer.MAX_VALUE, null);
+	}
+
+	private static long bound(Map<Integer, ByteBuffer> bounds, int fieldId, long fallback) {
+		ByteBuffer value = bounds == null ? null : bounds.get(fieldId);
+		return value == null ? fallback : Conversions.<Long>fromByteBuffer(Types.LongType.get(), value);
 	}
 
 	private synchronized IExtendedIterator<KvinRecord> fetchRows(List<Long> items, List<Long> properties, Long context, Long end, Long begin, long limit) {
@@ -581,62 +619,70 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 		table.refresh();
 
-		PriorityQueue<RowCursor> cursors = new PriorityQueue<>(Comparator.comparing(cursor -> cursor.row, ROW_ORDER));
-
-		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter).planFiles()) {
+		List<PlannedFile> files = new ArrayList<>();
+		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter)
+				.includeColumnStats(FETCH_STATS_COLUMNS).planFiles()) {
 			for (FileScanTask task : tasks) {
 				if (!task.deletes().isEmpty()) {
 					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
 				}
-
-				RowCursor cursor = new RowCursor(table, task, filter, limit > 0);
-
-				try {
-					if (cursor.advance()) {
-						cursors.add(cursor);
-					} else {
-						cursor.close();
-					}
-				} catch (RuntimeException e) {
-					cursor.close();
-					throw e;
-				}
+				files.add(new PlannedFile(task, lowerBound(task.file(), itemIds, contextId, propertyIds, end)));
 			}
-		} catch (RuntimeException | IOException e) {
-			closeCursors(cursors);
-
-			if (e instanceof IOException ioException) {
-				throw new UncheckedIOException(ioException);
-			}
-
-			throw (RuntimeException) e;
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
 		}
+		// Files are opened lazily in bound order: a file is opened only once its bound
+		// is not after the merge head, so it cannot hold a smaller unread matching row.
+		files.sort(Comparator.comparing(PlannedFile::bound, ROW_ORDER));
 
+		PriorityQueue<RowCursor> cursors = new PriorityQueue<>(Comparator.comparing(cursor -> cursor.row, ROW_ORDER));
+		Expression readFilter = filter;
 		long requestedSeries = properties.isEmpty() ? 0 : (long) itemIds.size() * propertyIds.size();
 
-		return new RecordIterator() {
+		return new NiceIterator<>() {
 			KvinRow previous;
 			long seriesCount;
 			long completedSeries;
 			long seriesItemId;
 			long seriesPropertyId;
 			boolean seriesStarted;
+			// Last series whose limit was reached; applied to files opened later.
+			boolean skipping;
+			long skipItemId;
+			long skipPropertyId;
+			int nextFile;
+			// Number of opened files, for tests.
+			int opened;
 			// Advance only when another tuple is requested, so a satisfied limit reads no extra row.
 			RowCursor pending;
 			KvinRecord next;
 			boolean closed;
 
-			@Override
-			Set<Long> headProperties() {
-				Set<Long> result = new HashSet<>();
-				for (RowCursor cursor : cursors) {
-					KvinRow head = cursor.row;
-					if (itemIds.contains(head.itemId()) && head.contextId() == contextId
-							&& (begin == null || head.time() >= begin) && (end == null || head.time() <= end)) {
-						result.add(head.propertyId());
+			private void openFiles() {
+				while (nextFile < files.size() && (cursors.isEmpty()
+						|| ROW_ORDER.compare(files.get(nextFile).bound(), cursors.peek().row) <= 0)) {
+					RowCursor cursor = new RowCursor(files.get(nextFile++).task(), readFilter, footers);
+					opened++;
+					try {
+						if (skipping) {
+							cursor.skipThrough(skipItemId, contextId, skipPropertyId);
+						}
+						if (cursor.advance()) {
+							cursors.add(cursor);
+						} else {
+							cursor.close();
+						}
+					} catch (RuntimeException e) {
+						try {
+							cursor.close();
+						} catch (RuntimeException closeFailure) {
+							if (e != closeFailure) {
+								e.addSuppressed(closeFailure);
+							}
+						}
+						throw e;
 					}
 				}
-				return result;
 			}
 
 			@Override
@@ -649,7 +695,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 				}
 
 				try {
-					while (pending != null || !cursors.isEmpty()) {
+					while (pending != null || !cursors.isEmpty() || nextFile < files.size()) {
 						if (pending != null) {
 							if (pending.advance()) {
 								cursors.add(pending);
@@ -658,6 +704,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 							}
 							pending = null;
 						}
+						openFiles();
 						if (cursors.isEmpty()) {
 							break;
 						}
@@ -689,6 +736,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 						previous = row;
 						if (limit > 0 && ++seriesCount == limit) {
 							completedSeries++;
+							skipping = true;
+							skipItemId = itemId;
+							skipPropertyId = propertyId;
 							pending.skipThrough(itemId, contextId, propertyId);
 							for (RowCursor cursor : cursors) {
 								cursor.skipThrough(itemId, contextId, propertyId);
@@ -866,6 +916,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 				table.refresh();
 
 				table.newRewrite().rewriteFiles(deleteFiles, addFiles).commit();
+				invalidateFooters(deleteFiles);
 
 				return;
 			} catch (CommitFailedException e) {
@@ -876,6 +927,10 @@ public class IcebergRecordStore implements KvinRecordStore {
 				log.warn("Iceberg rewrite conflicted; retrying ({}/{})", attempt, MAX_COMMIT_RETRIES);
 			}
 		}
+	}
+
+	private void invalidateFooters(Set<DataFile> replaced) {
+		replaced.forEach(file -> footers.invalidate(file.location()));
 	}
 
 	private static boolean matchesDelete(KvinRow row, long itemId, Long propertyId, long contextId, long begin, long end) {
@@ -919,14 +974,13 @@ public class IcebergRecordStore implements KvinRecordStore {
 		final CloseableIterator<org.apache.iceberg.data.Record> iterator;
 		KvinRow row;
 
-		RowCursor(Table table, FileScanTask task, Expression filter, boolean limited) {
+		RowCursor(FileScanTask task, Expression filter, Cache<String, ParquetMetadata> footers) {
 			if (!task.deletes().isEmpty()) {
 				throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
 			}
 
 			try {
-				this.rows = limited ? new SeriesSkippingReader(SCHEMA, task, filter)
-						: Parquet.read(table.io().newInputFile(task.file().location())).split(task.start(), task.length()).project(SCHEMA).filter(filter).createReaderFunc(schema -> GenericParquetReaders.buildReader(SCHEMA, schema)).build();
+				this.rows = new SeriesSkippingReader(SCHEMA, task, filter, footers);
 			} catch (IOException e) {
 				throw new UncheckedIOException("Unable to open Iceberg series reader", e);
 			}

@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.kvin.iceberg;
 
+import com.google.common.cache.Cache;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.Schema;
@@ -12,12 +13,16 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.parquet.ParquetMetricsRowGroupFilter;
 import org.apache.parquet.HadoopReadOptions;
+import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnReader;
 import org.apache.parquet.column.impl.ColumnReadStoreImpl;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.example.data.simple.convert.GroupRecordConverter;
 import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
+import org.apache.parquet.io.SeekableInputStream;
 import org.apache.parquet.schema.MessageType;
 
 import java.io.IOException;
@@ -28,14 +33,24 @@ import java.util.NoSuchElementException;
 /**
  * Flat KVIN reader that skips value decoding for completed series and prunes
  * subsequent row groups using the advancing series boundary.
+ *
+ * <p>File footers are taken from a shared cache keyed by file location (data
+ * files are immutable). Because a reader opened with a complete footer sees
+ * all row groups, the task's split range is applied here, using the same
+ * midpoint rule as Parquet's range metadata filter.</p>
  */
 final class SeriesSkippingReader implements CloseableIterable<Record>, CloseableIterator<Record> {
+	// Creating a Configuration per reader re-parses Hadoop's default resources.
+	private static final Configuration CONF = new Configuration();
+
 	private final Schema schema;
 	private final Expression filter;
 	private final Evaluator evaluator;
 	private final ParquetFileReader reader;
 	private final MessageType fileSchema;
 	private final GenericRecord keys;
+	private final long rangeStart;
+	private final long rangeEnd;
 	private ParquetMetricsRowGroupFilter groupFilter;
 	private PageReadStore pages;
 	private ColumnReader[] columns;
@@ -49,17 +64,39 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 	private boolean closed;
 	private Record next;
 
-	SeriesSkippingReader(Schema schema, FileScanTask task, Expression filter) throws IOException {
+	SeriesSkippingReader(Schema schema, FileScanTask task, Expression filter,
+			Cache<String, ParquetMetadata> footers) throws IOException {
 		this.schema = schema;
 		this.filter = filter;
 		this.evaluator = new Evaluator(schema.asStruct(), filter);
 		this.keys = GenericRecord.create(schema);
 		this.groupFilter = new ParquetMetricsRowGroupFilter(schema, filter);
-		var path = new org.apache.hadoop.fs.Path(task.file().location());
-		var conf = new Configuration();
-		this.reader = ParquetFileReader.open(HadoopInputFile.fromPath(path, conf),
-				HadoopReadOptions.builder(conf, path).withRange(task.start(), task.start() + task.length()).build());
+		this.rangeStart = task.start();
+		this.rangeEnd = task.start() + task.length();
+		String location = task.file().location();
+		var path = new org.apache.hadoop.fs.Path(location);
+		HadoopInputFile inputFile = HadoopInputFile.fromPath(path, CONF);
+		ParquetReadOptions options = HadoopReadOptions.builder(CONF, path).build();
+		ParquetMetadata footer = footers.getIfPresent(location);
+		if (footer == null) {
+			try (ParquetFileReader footerReader = ParquetFileReader.open(inputFile, options)) {
+				footer = footerReader.getFooter();
+			}
+			footers.put(location, footer);
+		}
+		SeekableInputStream stream = inputFile.newStream();
+		try {
+			this.reader = ParquetFileReader.open(inputFile, footer, options, stream);
+		} catch (IOException | RuntimeException e) {
+			stream.close();
+			throw e;
+		}
 		this.fileSchema = reader.getFileMetaData().getSchema();
+	}
+
+	private boolean inRange(BlockMetaData group) {
+		long midpoint = group.getStartingPos() + group.getCompressedSize() / 2;
+		return midpoint >= rangeStart && midpoint < rangeEnd;
 	}
 
 	void skipThrough(long item, long context, long property) {
@@ -91,7 +128,7 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 		}
 		while (groupIndex < reader.getRowGroups().size()) {
 			var group = reader.getRowGroups().get(groupIndex++);
-			if (!groupFilter.shouldRead(fileSchema, group)) {
+			if (!inRange(group) || !groupFilter.shouldRead(fileSchema, group)) {
 				reader.skipNextRowGroup();
 				continue;
 			}
