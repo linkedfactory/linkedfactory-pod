@@ -21,7 +21,8 @@ public final class LuceneFtsIndexUpdateStrategyFactory implements FtsIndexUpdate
 			throw new SailConfigException("The lucene FTS backend requires fts:indexDir");
 		}
 		try {
-			return new LuceneFtsSearchService(LuceneFtsIndexRegistry.getOrCreate(config.getIndexDir()));
+			String indexDir = config.getIndexDir();
+			return new LuceneFtsSearchService(LuceneFtsIndexRegistry.getOrCreate(indexDir), indexDir);
 		} catch (Exception e) {
 			throw new SailConfigException(
 					"Unable to initialize embedded Lucene FTS index at " + config.getIndexDir(), e);

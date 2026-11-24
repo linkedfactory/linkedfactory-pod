@@ -16,9 +16,15 @@ import java.util.Set;
 
 public class LuceneFtsSearchService implements FtsSearchService {
 	private final LuceneFtsIndex index;
+	private final String registryKey;
 
 	public LuceneFtsSearchService(LuceneFtsIndex index) {
+		this(index, null);
+	}
+
+	public LuceneFtsSearchService(LuceneFtsIndex index, String registryKey) {
 		this.index = index;
+		this.registryKey = registryKey;
 	}
 
 	@Override
@@ -56,6 +62,13 @@ public class LuceneFtsSearchService implements FtsSearchService {
 	@Override
 	public void commit() throws IOException {
 		index.commit();
+	}
+
+	@Override
+	public void close() throws IOException {
+		if (registryKey != null) {
+			LuceneFtsIndexRegistry.release(registryKey);
+		}
 	}
 
 	private static void append(Map<String, List<LuceneFtsIndex.FieldValue>> target, Statement statement) {

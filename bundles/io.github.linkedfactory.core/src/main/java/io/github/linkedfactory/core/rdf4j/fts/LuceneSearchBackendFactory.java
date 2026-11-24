@@ -10,7 +10,8 @@ public class LuceneSearchBackendFactory implements FtsSearchBackendFactory {
 
 	@Override
 	public FtsSearchBackend create(FtsFederatedServiceConfig config) throws Exception {
-		LuceneFtsIndex index = LuceneFtsIndexRegistry.getOrCreate(config.getEndpoint());
-		return new LuceneFtsSearchBackend(index);
+		String indexDir = config.getEndpoint();
+		LuceneFtsIndex index = LuceneFtsIndexRegistry.getOrCreate(indexDir);
+		return new LuceneFtsSearchBackend(index, indexDir);
 	}
 }
