@@ -20,6 +20,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.util.concurrent.Striped;
 import io.github.linkedfactory.core.kvin.Data;
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
@@ -727,19 +728,19 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 		return null;
 	}
 
-	private static void await(Future<?> future) {
+	static void await(Future<?> future) {
 		try {
 			future.get();
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
-			throw new RuntimeException(e);
+			throw new KvinException("Interrupted while writing IDs", e);
 		} catch (ExecutionException e) {
 			if (e.getCause() instanceof RuntimeException re) {
 				throw re;
 			} else if (e.getCause() instanceof Error err) {
 				throw err;
 			}
-			throw new RuntimeException(e.getCause());
+			throw new KvinException("Writing IDs failed", e.getCause());
 		}
 	}
 
