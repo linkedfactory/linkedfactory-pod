@@ -173,7 +173,8 @@ public class IcebergRecordStoreTest {
 			}
 			verify(records, never()).close();
 		}
-		IdStore genericIds = mock(IdStore.class);
+		// real default batch methods, so lookups go through the stubbed single-ID method
+		IdStore genericIds = mock(IdStore.class, CALLS_REAL_METHODS);
 		when(genericIds.getId(any(), any(), eq(true))).thenReturn(1L);
 		KvinRecordStore genericRecords = mock(KvinRecordStore.class);
 		doAnswer(call -> {
