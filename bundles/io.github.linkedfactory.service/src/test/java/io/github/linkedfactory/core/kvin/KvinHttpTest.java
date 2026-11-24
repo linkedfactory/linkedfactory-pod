@@ -329,6 +329,43 @@ public class KvinHttpTest extends Mockito {
 	}
 
 	@Test
+	public void shouldThrowOnPutError() throws Exception {
+		CloseableHttpResponse response = mockedResponse("{\"code\":\"FORBIDDEN\"}", 403);
+		doReturn(response).when(httpClient).execute(any());
+
+		URI item = URIs.createURI("http://example.org/item1");
+		KvinException e = Assert.assertThrows(KvinException.class,
+				() -> kvinHttp.put(new KvinTuple(item, URIs.createURI("http://example.org/p"), null, 1, 1)));
+		Assert.assertTrue(e.getMessage().contains("HTTP 403"));
+		verify(response).close();
+	}
+
+	@Test
+	public void shouldCloseResponses() throws Exception {
+		URI item = URIs.createURI("http://example.org/item1");
+
+		CloseableHttpResponse response = mockedResponse("", 200);
+		doReturn(response).when(httpClient).execute(any());
+		kvinHttp.put(new KvinTuple(item, URIs.createURI("http://example.org/p"), null, 1, 1));
+		verify(response).close();
+
+		response = mockedResponse("[{\"@id\": \"http://example.org/p\"}]", 200);
+		doReturn(response).when(httpClient).execute(any());
+		Assert.assertEquals(List.of(URIs.createURI("http://example.org/p")), kvinHttp.properties(item, null).toList());
+		verify(response).close();
+
+		response = mockedResponse("[{\"@id\": \"http://example.org/item1/a\"}]", 200);
+		doReturn(response).when(httpClient).execute(any());
+		Assert.assertEquals(List.of(URIs.createURI("http://example.org/item1/a")), kvinHttp.descendants(item, null).toList());
+		verify(response).close();
+
+		response = mockedResponse("", 500);
+		doReturn(response).when(httpClient).execute(any());
+		Assert.assertThrows(KvinException.class, () -> kvinHttp.properties(item, null));
+		verify(response).close();
+	}
+
+	@Test
 	public void shouldReturnEmptyOn404Properties() throws Exception {
 		doReturn(mockedResponse("", 404)).when(httpClient).execute(any());
 
