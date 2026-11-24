@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.io.ByteStreams;
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
@@ -37,7 +38,6 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -62,31 +62,19 @@ public class KvinHttp implements Kvin {
 
     @Override
     public boolean addListener(KvinListener listener) {
-        try {
-            listeners.add(listener);
-            return true;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        listeners.add(listener);
+        return true;
     }
 
     @Override
     public boolean removeListener(KvinListener listener) {
-        try {
-            listeners.remove(listener);
-            return true;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        listeners.remove(listener);
+        return true;
     }
 
     @Override
     public void put(KvinTuple... tuples) {
-        try {
-            this.put(Arrays.asList(tuples));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        this.put(Arrays.asList(tuples));
     }
 
     @Override
@@ -127,7 +115,7 @@ public class KvinHttp implements Kvin {
             CloseableHttpResponse response = httpClient.execute(httpPost);
             HttpEntity entity = response.getEntity();
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new KvinException(e);
         }
     }
 
@@ -211,17 +199,17 @@ public class KvinHttp implements Kvin {
                     return NiceIterator.emptyIterator();
                 }
                 String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
-                throw new UncheckedIOException(new IOException("HTTP " + status + " while fetching values: " + body));
+                throw new KvinException("HTTP " + status + " while fetching values: " + body);
             }
             // converting json to kvin tuples
             // TODO directly read from stream with pooled HTTP client
             content = entity.getContent();
             JsonFormatParser jsonParser = new JsonFormatParser(new ByteArrayInputStream(ByteStreams.toByteArray(content)));
-            return jsonParser.parse();
-        } catch (UncheckedIOException e) {
+            return parseErrorsAsKvinException(jsonParser.parse());
+        } catch (KvinException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new KvinException(e);
         } finally {
             if (content != null) {
                 try {
@@ -238,6 +226,40 @@ public class KvinHttp implements Kvin {
                 }
             }
         }
+    }
+
+    /**
+     * Reports errors while parsing a response lazily as {@link KvinException}.
+     */
+    private static <T> IExtendedIterator<T> parseErrorsAsKvinException(IExtendedIterator<T> base) {
+        return new NiceIterator<>() {
+            @Override
+            public boolean hasNext() {
+                try {
+                    return base.hasNext();
+                } catch (KvinException e) {
+                    throw e;
+                } catch (RuntimeException e) {
+                    throw new KvinException("Invalid response from remote endpoint", e);
+                }
+            }
+
+            @Override
+            public T next() {
+                try {
+                    return base.next();
+                } catch (KvinException | NoSuchElementException e) {
+                    throw e;
+                } catch (RuntimeException e) {
+                    throw new KvinException("Invalid response from remote endpoint", e);
+                }
+            }
+
+            @Override
+            public void close() {
+                base.close();
+            }
+        };
     }
 
     @Override
@@ -278,7 +300,7 @@ public class KvinHttp implements Kvin {
                     return NiceIterator.emptyIterator();
                 }
                 String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
-                throw new UncheckedIOException(new IOException("HTTP " + status + " while fetching descendants: " + body));
+                throw new KvinException("HTTP " + status + " while fetching descendants: " + body);
             }
             // converting json to URI
             return new NiceIterator<>() {
@@ -289,7 +311,7 @@ public class KvinHttp implements Kvin {
                     try {
                         return isLoopingArray();
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        throw new KvinException(e);
                     }
                 }
 
@@ -305,7 +327,7 @@ public class KvinHttp implements Kvin {
                         }
                         jsonParser.nextToken();
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        throw new KvinException(e);
                     }
                     return descendant;
                 }
@@ -327,10 +349,10 @@ public class KvinHttp implements Kvin {
                     }
                 }
             };
-        } catch (UncheckedIOException e) {
+        } catch (KvinException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new KvinException(e);
         }
     }
 
@@ -352,7 +374,7 @@ public class KvinHttp implements Kvin {
                     return NiceIterator.emptyIterator();
                 }
                 String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
-                throw new UncheckedIOException(new IOException("HTTP " + status + " while fetching properties: " + body));
+                throw new KvinException("HTTP " + status + " while fetching properties: " + body);
             }
             // converting json to URI
             return new NiceIterator<>() {
@@ -363,7 +385,7 @@ public class KvinHttp implements Kvin {
                     try {
                         return isLoopingArray();
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        throw new KvinException(e);
                     }
                 }
 
@@ -374,7 +396,7 @@ public class KvinHttp implements Kvin {
                         while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
                             // check current token for null and throw exception
                             if (jsonParser.getCurrentToken() == null) {
-                                throw new RuntimeException("JSON parsing error: current token is null");
+                                throw new KvinException("JSON parsing error: current token is null");
                             }
                             if (jsonParser.getCurrentToken() == JsonToken.VALUE_STRING) {
                                 property = URIs.createURI(jsonParser.getValueAsString());
@@ -383,7 +405,7 @@ public class KvinHttp implements Kvin {
                         }
                         jsonParser.nextToken();
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        throw new KvinException(e);
                     }
                     return property;
                 }
@@ -405,10 +427,10 @@ public class KvinHttp implements Kvin {
                     }
                 }
             };
-        } catch (UncheckedIOException e) {
+        } catch (KvinException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new KvinException(e);
         }
     }
 
@@ -417,7 +439,7 @@ public class KvinHttp implements Kvin {
         try {
             this.httpClient.close();
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new KvinException(e);
         }
     }
 

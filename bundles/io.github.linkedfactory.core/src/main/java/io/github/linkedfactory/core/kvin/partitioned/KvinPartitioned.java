@@ -1,6 +1,7 @@
 package io.github.linkedfactory.core.kvin.partitioned;
 
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
@@ -64,7 +65,8 @@ public class KvinPartitioned implements Kvin {
 		try {
 			return lockManager.getWriteLock();
 		} catch (InterruptedException e) {
-			throw new RuntimeException(e);
+			Thread.currentThread().interrupt();
+			throw new KvinException("Interrupted while waiting for lock", e);
 		}
 	}
 
@@ -72,7 +74,8 @@ public class KvinPartitioned implements Kvin {
 		try {
 			return lockManager.getReadLock();
 		} catch (InterruptedException e) {
-			throw new RuntimeException(e);
+			Thread.currentThread().interrupt();
+			throw new KvinException("Interrupted while waiting for lock", e);
 		}
 	}
 
@@ -126,22 +129,14 @@ public class KvinPartitioned implements Kvin {
 
 	@Override
 	public boolean addListener(KvinListener listener) {
-		try {
-			listeners.add(listener);
-			return hotStore.addListener(listener);
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
+		listeners.add(listener);
+		return hotStore.addListener(listener);
 	}
 
 	@Override
 	public boolean removeListener(KvinListener listener) {
-		try {
-			listeners.remove(listener);
-			return hotStore.removeListener(listener);
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
+		listeners.remove(listener);
+		return hotStore.removeListener(listener);
 	}
 
 	@Override
