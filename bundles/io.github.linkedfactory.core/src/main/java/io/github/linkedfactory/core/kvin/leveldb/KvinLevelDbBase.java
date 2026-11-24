@@ -15,6 +15,7 @@
  */
 package io.github.linkedfactory.core.kvin.leveldb;
 
+import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.util.Varint;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
@@ -25,7 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
@@ -127,7 +127,7 @@ public abstract class KvinLevelDbBase {
 		try {
 			closeable.close();
 		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			throw new KvinException(e);
 		}
 	}
 

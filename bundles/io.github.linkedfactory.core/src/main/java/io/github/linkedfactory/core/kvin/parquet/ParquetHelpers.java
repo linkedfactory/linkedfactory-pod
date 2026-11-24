@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
+import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinParquetWriter;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
@@ -35,7 +36,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.*;
@@ -179,7 +179,7 @@ public class ParquetHelpers {
 				}
 			};
 		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			throw new KvinException(e);
 		}
 	}
 

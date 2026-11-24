@@ -27,6 +27,10 @@ import net.enilink.komma.core.URIs;
 
 /**
  * A key-value store for time series data.
+ * <p>
+ * If the underlying storage or a remote endpoint fails, a store throws a
+ * {@link KvinException}. This also applies to the iterators that a store
+ * returns, as they may read their results lazily.
  */
 public interface Kvin extends Closeable {
 	/**

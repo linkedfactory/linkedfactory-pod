@@ -43,7 +43,6 @@ import org.iq80.leveldb.WriteOptions;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.lang.reflect.Array;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -102,7 +101,7 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 			ids = factory.open(new File(path, "ids"), createOptions(false));
 			values = factory.open(new File(path, "values"), createOptions(true));
 		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			throw new KvinException(e);
 		}
 		nextIds = Arrays.stream(readNextIds(List.of(EntryType.SubjectToId, EntryType.PropertyToId,
 				EntryType.ContextToId, EntryType.ResourceToId))).mapToObj(AtomicLong::new).toArray(AtomicLong[]::new);
@@ -852,7 +851,7 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 				try {
 					return Values.decode(b);
 				} catch (IOException e) {
-					throw new UncheckedIOException(e);
+					throw new KvinException(e);
 				}
 		}
 	}
@@ -967,7 +966,7 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 		}
 		executor.shutdown();
 		if (error != null) {
-			throw new UncheckedIOException(error);
+			throw new KvinException(error);
 		}
 	}
 }

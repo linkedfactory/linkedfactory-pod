@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
+import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.util.Pair;
@@ -14,7 +15,6 @@ import org.eclipse.rdf4j.common.concurrent.locks.Lock;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
@@ -54,7 +54,7 @@ public class Compactor {
 				try {
 					compactDataFiles(weekFolder);
 				} catch (IOException e) {
-					throw new RuntimeException(e);
+					throw new KvinException(e);
 				}
 			}
 		} finally {
@@ -87,7 +87,7 @@ public class Compactor {
 							Files.createDirectories(dest.getParent());
 							Files.move(p, dest);
 						} catch (IOException e) {
-							throw new UncheckedIOException(e);
+							throw new KvinException(e);
 						}
 					});
 			// completely delete compaction folder

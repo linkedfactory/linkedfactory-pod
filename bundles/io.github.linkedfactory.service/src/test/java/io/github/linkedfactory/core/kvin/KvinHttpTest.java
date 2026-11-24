@@ -50,7 +50,6 @@ import scala.collection.immutable.Nil$;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -284,12 +283,48 @@ public class KvinHttpTest extends Mockito {
 	public void shouldThrowOnNon404FetchError() throws Exception {
 		doReturn(mockedResponse("{\"code\":\"INTERNAL\"}", 500)).when(httpClient).execute(any());
 
+		KvinException e = Assert.assertThrows(KvinException.class,
+				() -> kvinHttp.fetch(URIs.createURI("http://example.org/item1"), null, null, 10).toList());
+		Assert.assertTrue(e.getMessage().contains("HTTP 500"));
+	}
+
+	@Test
+	public void shouldThrowOnNon404PropertiesAndDescendantsError() throws Exception {
+		URI item = URIs.createURI("http://example.org/item1");
+		doReturn(mockedResponse("", 500)).when(httpClient).execute(any());
+		KvinException e = Assert.assertThrows(KvinException.class, () -> kvinHttp.properties(item, null));
+		Assert.assertTrue(e.getMessage().contains("HTTP 500"));
+
+		doReturn(mockedResponse("", 503)).when(httpClient).execute(any());
+		e = Assert.assertThrows(KvinException.class, () -> kvinHttp.descendants(item, null));
+		Assert.assertTrue(e.getMessage().contains("HTTP 503"));
+	}
+
+	@Test
+	public void shouldThrowKvinExceptionOnConnectionError() throws Exception {
+		IOException cause = new IOException("connection refused");
+		doThrow(cause).when(httpClient).execute(any());
+
+		URI item = URIs.createURI("http://example.org/item1");
+		KvinException e = Assert.assertThrows(KvinException.class,
+				() -> kvinHttp.fetch(item, null, null, 10));
+		Assert.assertSame(cause, e.getCause());
+		Assert.assertThrows(KvinException.class, () -> kvinHttp.properties(item, null));
+		Assert.assertThrows(KvinException.class, () -> kvinHttp.descendants(item, null));
+		Assert.assertThrows(KvinException.class,
+				() -> kvinHttp.put(new KvinTuple(item, URIs.createURI("http://example.org/p"), null, 1, 1)));
+	}
+
+	@Test
+	public void shouldThrowKvinExceptionOnInvalidFetchResponse() throws Exception {
+		doReturn(mockedResponse("{\"http://example.org/item1\": {\"http://example.org/p\": [{\"value\": ",
+				200)).when(httpClient).execute(any());
+
+		var values = kvinHttp.fetch(URIs.createURI("http://example.org/item1"), null, null, 10);
 		try {
-			kvinHttp.fetch(URIs.createURI("http://example.org/item1"), null, null, 10).toList();
-			Assert.fail("Expected UncheckedIOException for non-404 HTTP error");
-		} catch (UncheckedIOException e) {
-			String message = e.getMessage() != null ? e.getMessage() : String.valueOf(e.getCause());
-			Assert.assertTrue(message.contains("500") || (e.getCause() != null && String.valueOf(e.getCause().getMessage()).contains("500")));
+			Assert.assertThrows(KvinException.class, values::toList);
+		} finally {
+			values.close();
 		}
 	}
 
