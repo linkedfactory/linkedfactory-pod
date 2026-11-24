@@ -52,6 +52,20 @@ public class KvinLevelDbBaseTest {
 	}
 
 	@Test
+	public void testZeroTtl() {
+		for (String unit : new String[]{"ns", "us", "ms", "s", "m", "d"}) {
+			assertEquals(OptionalLong.empty(), ttl("http://example.org/item?ttl=0" + unit));
+		}
+		assertEquals(OptionalLong.empty(), ttl("http://example.org/item?ttl=00s"));
+		assertEquals(OptionalLong.empty(), ttl("http://example.org/item?a=b&ttl=0s"));
+		// less than one millisecond
+		assertEquals(OptionalLong.empty(), ttl("http://example.org/item?ttl=999999ns"));
+		assertEquals(OptionalLong.empty(), ttl("http://example.org/item?ttl=999us"));
+		assertEquals(OptionalLong.of(1L), ttl("http://example.org/item?ttl=1000us"));
+		assertEquals(OptionalLong.of(1L), ttl("http://example.org/item?ttl=1ms"));
+	}
+
+	@Test
 	public void testTtlOverflow() {
 		long max = Long.MAX_VALUE;
 		assertEquals(OptionalLong.of(max), ttl("http://example.org/item?ttl=" + max + "ms"));
