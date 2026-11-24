@@ -116,6 +116,7 @@ public class ParquetHelpers {
 				KvinRecord next;
 				PageReadStore pages;
 				long readRows;
+				boolean closed;
 
 				@Override
 				public boolean hasNext() {
@@ -143,14 +144,20 @@ public class ParquetHelpers {
 										}
 									}
 								} else {
-									r.close();
+									close();
 									break;
 								}
 							}
 						} catch (Exception e) {
-							log.error("Error while reading file {}. Data elements may be incomplete.", path, e);
-							close();
-							return false;
+							try {
+								close();
+							} catch (RuntimeException closeError) {
+								e.addSuppressed(closeError);
+							}
+							if (e instanceof KvinException kvinException) {
+								throw kvinException;
+							}
+							throw new KvinException("Error while reading file " + path, e);
 						}
 					}
 					return next != null;
@@ -168,8 +175,13 @@ public class ParquetHelpers {
 
 				@Override
 				public void close() {
+					if (closed) {
+						return;
+					}
+					closed = true;
 					if (pages != null) {
 						pages.close();
+						pages = null;
 					}
 					try {
 						r.close();

@@ -112,8 +112,16 @@ public class KvinHttp implements Kvin {
                     ContentType.APPLICATION_JSON
             );
             httpPost.setEntity(requestPayload);
-            CloseableHttpResponse response = httpClient.execute(httpPost);
-            HttpEntity entity = response.getEntity();
+            try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                HttpEntity entity = response.getEntity();
+                String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
+                int status = response.getStatusLine().getStatusCode();
+                if (status < 200 || status >= 300) {
+                    throw new KvinException("HTTP " + status + " while storing values: " + body);
+                }
+            }
+        } catch (KvinException e) {
+            throw e;
         } catch (Exception e) {
             throw new KvinException(e);
         }
@@ -292,63 +300,64 @@ public class KvinHttp implements Kvin {
             java.net.URI getRequestUri = uriBuilder.build();
             // sending get request to the endpoint
             HttpGet httpGet = createHttpGet(getRequestUri.toString());
-            HttpResponse response = this.httpClient.execute(httpGet);
-            HttpEntity entity = response.getEntity();
-            int status = response.getStatusLine().getStatusCode();
-            if (status != 200) {
-                if (status == 404) {
-                    return NiceIterator.emptyIterator();
-                }
-                String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
-                throw new KvinException("HTTP " + status + " while fetching descendants: " + body);
-            }
-            // converting json to URI
-            return new NiceIterator<>() {
-                JsonParser jsonParser = jsonFactory.createParser(new ByteArrayInputStream(ByteStreams.toByteArray(entity.getContent())));
-
-                @Override
-                public boolean hasNext() {
-                    try {
-                        return isLoopingArray();
-                    } catch (IOException e) {
-                        throw new KvinException(e);
+            try (CloseableHttpResponse response = this.httpClient.execute(httpGet)) {
+                HttpEntity entity = response.getEntity();
+                int status = response.getStatusLine().getStatusCode();
+                if (status != 200) {
+                    if (status == 404) {
+                        return NiceIterator.emptyIterator();
                     }
+                    String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
+                    throw new KvinException("HTTP " + status + " while fetching descendants: " + body);
                 }
+                // converting json to URI
+                return new NiceIterator<>() {
+                    JsonParser jsonParser = jsonFactory.createParser(new ByteArrayInputStream(ByteStreams.toByteArray(entity.getContent())));
 
-                @Override
-                public URI next() {
-                    URI descendant = null;
-                    try {
-                        while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
-                            if (jsonParser.getCurrentToken() == JsonToken.VALUE_STRING) {
-                                descendant = URIs.createURI(jsonParser.getValueAsString());
-                                break;
+                    @Override
+                    public boolean hasNext() {
+                        try {
+                            return isLoopingArray();
+                        } catch (IOException e) {
+                            throw new KvinException(e);
+                        }
+                    }
+
+                    @Override
+                    public URI next() {
+                        URI descendant = null;
+                        try {
+                            while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                                if (jsonParser.getCurrentToken() == JsonToken.VALUE_STRING) {
+                                    descendant = URIs.createURI(jsonParser.getValueAsString());
+                                    break;
+                                }
                             }
+                            jsonParser.nextToken();
+                        } catch (IOException e) {
+                            throw new KvinException(e);
                         }
-                        jsonParser.nextToken();
-                    } catch (IOException e) {
-                        throw new KvinException(e);
+                        return descendant;
                     }
-                    return descendant;
-                }
 
-                private boolean isLoopingArray() throws IOException {
-                    return jsonParser.nextToken() != JsonToken.END_ARRAY;
-                }
+                    private boolean isLoopingArray() throws IOException {
+                        return jsonParser.nextToken() != JsonToken.END_ARRAY;
+                    }
 
-                @Override
-                public void close() {
-                    try {
-                        if (jsonParser != null) {
-                            jsonParser.close();
-                            jsonParser = null;
+                    @Override
+                    public void close() {
+                        try {
+                            if (jsonParser != null) {
+                                jsonParser.close();
+                                jsonParser = null;
+                            }
+                        } catch (IOException e) {
+                            // ignore
+                            logger.error("Exception while closing JSON parser", e);
                         }
-                    } catch (IOException e) {
-                        // ignore
-                        logger.error("Exception while closing JSON parser", e);
                     }
-                }
-            };
+                };
+            }
         } catch (KvinException e) {
             throw e;
         } catch (Exception e) {
@@ -366,67 +375,68 @@ public class KvinHttp implements Kvin {
             java.net.URI getRequestUri = uriBuilder.build();
             // sending get request to the endpoint
             HttpGet httpGet = createHttpGet(getRequestUri.toString());
-            HttpResponse response = this.httpClient.execute(httpGet);
-            HttpEntity entity = response.getEntity();
-            int status = response.getStatusLine().getStatusCode();
-            if (status != 200) {
-                if (status == 404) {
-                    return NiceIterator.emptyIterator();
+            try (CloseableHttpResponse response = this.httpClient.execute(httpGet)) {
+                HttpEntity entity = response.getEntity();
+                int status = response.getStatusLine().getStatusCode();
+                if (status != 200) {
+                    if (status == 404) {
+                        return NiceIterator.emptyIterator();
+                    }
+                    String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
+                    throw new KvinException("HTTP " + status + " while fetching properties: " + body);
                 }
-                String body = entity != null ? EntityUtils.toString(entity, StandardCharsets.UTF_8) : "";
-                throw new KvinException("HTTP " + status + " while fetching properties: " + body);
+                // converting json to URI
+                return new NiceIterator<>() {
+                    JsonParser jsonParser = jsonFactory.createParser(new ByteArrayInputStream(ByteStreams.toByteArray(entity.getContent())));
+
+                    @Override
+                    public boolean hasNext() {
+                        try {
+                            return isLoopingArray();
+                        } catch (IOException e) {
+                            throw new KvinException(e);
+                        }
+                    }
+
+                    @Override
+                    public URI next() {
+                        URI property = null;
+                        try {
+                            while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                                // check current token for null and throw exception
+                                if (jsonParser.getCurrentToken() == null) {
+                                    throw new KvinException("JSON parsing error: current token is null");
+                                }
+                                if (jsonParser.getCurrentToken() == JsonToken.VALUE_STRING) {
+                                    property = URIs.createURI(jsonParser.getValueAsString());
+                                    break;
+                                }
+                            }
+                            jsonParser.nextToken();
+                        } catch (IOException e) {
+                            throw new KvinException(e);
+                        }
+                        return property;
+                    }
+
+                    private boolean isLoopingArray() throws IOException {
+                        return jsonParser.nextToken() != JsonToken.END_ARRAY;
+                    }
+
+                    @Override
+                    public void close() {
+                        try {
+                            if (jsonParser != null) {
+                                jsonParser.close();
+                                jsonParser = null;
+                            }
+                        } catch (IOException e) {
+                            // ignore
+                            logger.error("Exception while closing JSON parser", e);
+                        }
+                    }
+                };
             }
-            // converting json to URI
-            return new NiceIterator<>() {
-                JsonParser jsonParser = jsonFactory.createParser(new ByteArrayInputStream(ByteStreams.toByteArray(entity.getContent())));
-
-                @Override
-                public boolean hasNext() {
-                    try {
-                        return isLoopingArray();
-                    } catch (IOException e) {
-                        throw new KvinException(e);
-                    }
-                }
-
-                @Override
-                public URI next() {
-                    URI property = null;
-                    try {
-                        while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
-                            // check current token for null and throw exception
-                            if (jsonParser.getCurrentToken() == null) {
-                                throw new KvinException("JSON parsing error: current token is null");
-                            }
-                            if (jsonParser.getCurrentToken() == JsonToken.VALUE_STRING) {
-                                property = URIs.createURI(jsonParser.getValueAsString());
-                                break;
-                            }
-                        }
-                        jsonParser.nextToken();
-                    } catch (IOException e) {
-                        throw new KvinException(e);
-                    }
-                    return property;
-                }
-
-                private boolean isLoopingArray() throws IOException {
-                    return jsonParser.nextToken() != JsonToken.END_ARRAY;
-                }
-
-                @Override
-                public void close() {
-                    try {
-                        if (jsonParser != null) {
-                            jsonParser.close();
-                            jsonParser = null;
-                        }
-                    } catch (IOException e) {
-                        // ignore
-                        logger.error("Exception while closing JSON parser", e);
-                    }
-                }
-            };
         } catch (KvinException e) {
             throw e;
         } catch (Exception e) {

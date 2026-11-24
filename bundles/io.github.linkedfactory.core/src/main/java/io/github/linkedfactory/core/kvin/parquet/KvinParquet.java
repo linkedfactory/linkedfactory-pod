@@ -901,6 +901,7 @@ public class KvinParquet implements Kvin {
 			KvinRecord next;
 			PageReadStore pages;
 			long readRows;
+			boolean closed;
 
 			@Override
 			public boolean hasNext() {
@@ -928,16 +929,20 @@ public class KvinParquet implements Kvin {
 									}
 								}
 							} else {
-								r.close();
+								close();
 								break;
 							}
 						}
-					} catch (IOException e) {
-						throw new KvinException(e);
 					} catch (Exception e) {
-						log.error("Error while reading next element", e);
-						close();
-						return false;
+						try {
+							close();
+						} catch (RuntimeException closeError) {
+							e.addSuppressed(closeError);
+						}
+						if (e instanceof KvinException kvinException) {
+							throw kvinException;
+						}
+						throw new KvinException("Error while reading file " + fileInfo.path, e);
 					}
 				}
 				return next != null;
@@ -955,8 +960,13 @@ public class KvinParquet implements Kvin {
 
 			@Override
 			public void close() {
+				if (closed) {
+					return;
+				}
+				closed = true;
 				if (pages != null) {
 					pages.close();
+					pages = null;
 				}
 				try {
 					r.close();
