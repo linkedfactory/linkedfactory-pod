@@ -146,6 +146,8 @@ public abstract class KvinLevelDbBase {
 	 * Returns the time to live in milliseconds that is encoded in the query part
 	 * of the given URI, e.g. <code>?ttl=5s</code> or <code>?a=b&amp;ttl=2d</code>.
 	 *
+	 * A TTL of zero, also after conversion to milliseconds, is treated as no TTL.
+	 *
 	 * @param uri the URI
 	 * @return the time to live or an empty value if the URI has no TTL
 	 */
@@ -160,7 +162,7 @@ public abstract class KvinLevelDbBase {
 		}
 		try {
 			long d = Long.parseLong(matcher.group(1));
-			return OptionalLong.of(switch (matcher.group(2)) {
+			long ttl = switch (matcher.group(2)) {
 				case "ns" -> d / 1000000L;
 				case "us" -> d / 1000L;
 				case "ms" -> d;
@@ -168,7 +170,8 @@ public abstract class KvinLevelDbBase {
 				case "m" -> Math.multiplyExact(d, 60000L);
 				case "d" -> Math.multiplyExact(d, 86400000L);
 				default -> throw new IllegalStateException("Unknown time unit: " + matcher.group(2));
-			});
+			};
+			return ttl == 0 ? OptionalLong.empty() : OptionalLong.of(ttl);
 		} catch (ArithmeticException | NumberFormatException e) {
 			// the TTL does not fit into a long value of milliseconds
 			return OptionalLong.empty();
