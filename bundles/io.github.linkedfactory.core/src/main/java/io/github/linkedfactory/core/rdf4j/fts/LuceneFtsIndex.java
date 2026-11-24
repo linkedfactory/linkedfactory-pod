@@ -34,6 +34,8 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -46,6 +48,7 @@ import java.util.Set;
 import java.util.TreeSet;
 
 public class LuceneFtsIndex implements AutoCloseable {
+	private static final Logger logger = LoggerFactory.getLogger(LuceneFtsIndex.class);
 	public static final String SUBJECT_FIELD = "subject";
 	private static final String ENTRY_FIELD = "_entry";
 	private static final String ALL_TEXT_FIELD = "_all";
@@ -64,6 +67,11 @@ public class LuceneFtsIndex implements AutoCloseable {
 
 	public LuceneFtsIndex(Path indexDir) throws IOException {
 		this.directory = FSDirectory.open(indexDir);
+		if (!DirectoryReader.indexExists(directory)) {
+			logger.warn("Creating a new, empty Lucene FTS index at {}. If an index previously existed at this "
+					+ "location, its data is gone and nothing will be found by search until the affected models "
+					+ "are re-imported.", indexDir);
+		}
 		this.writer = new IndexWriter(directory, new IndexWriterConfig(analyzer));
 		writer.commit();
 		this.searcherManager = new SearcherManager(writer, null);
