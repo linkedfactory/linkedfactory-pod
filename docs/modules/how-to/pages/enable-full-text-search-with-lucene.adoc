@@ -1,0 +1,105 @@
+= Enable full-text search with the embedded Lucene index
+:description: Index RDF literals in an embedded Lucene index and search them from SPARQL with SERVICE <fts:>, without running a separate search server.
+
+This guide sets up full-text search with the `lucene` backend of `fts:FtsSail`: a local Lucene index embedded in Pod, with no separate search server to run or reach over HTTP.
+After setup, SPARQL queries can combine a keyword search in `SERVICE <fts:>` with ordinary graph patterns, the same way as with the `elastic` backend described in xref:how-to:enable-full-text-search.adoc[].
+
+The full-text search is new; the embedded Lucene backend in particular is experimental and its indexing behaviour may still change between versions.
+
+== Before you start
+
+* Write access to the platform configuration Pod starts with:
+** In the Docker image, `config.ttl` in the workspace volume.
+** In a local launch from `launch/equinox`, `configurations/default.ttl`.
++
+See xref:reference:configuration.adoc[] for how the configuration file is selected.
+* A writable directory on the host for the Lucene index files and a separate writable directory for the outbox (see below); neither needs to exist beforehand.
+
+Unlike the `elastic` backend, there is no search index to create up front: the embedded index is created in `fts:indexDir` the first time Pod starts with this configuration.
+
+== Add the search layer to the data repository
+
+Replace the definition of `<urn:enilink:data>` in the platform configuration with a repository whose SAIL chain contains `fts:FtsSail` between the KVIN SAIL and the RDF store:
+
+[source,turtle]
+----
+@prefix models: <http://enilink.net/vocab/komma/models#> .
+@prefix rep: <http://www.openrdf.org/config/repository#> .
+@prefix sr: <http://www.openrdf.org/config/repository/sail#> .
+@prefix sail: <http://www.openrdf.org/config/sail#> .
+@prefix ns: <http://www.openrdf.org/config/sail/native#> .
+@prefix fts: <http://linkedfactory.github.io/config/sail/fts#> .
+
+<urn:enilink:data> a models:RepositoryModelSet ;
+  models:repository <urn:linkedfactory:data-repo> .
+
+<urn:linkedfactory:data-repo> a rep:Repository ;
+  rep:repositoryID "linkedfactory-data" ;
+  rep:repositoryImpl [
+    rep:repositoryType "openrdf:SailRepository" ;
+    sr:sailImpl [
+      sail:sailType "kvin:KvinSail" ;
+      sail:delegate [
+        sail:sailType "fts:FtsSail" ;
+        fts:backend "lucene" ;
+        fts:indexDir "/var/lib/linkedfactory/fts-lucene-index" ;
+        fts:outboxDir "/var/lib/linkedfactory/fts-outbox/linkedfactory-data" ;
+        fts:storeIdentity "linkedfactory-data" ;
+        sail:delegate [
+          sail:sailType "openrdf:NativeStore" ;
+          ns:tripleIndexes "cspo,cpos,spoc,posc"
+        ]
+      ]
+    ]
+  ] .
+----
+
+`fts:indexDir`, `fts:outboxDir`, and `fts:storeIdentity` are required; Pod fails to start the repository without them.
+`fts:storeIdentity` must be unique to this repository and stay the same across restarts.
+`fts:endpoint`, `fts:bulkPath`, and `fts:searchPath` are not used by this backend.
+
+To keep the RDF data in memory instead, use `openrdf:MemoryStore` in place of `openrdf:NativeStore` and drop `ns:tripleIndexes`.
+
+All `fts:` properties are listed in xref:reference:full-text-search.adoc[].
+
+== Restart Pod
+
+Restart Pod so that the repository is created with the new configuration.
+Check the log for errors from the FTS SAIL; a missing or non-writable `fts:indexDir` or `fts:outboxDir` fails repository startup.
+
+== Index some data
+
+Pod indexes literal values when statements are added to a model.
+Statements that existed before the search layer was configured are not indexed retroactively; re-import those models to index them.
+
+Add a label to test the setup, for example with the update from xref:how-to:use-sparql.adoc#_update_an_asset_description[Update an asset description].
+
+== Search from SPARQL
+
+Run a query with `SERVICE <fts:>` against the same model:
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+
+curl --fail-with-body "$POD_URL/sparql" \
+  --header 'Accept: application/sparql-results+json' \
+  --data-urlencode "model=$POD_MODEL" \
+  --data-urlencode 'query=
+PREFIX fts: <fts:>
+SELECT ?iri ?score WHERE {
+  SERVICE <fts:> {
+    ?iri fts:keywords "strain gauge" ;
+         fts:score ?score .
+  }
+}'
+----
+
+The result lists the subjects whose literals match the keywords, with the best match first.
+
+== Next steps
+
+* xref:reference:full-text-search.adoc[] lists the configuration properties and all patterns supported in `SERVICE <fts:>`, and describes how the embedded Lucene index stores statements.
+* xref:how-to:enable-full-text-search.adoc[] covers the `elastic` backend instead.
+* xref:how-to:query-data.adoc[] shows how to combine asset descriptions with measurements.

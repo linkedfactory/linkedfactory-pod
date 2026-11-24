@@ -1,0 +1,64 @@
+= Ingest measurements
+:description: Write timestamped measurements to Pod in the LF JSON format.
+
+This guide writes two force measurements of the sample strain gauge to Pod.
+Each measurement belongs to an item IRI, such as the sensor, and a property IRI, such as `p:force`.
+
+== Before you start
+
+* Pod runs, see xref:ROOT:quickstart.adoc[].
+* You have chosen stable IRIs for your items and properties, see xref:how-to:model-assets.adoc#_choose_stable_iris[Choose stable IRIs].
+
+The examples use the defaults of a local development instance.
+For another deployment, use its base URL and model IRI, and add credentials as described in xref:how-to:secure-deployment.adoc[].
+
+== Write the payload
+
+Save the measurements as `measurements.json`:
+
+[source,json]
+----
+{
+  "https://example.org/Press/Frame/StrainGauge": {
+    "p:force": [
+      { "value": 7.10096884, "time": 1541521440000 },
+      { "value": 7.3, "time": 1541521441000 }
+    ]
+  }
+}
+----
+
+The outer key is the item, the inner key the property.
+Each value has a timestamp in epoch milliseconds.
+
+This is the LF JSON format described in xref:explanation:kvin-data-model.adoc[].
+It is not JSON-LD; do not add an `@context`.
+
+== Send it to Pod
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+
+curl --fail-with-body \
+  "$POD_URL/linkedfactory/values?model=$POD_MODEL" \
+  --header 'Content-Type: application/json' \
+  --data-binary @measurements.json
+----
+
+The model must already exist; otherwise Pod answers `400` with `INVALID_MODEL`.
+If your model IRI contains characters such as `&` or `#`, percent-encode it in the URL.
+
+To send CSV or InfluxDB line protocol instead, see xref:reference:time-series-api.adoc[].
+
+== Check the result
+
+A successful request returns an empty body.
+Read the values back as shown in xref:how-to:query-data.adoc#_read_a_series_over_http[Read a series over HTTP] and compare timestamps and values.
+
+== Next steps
+
+* xref:how-to:model-assets.adoc[]: describe the sensor in RDF
+* xref:how-to:query-data.adoc[]: read and combine the data
+* xref:reference:time-series-api.adoc[]: all formats and parameters

@@ -1,0 +1,5 @@
+.Explanation
+* xref:explanation:kvin-data-model.adoc[KVIN data model]
+* xref:explanation:architecture.adoc[Architecture and limits]
+* xref:explanation:semantic-concepts.adoc[Models, imports, and identifiers]
+* xref:explanation:security-model.adoc[Users, groups, and permissions]

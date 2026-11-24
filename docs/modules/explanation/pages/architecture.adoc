@@ -1,0 +1,86 @@
+= Architecture and limits
+:description: How Pod is built on eniLINK, how requests reach the two stores, and which limits follow from that design.
+
+Pod is an extension of the semantic platform eniLINK and runs on Eclipse Equinox (OSGi).
+eniLINK provides model management, the SPARQL endpoint, security, and the web framework.
+Pod adds the time-series store, its HTTP API, and the link between both.
+
+== Two stores, one identifier
+
+Pod keeps asset descriptions and measurements in different stores:
+
+* *RDF repository*: models with asset descriptions and ontologies, managed by eniLINK. The shipped configuration keeps them in memory.
+* *KVIN store*: measurements, keyed by item, property, context, time, and sequence number. The shipped configuration uses LevelDB in the workspace.
+
+eniLINK also keeps model metadata, such as owners and permissions, and a file store for attachments.
+
+What connects the stores is the IRI: a sensor described in RDF stores its measurements under the same IRI.
+xref:explanation:kvin-data-model.adoc[] explains why the data is split this way.
+
+== Request paths
+
+The diagram is written in Mermaid; the documentation site shows its source until a Mermaid extension is added.
+
+[source,mermaid]
+----
+flowchart TB
+  U["Users and integrators"]
+  UI["Web interface"]
+  API["Time-series API /linkedfactory/"]
+  SQ["SPARQL /sparql"]
+  RDF["eniLINK model management"]
+  KV["KVIN service"]
+  TS[("RDF repository")]
+  VS[("KVIN store")]
+
+  U --> UI
+  U --> API
+  U --> SQ
+  UI --> RDF
+  SQ --> RDF
+  SQ -->|"SERVICE kvin:"| KV
+  API --> KV
+  RDF --> TS
+  KV --> VS
+----
+
+* The *time-series API* writes and reads the KVIN store directly.
+* *SPARQL* queries the RDF repository. Inside `SERVICE <kvin:>`, it reads from the KVIN store, so one query can select assets in RDF and read their measurements.
+* The *web interface* works on the RDF models.
+
+== Limits to know
+
+The design has consequences that are worth knowing before you build on Pod.
+
+*Measurements and descriptions are managed separately.*
+
+* Writing measurements does not create an RDF description, and importing RDF does not create measurements.
+* An ordinary SPARQL graph pattern does not find measurements; they are only reachable through `SERVICE <kvin:>`.
+* Deleting a model does not delete its measurements or attached files.
+* An export of a model contains its RDF statements only.
+
+*Persistence must be configured for each store.*
+
+* The shipped configuration keeps the RDF models in memory. After a restart, asset descriptions are gone, while measurements in the workspace remain.
+* Changing the KVIN store does not change the RDF repository, and the other way round.
+* A complete backup covers RDF data, metadata, files, configuration, and the KVIN store.
+
+See xref:reference:configuration.adoc[].
+
+*Permissions cover the RDF side only.*
+Model permissions are checked for SPARQL, the model API, and the web interface.
+The time-series API and the file service do not check them, see xref:explanation:security-model.adoc[].
+
+*Query size is bounded per series.*
+The time-series API returns at most 10,000 values per series by default and rejects limits above 500,000.
+The limit applies per series, not to the whole response.
+
+*No inference by default.*
+Imported vocabularies are visible to queries, but OWL axioms such as subclass relations do not produce additional results, see xref:explanation:semantic-concepts.adoc[].
+
+*Replacing a model is not transactional.*
+`PUT` on the model API clears the model before reading the new document; an invalid document leaves it empty.
+
+== Identifiers used in this documentation
+
+include::ROOT:partial$namespaces.adoc[]

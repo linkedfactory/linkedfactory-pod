@@ -1,0 +1,105 @@
+= Model API
+:description: Routes, parameters, formats, behaviour, and status codes of the eniLINK model API on /models and /vocab.
+
+The model API of eniLINK imports, exports, replaces, and deletes models (named graphs).
+It works on RDF only; measurements and attached files are not affected.
+For step-by-step use see xref:how-to:manage-models.adoc[].
+
+== Routes
+
+`/models` and `/vocab` are handled identically.
+
+[cols="1,3",options="header"]
+|===
+|Request |Behaviour
+
+|GET `/models?model=…`
+|Exports the model in the format requested with `Accept`.
+
+|POST `/models?model=…` with RDF body
+|Adds the statements to the model. Creates the model if it does not exist and the caller may create it. Existing statements stay.
+
+|PUT `/models?model=…` with RDF body
+|Clears the model, then loads the document. Creates the model if it does not exist.
+
+|DELETE `/models?model=…`
+|Removes the model and its metadata.
+
+|OPTIONS `/models`
+|Returns an empty `200` response.
+
+|GET `/models` without `model`
+|Returns the browser page listing the models, not a data format.
+|===
+
+== Parameters
+
+[cols="1,3",options="header"]
+|===
+|Parameter |Meaning
+
+|`model`
+|Absolute IRI of the model. Percent-encode characters such as `&` and `#`.
+
+|`type`
+|Overrides the media type derived from the request headers.
+
+|`query`
+|SPARQL query on GET and POST. Use the xref:reference:sparql-endpoint.adoc[SPARQL endpoint] instead in clients.
+|===
+
+Without `model`, the model is derived from the request URL, for example `/models/example`.
+The model IRI then depends on the host name and proxy the client used, and file extensions in the path influence model lookup and creation.
+Always pass `model` explicitly, without a file extension, and select formats with headers.
+
+== Formats
+
+Imports read the format from `Content-Type`, exports from `Accept`.
+Without these headers, the file extension in the path is used.
+
+[cols="1,1",options="header"]
+|===
+|Format |Media type
+
+|Turtle
+|`text/turtle`
+
+|JSON-LD
+|`application/ld+json`, see xref:reference:json-ld.adoc[]
+|===
+
+Further RDF formats are available when the corresponding RDF4J codec is installed.
+A browser request that accepts `text/html` gets an ontology overview page instead of RDF.
+
+== Behaviour
+
+* *POST* adds statements. Blank nodes are new on every import, so importing the same document twice duplicates structures that use blank nodes.
+* *PUT* is not transactional. The model is cleared before the document is read; if the document is invalid or its media type unsupported, the model stays empty.
+* *DELETE* removes the RDF model and its metadata. Measurements stored under the model IRI and files stay.
+* *Export* contains the RDF statements of the model only: no measurements, files, or permissions.
+* A caller who creates a model with credentials becomes its owner, see xref:explanation:security-model.adoc[].
+
+== Status codes
+
+[cols="1,3",options="header"]
+|===
+|Status |Meaning
+
+|200
+|Import, replacement, deletion, or export succeeded. Imports return no body.
+
+|400
+|Invalid model selection or invalid RDF.
+
+|403
+|The caller may not access the model.
+
+|404
+|The model does not exist (export, deletion).
+
+|415
+|No reader or writer for the requested format.
+|===
+
+Errors do not use the JSON error format of the time-series API.
+Large exports are streamed and can fail after the status line was sent; check that the export is complete.

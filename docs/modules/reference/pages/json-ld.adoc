@@ -1,0 +1,79 @@
+= JSON-LD asset descriptions
+:description: The JSON-LD form of Pod asset descriptions, and how it differs from LF JSON.
+
+JSON-LD expresses RDF in JSON syntax.
+Pod accepts it for asset descriptions on the model API.
+Measurements use LF JSON instead, see <<_difference_from_lf_json>>.
+
+== Example
+
+This document describes the same assets as the Turtle example in xref:how-to:model-assets.adoc[]:
+
+[source,json]
+----
+{
+  "@context": {
+    "ex": "https://example.org/vocab/",
+    "lf": "http://linkedfactory.github.io/vocab#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "contains": {
+      "@id": "lf:contains",
+      "@type": "@id"
+    },
+    "label": "rdfs:label"
+  },
+  "@graph": [
+    {
+      "@id": "https://example.org/Press/Frame",
+      "@type": "ex:MachineComponent",
+      "label": "Press frame",
+      "contains": "https://example.org/Press/Frame/StrainGauge"
+    },
+    {
+      "@id": "https://example.org/Press/Frame/StrainGauge",
+      "@type": "ex:StrainGauge",
+      "label": "Frame strain gauge"
+    }
+  ]
+}
+----
+
+== Import and export
+
+JSON-LD is imported and exported through `/models` or `/vocab`, like Turtle:
+
+[source,bash]
+----
+curl --fail-with-body \
+  "$POD_URL/models?model=$POD_MODEL" \
+  --header 'Content-Type: application/ld+json' \
+  --data-binary @assets.jsonld
+----
+
+For an export, send `Accept: application/ld+json` with a GET request.
+All operations, including `PUT` and `DELETE`, are described in xref:reference:models-api.adoc[].
+
+JSON-LD support requires the JSON-LD codec in the Pod distribution.
+If it is missing, convert the document to Turtle and import that.
+
+== Difference from LF JSON
+
+[cols="1,2,2",options="header"]
+|===
+| |JSON-LD |LF JSON
+
+|Describes
+|Assets and their relationships (RDF)
+|Measurements with timestamps
+
+|Structure
+|`@context`, `@id`, `@type`, `@graph`
+|Item, then property, then a list of values
+
+|Endpoint
+|`/models`, `/vocab`
+|`/linkedfactory/values`
+|===
+
+Both can use the same item IRIs; that is what connects descriptions and measurements.
+Send JSON-LD only to the model API and LF JSON only to the time-series API.

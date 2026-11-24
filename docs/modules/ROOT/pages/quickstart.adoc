@@ -1,0 +1,44 @@
+= Quickstart
+:description: Start Pod locally with Docker and find the next steps.
+
+This quickstart starts Pod on your machine with Docker.
+
+== Start Pod
+
+[source,bash]
+----
+docker run --name linkedfactory-pod \
+  --publish 127.0.0.1:8080:8080 \
+  --volume linkedfactory-pod-workspace:/linkedfactory-pod/workspace \
+  linkedfactory/linkedfactory-pod
+----
+
+The container runs in the foreground; use a second terminal for the next steps.
+Open http://localhost:8080/linkedfactory/ and wait until the page appears.
+
+The local instance uses these defaults, which the rest of the documentation also uses:
+
+* Base URL: `http://localhost:8080`
+* Default model: `http://linkedfactory.github.io/data/`
+
+Without a tag, Docker uses `latest`, which is the newest snapshot build.
+For repeatable setups, use one of the release tags listed on https://hub.docker.com/r/linkedfactory/linkedfactory-pod/tags[Docker Hub].
+
+== Know the development defaults
+
+This setup is meant for your own machine:
+
+* Every caller may read and change everything, and there is an administrator `admin` with the password `admin`.
+* Measurements are kept in the workspace volume, but the RDF models are held in memory and lost when the container stops.
+
+xref:how-to:secure-deployment.adoc[] describes what to change before others can reach Pod.
+
+== Write and read measurements
+
+Follow xref:how-to:ingest-measurements.adoc[] to write sample measurements of a strain gauge.
+Then read them with xref:how-to:query-data.adoc[].
+
+== Describe the sensor
+
+xref:how-to:model-assets.adoc[] describes the strain gauge and its frame in RDF.
+Because the description uses the same IRI as the measurements, the last step of xref:how-to:query-data.adoc[] can combine both.

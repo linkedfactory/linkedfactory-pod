@@ -1,0 +1,76 @@
+= Models, imports, and identifiers
+:description: How models, model sets, imports, and the different kinds of IRIs fit together in Pod.
+
+Pod describes assets in RDF, using the model framework of eniLINK.
+Several kinds of IRIs appear in requests and configuration, and they are easy to mix up.
+This page explains what each one identifies, how models relate to each other through imports, and why imports are not inference.
+
+== Five kinds of identifiers
+
+[cols="1,3",options="header"]
+|===
+|Identifier |Identifies
+
+|Model IRI
+|A named graph, selected with the `model` parameter. Pod also uses it as the context of measurements.
+
+|Asset or item IRI
+|A machine or sensor. The same IRI is the item of its measurements.
+
+|Property IRI
+|A relationship or a measured quantity, such as `p:force`. Queries must use exactly the IRI used when writing.
+
+|Ontology IRI
+|A vocabulary model that asset models import.
+
+|Document URL
+|The location of an RDF file. It can differ from the model or ontology IRI it contains.
+|===
+
+Two IRIs look similar but mean different things:
+`urn:enilink:data` names the *model set* in the configuration, a collection of models with its storage.
+`http://linkedfactory.github.io/data/` is a *model* in that set, and the default model of Pod.
+
+Use IRIs, not blank nodes, for assets.
+Blank nodes have no stable name, so collectors and queries cannot refer to the same asset.
+
+== Import vocabularies into an asset model
+
+A vocabulary, for example the classes and properties of your domain, is best kept in its own model and imported where it is needed.
+Load the vocabulary model first, then add an import to the asset model:
+
+[source,turtle]
+----
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+<http://linkedfactory.github.io/data/>
+    a owl:Ontology ;
+    owl:imports <https://example.org/vocab/> .
+----
+
+Replace the example vocabulary IRI with one of your models.
+Both models are loaded through the model API, see xref:how-to:manage-models.adoc[].
+
+eniLINK can also find vocabularies on disk: files in the directory set with `net.enilink.models.dir` are registered under the ontology IRI they declare.
+
+== What an import changes
+
+A query against an asset model also sees the statements of the models it imports.
+Results can therefore contain statements that are not stored in the selected model itself.
+Removing the import removes them from the results again.
+
+An import is not inference.
+With inference switched off, as in the shipped configuration, importing a vocabulary makes its statements visible, but it does not derive new ones: an instance of a subclass is not returned as an instance of the superclass.
+
+== Models, metadata, and permissions
+
+eniLINK keeps metadata about each model, such as its owner and permissions, apart from the model's statements.
+That is why permissions are configured in the platform configuration, not by adding ACL statements to an asset model, see xref:explanation:security-model.adoc[].
+
+In the browser, the `resource` parameter selects a resource within the selected model.
+It does not select a measurement series or grant access.
+
+== Related pages
+
+* xref:how-to:manage-models.adoc[]: create, change, and delete models
+* xref:explanation:kvin-data-model.adoc[]: how measurements use the same identifiers

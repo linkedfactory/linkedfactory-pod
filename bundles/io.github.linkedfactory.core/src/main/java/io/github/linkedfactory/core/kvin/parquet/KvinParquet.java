@@ -3,6 +3,7 @@ package io.github.linkedfactory.core.kvin.parquet;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
@@ -52,7 +53,6 @@ import org.slf4j.LoggerFactory;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -130,6 +130,11 @@ public class KvinParquet implements Kvin {
 			validateAndRepairTempFiles(tempPath);
 		} catch (IOException e) {
 			log.error("Error while repairing unfinished transaction", e);
+		}
+		try {
+			Compactor.recover(Paths.get(this.archiveLocation));
+		} catch (IOException | KvinException e) {
+			log.error("Error while finishing interrupted compaction", e);
 		}
 	}
 
@@ -243,7 +248,7 @@ public class KvinParquet implements Kvin {
 		try {
 			putInternal(tuples);
 		} catch (IOException e) {
-			throw new RuntimeException(e);
+			throw new KvinException(e);
 		}
 	}
 
@@ -504,7 +509,7 @@ public class KvinParquet implements Kvin {
 							Files.move(sourceFile, destFile);
 						}
 					} catch (IOException e) {
-						throw new UncheckedIOException(e);
+						throw new KvinException(e);
 					}
 				});
 	}
@@ -574,7 +579,7 @@ public class KvinParquet implements Kvin {
 			try {
 				itemMappingWriter.write(mapping);
 			} catch (IOException e) {
-				throw new RuntimeException();
+				throw new KvinException(e);
 			}
 			return newId;
 		});
@@ -592,7 +597,7 @@ public class KvinParquet implements Kvin {
 			try {
 				propertyMappingWriter.write(mapping);
 			} catch (IOException e) {
-				throw new RuntimeException();
+				throw new KvinException(e);
 			}
 			return newId;
 		});
@@ -611,7 +616,7 @@ public class KvinParquet implements Kvin {
 			try {
 				contextMappingWriter.write(mapping);
 			} catch (IOException e) {
-				throw new RuntimeException();
+				throw new KvinException(e);
 			}
 			return newId;
 		});
@@ -728,7 +733,7 @@ public class KvinParquet implements Kvin {
 					}
 				}
 			} catch (IOException e) {
-				throw new UncheckedIOException(e);
+				throw new KvinException(e);
 			}
 		}
 		return ids;
@@ -792,7 +797,7 @@ public class KvinParquet implements Kvin {
 			}
 			return internalResult;
 		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			throw new KvinException(e);
 		}
 	}
 
@@ -802,7 +807,7 @@ public class KvinParquet implements Kvin {
 			return fetchInternal(List.of(item), property == null ? List.of() : List.of(property),
 					context, null, null, limit);
 		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			throw new KvinException(e);
 		}
 	}
 
@@ -901,6 +906,7 @@ public class KvinParquet implements Kvin {
 			KvinRecord next;
 			PageReadStore pages;
 			long readRows;
+			boolean closed;
 
 			@Override
 			public boolean hasNext() {
@@ -928,16 +934,20 @@ public class KvinParquet implements Kvin {
 									}
 								}
 							} else {
-								r.close();
+								close();
 								break;
 							}
 						}
-					} catch (IOException e) {
-						throw new UncheckedIOException(e);
 					} catch (Exception e) {
-						log.error("Error while reading next element", e);
-						close();
-						return false;
+						try {
+							close();
+						} catch (RuntimeException closeError) {
+							e.addSuppressed(closeError);
+						}
+						if (e instanceof KvinException kvinException) {
+							throw kvinException;
+						}
+						throw new KvinException("Error while reading file " + fileInfo.path, e);
 					}
 				}
 				return next != null;
@@ -955,13 +965,18 @@ public class KvinParquet implements Kvin {
 
 			@Override
 			public void close() {
+				if (closed) {
+					return;
+				}
+				closed = true;
 				if (pages != null) {
 					pages.close();
+					pages = null;
 				}
 				try {
 					r.close();
 				} catch (IOException e) {
-					throw new UncheckedIOException(e);
+					throw new KvinException(e);
 				}
 			}
 		};
@@ -989,7 +1004,7 @@ public class KvinParquet implements Kvin {
 								try {
 									base = doFetch(items, Collections.singletonList(property), context, end, begin, limit);
 								} catch (IOException e) {
-									throw new UncheckedIOException(e);
+									throw new KvinException(e);
 								}
 							}
 							return base.hasNext();
@@ -1127,7 +1142,7 @@ public class KvinParquet implements Kvin {
 					try {
 						nextTuple = selectNextTuple();
 					} catch (IOException e) {
-						throw new UncheckedIOException(e);
+						throw new KvinException(e);
 					}
 					if (nextTuple != null) {
 						return true;
@@ -1215,7 +1230,7 @@ public class KvinParquet implements Kvin {
 			};
 		} catch (IOException e) {
 			readLock.release();
-			throw new UncheckedIOException(e);
+			throw new KvinException(e);
 		}
 	}
 
@@ -1354,11 +1369,11 @@ public class KvinParquet implements Kvin {
 				try {
 					return getProperty(id);
 				} catch (IOException e) {
-					throw new UncheckedIOException(e);
+					throw new KvinException(e);
 				}
 			}).collect(Collectors.toList());
 		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			throw new KvinException(e);
 		}
 	}
 
@@ -1377,7 +1392,7 @@ public class KvinParquet implements Kvin {
 			List<URI> properties = getProperties(idMappings.itemId, idMappings.contextId);
 			return WrappedIterator.create(properties.iterator());
 		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			throw new KvinException(e);
 		} finally {
 			readLock.release();
 		}

@@ -1,0 +1,93 @@
+= HTTP interfaces
+:description: Overview of all HTTP routes of Pod, their formats, and their error formats.
+
+A local instance listens on `http://localhost:8080`.
+The default model is `http://linkedfactory.github.io/data/`.
+
+== Routes
+
+[cols="1,1,2,1",options="header"]
+|===
+|Path |Methods |Purpose |Provided by
+
+|`/linkedfactory/values`
+|GET, POST, DELETE
+|Read, write, or delete measurements, see xref:reference:time-series-api.adoc[].
+|Pod
+
+|`/linkedfactory/properties`
+|GET
+|List the measured properties of an item.
+|Pod
+
+|`/linkedfactory/**`
+|GET
+|List descendants of an item; `**` is a literal suffix.
+|Pod
+
+|`/sparql`
+|GET, POST
+|SPARQL queries and updates, see xref:reference:sparql-endpoint.adoc[].
+|eniLINK, extended by Pod
+
+|`/models`, `/vocab`
+|GET, POST, PUT, DELETE, OPTIONS
+|Import, export, replace, and delete models, see xref:reference:models-api.adoc[].
+|eniLINK
+
+|`/files`
+|POST, OPTIONS
+|Upload attachments, see xref:reference:files-api.adoc[].
+|eniLINK
+
+|`+/files/{key}+`
+|GET, HEAD
+|Download attachments.
+|eniLINK
+|===
+
+`POST /linkedfactory/values` reads measurements when the body is a form (`application/x-www-form-urlencoded`) and writes them when the body is LF JSON, CSV, or line protocol.
+
+eniLINK also contains support for the Linked Data Platform; it has no route unless a deployment registers one, see xref:reference:ldp.adoc[].
+
+Which routes check model permissions is described in xref:explanation:security-model.adoc#_what_the_permissions_protect[What the permissions protect].
+
+== Formats
+
+[cols="1,2",options="header"]
+|===
+|Format |Used for
+
+|LF JSON, CSV
+|Measurements on `/linkedfactory/values`
+
+|SPARQL results JSON, CSV
+|Results of SELECT and ASK queries
+
+|Turtle, JSON-LD
+|Models on `/models`
+
+|Multipart form data, byte stream
+|Attachments on `/files`
+|===
+
+JSON-LD describes assets; it is not accepted as measurement format.
+
+== Errors
+
+[cols="1,2",options="header"]
+|===
+|Interface |Error body
+
+|Time-series API
+|JSON object with `code`, `message`, and optional `details`
+
+|SPARQL endpoint
+|Plain text starting with the error code
+
+|Model API, file service
+|Depends on the error; see the respective page
+|===
+
+Check the status and `Content-Type` before parsing an error body.
+Streamed responses such as large exports can fail after the status line was sent, so also check that a response is complete.

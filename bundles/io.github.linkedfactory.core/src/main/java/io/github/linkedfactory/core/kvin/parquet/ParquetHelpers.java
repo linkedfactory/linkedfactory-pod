@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.kvin.parquet;
 
+import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinParquetWriter;
 import io.github.linkedfactory.core.kvin.parquet.records.KvinRecord;
@@ -35,7 +36,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.*;
@@ -79,7 +79,6 @@ public class ParquetHelpers {
 			.name("value").type().stringType().noDefault().endRecord();
 
 	static Pattern fileWithSeqNr = Pattern.compile("^([^.].*)__([0-9]+)\\..*$");
-	static Pattern fileOrDotFileWithSeqNr = Pattern.compile("^\\.?([^.].*)__([0-9]+)\\..*$");
 	static Configuration configuration = new Configuration();
 
 	static {
@@ -116,6 +115,7 @@ public class ParquetHelpers {
 				KvinRecord next;
 				PageReadStore pages;
 				long readRows;
+				boolean closed;
 
 				@Override
 				public boolean hasNext() {
@@ -143,14 +143,20 @@ public class ParquetHelpers {
 										}
 									}
 								} else {
-									r.close();
+									close();
 									break;
 								}
 							}
 						} catch (Exception e) {
-							log.error("Error while reading file {}. Data elements may be incomplete.", path, e);
-							close();
-							return false;
+							try {
+								close();
+							} catch (RuntimeException closeError) {
+								e.addSuppressed(closeError);
+							}
+							if (e instanceof KvinException kvinException) {
+								throw kvinException;
+							}
+							throw new KvinException("Error while reading file " + path, e);
 						}
 					}
 					return next != null;
@@ -168,8 +174,13 @@ public class ParquetHelpers {
 
 				@Override
 				public void close() {
+					if (closed) {
+						return;
+					}
+					closed = true;
 					if (pages != null) {
 						pages.close();
+						pages = null;
 					}
 					try {
 						r.close();
@@ -178,8 +189,8 @@ public class ParquetHelpers {
 					}
 				}
 			};
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+		} catch (IOException | RuntimeException e) {
+			throw new KvinException("Error while opening file " + path, e);
 		}
 	}
 
@@ -219,27 +230,6 @@ public class ParquetHelpers {
 			});
 		}
 		return fileMap;
-	}
-
-	public static void deleteMappingFiles(java.nio.file.Path folder, Set<String> types)
-			throws IOException {
-		if (Files.isDirectory(folder)) {
-			Files.list(folder).forEach(p -> {
-				String name = p.getFileName().toString();
-				Matcher m = fileOrDotFileWithSeqNr.matcher(name);
-				if (m.matches()) {
-					String type = m.group(1);
-					if (types.contains(type)) {
-						// delete file
-						try {
-							Files.delete(p);
-						} catch (IOException e) {
-							log.error("Unable to delete file", e);
-						}
-					}
-				}
-			});
-		}
 	}
 
 	public static KvinTuple recordToTuple(URI item, URI property, URI context, KvinRecord record) throws IOException {

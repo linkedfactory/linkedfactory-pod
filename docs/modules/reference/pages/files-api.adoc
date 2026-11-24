@@ -1,0 +1,98 @@
+= File service
+:description: Routes, upload format, storage location, and permissions of the eniLINK file service for attachments.
+
+The file service of eniLINK stores binary attachments such as manuals or calibration reports.
+It stores the bytes only.
+To connect a file to an asset, add the file's URL to the asset description yourself.
+
+== Routes
+
+[cols="1,3",options="header"]
+|===
+|Request |Behaviour
+
+|POST `/files`, multipart form data
+|Stores the first file in the request and returns its metadata as a JSON array.
+
+|GET `+/files/{key}+`
+|Returns the file with its stored content type, size, and file name where known.
+
+|HEAD `+/files/{key}+`
+|Returns the headers of the file without the body.
+
+|OPTIONS `/files`
+|Returns an empty `200` response.
+|===
+
+There is no route for deleting files.
+
+== Upload
+
+Send one file per request as multipart form data:
+
+[source,bash]
+----
+curl --fail-with-body "$POD_URL/files" \
+  --form 'upload=@manual.pdf;type=application/pdf'
+----
+
+Further files in the same request are ignored.
+Raw request bodies are not accepted.
+
+Response:
+
+[source,json]
+----
+[
+  {
+    "id": "returned-key",
+    "type": "application/pdf",
+    "size": 12345
+  }
+]
+----
+
+`id` is the key for `+/files/{key}+`.
+A response with size `0` means the upload failed.
+
+== Link a file to an asset
+
+Add the file URL to the asset description, using a property of your vocabulary:
+
+[source,turtle]
+----
+@prefix ex: <https://example.org/vocab/> .
+
+<https://example.org/Press/Frame>
+    ex:manual <https://pod.example.org/files/returned-key> .
+----
+
+Use the public URL of your deployment and the returned key.
+
+== Status codes
+
+[cols="1,3",options="header"]
+|===
+|Status |Meaning
+
+|200
+|Upload or download succeeded.
+
+|404
+|No file with this key.
+
+|500
+|Upload failed. The body is a JSON array with the error.
+|===
+
+== Storage
+
+Files are stored in `files/` in the workspace.
+The JVM property `net.enilink.filestore.path` selects another directory.
+Include it in backups; model exports do not contain files.
+
+== Permissions
+
+The file service does not check model permissions.
+Anyone who can reach `/files` can upload, and anyone who knows a key can download the file, regardless of who may read the asset that links it.
+Restrict access to `/files` at a reverse proxy and limit the upload size there, see xref:how-to:secure-deployment.adoc[].

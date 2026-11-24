@@ -1,0 +1,48 @@
+= Linked Data Platform
+:description: The optional Linked Data Platform support in eniLINK and what a deployment needs to expose it.
+
+eniLINK contains support for the W3C Linked Data Platform (LDP), which manages RDF resources and containers over HTTP.
+A Pod deployment can use it to offer resource-oriented access to asset descriptions in addition to the model API.
+
+== Availability
+
+LDP has no route in a standard Pod.
+The generic registration in eniLINK is disabled, so there is no `/ldp` endpoint.
+To use LDP, an application installs the LDP bundle and registers an `LDPHelper` handler with its own path, root model, and container configuration.
+
+The presence of the LDP bundle alone does not mean that an LDP API is reachable.
+For the directly available way to import and export models, use xref:reference:models-api.adoc[].
+
+== Concepts
+
+[cols="1,3",options="header"]
+|===
+|Term |Meaning
+
+|RDF source
+|A resource whose state is a set of RDF statements.
+
+|Basic container
+|Groups resources through containment.
+
+|Direct container
+|Additionally defines membership relations.
+|===
+
+These are concepts for managing resources over HTTP.
+They are unrelated to the KVIN structure of measurements and to xref:reference:files-api.adoc[file attachments].
+
+== Operations and formats
+
+An `LDPHelper` handler can serve OPTIONS, HEAD, GET, POST, PUT, PATCH, and DELETE under its path.
+Representations are Turtle and JSON-LD; PATCH uses `text/ldpatch`.
+Which operations work depends on the container handler of the deployment.
+The implementation has known gaps and does not claim full LDP conformance.
+
+== Using an LDP endpoint
+
+When a deployment has registered an LDP handler:
+
+* Get the container URL and the supported operations from the operator.
+* Use the URLs returned in `Location` and `Link` headers instead of constructing them.
+* Send `If-Match` where the endpoint requires conditional updates.

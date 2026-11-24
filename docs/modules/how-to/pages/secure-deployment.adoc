@@ -1,0 +1,95 @@
+= Secure a deployment
+:description: Replace the development defaults and protect all Pod interfaces before Pod is reachable by others.
+
+The configuration shipped with Pod is meant for a local machine: everybody may read and change everything.
+This guide lists the changes needed before other people or machines can reach Pod.
+The background is explained in xref:explanation:security-model.adoc[].
+
+== Before you start
+
+* You can edit the platform configuration and restart Pod.
+** Docker image: `config.ttl` in the workspace volume
+** Local launch from `launch/equinox`: `configurations/default.ttl`
+* You know which users and machines need which access.
+
+== Replace the administrator password
+
+The shipped configuration defines `admin` with the password `admin`:
+
+[source,turtle]
+----
+user:admin a foaf:Agent ; auth:password "admin" .
+----
+
+Set a strong password, or remove the user and add your own administrator to `group:Administrators`.
+Keep administrator accounts out of collectors and scripts.
+
+== Remove the anonymous full access
+
+Delete this authorization from the configuration:
+
+[source,turtle]
+----
+<enilink:auth:anonymousAll> a acl:Authorization ; acl:agent user:anonymous ;
+                         acl:accessToClass <http://enilink.net/vocab/komma/models#Model> ;
+                         acl:mode acl:Read, acl:Write, acl:Control .
+----
+
+Adding a narrower rule is not enough: permissions add up, so the broad rule would still apply.
+If anonymous callers should read a model, grant exactly that with a separate authorization.
+
+== Give users and groups their access
+
+Create accounts for people and for each collector, and grant access per group.
+Give each account only the modes it needs.
+xref:how-to:grant-access-with-groups.adoc[] shows the configuration.
+
+== Require a login in the browser
+
+Start Pod with the JVM system property `enilink.loginrequired=true`.
+
+* Docker image: pass it through the Karaf start script, for example `-e EXTRA_JAVA_OPTS=-Denilink.loginrequired=true`.
+* Local launch: add it to the `vmProperties` in `launch/equinox/pom.xml`.
+
+Setting it as a plain environment variable has no effect.
+The property affects the browser interface only; permissions are still checked per model.
+
+== Protect the time-series API and the file service
+
+`/linkedfactory/` and `/files` do not check model permissions.
+Put Pod behind a reverse proxy or gateway and allow these paths only for authorised clients, for example the collectors that write measurements.
+Also limit the upload size for `/files` there.
+
+When writing gateway rules, classify requests by endpoint, not by method:
+
+* `POST /linkedfactory/values` writes measurements when the body is LF JSON or CSV, but reads them when the body is a form (`application/x-www-form-urlencoded`).
+* `POST /sparql` runs a query or an update, depending on its parameters.
+* `DELETE /linkedfactory/values` deletes measurements.
+
+== Use HTTPS
+
+Terminate TLS at the reverse proxy and send credentials only over HTTPS.
+Store configuration files with passwords where only operators can read them, and change passwords regularly.
+
+== Make the data persistent
+
+The shipped configuration keeps the RDF models in memory, so they are lost on restart.
+Configure persistent storage as described in xref:reference:configuration.adoc[], and include RDF data, metadata, files, configuration, and the KVIN store in your backups.
+
+== Check the result
+
+Test each interface with an anonymous request, a reader, a writer, and an administrator:
+
+* SPARQL queries and updates on `/sparql`, including `SERVICE <kvin:>` queries
+* reads, writes, discovery, and deletion on `/linkedfactory/`
+* import, replacement, and deletion on `/models` and `/vocab`
+* uploads and downloads on `/files`
+* requests that name a different `model`
+
+Each request must succeed or fail as intended.
+A working login alone does not show that the time-series API is protected.
+
+== Next steps
+
+* xref:explanation:security-model.adoc[]: identity, permissions, and which interfaces they cover
+* xref:reference:configuration.adoc[]: login, storage, and JAAS configuration

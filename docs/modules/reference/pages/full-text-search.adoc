@@ -1,0 +1,208 @@
+= Full-text search
+:description: Configuration properties, SPARQL patterns, indexing rules, and search-server protocol of the Pod full-text search.
+
+The full-text search consists of the `fts:FtsSail`, which sends literal values to a search server, and the SPARQL service `SERVICE <fts:>`, which queries that server.
+For a step-by-step setup see xref:how-to:enable-full-text-search.adoc[].
+
+== Configuration properties
+
+`fts:FtsSail` is configured as a delegating SAIL in the repository configuration.
+
+Namespace: `http://linkedfactory.github.io/config/sail/fts#`
+
+[cols="2,1,4",options="header"]
+|===
+|Property |Default |Meaning
+
+|`fts:backend`
+|`"elastic"`
+|Search backend. `elastic` and `lucene` are available. An unknown value fails the query with a list of available backends.
+
+|`fts:endpoint`
+|none
+|Base URL of the search server, for example `"http://localhost:9200"`. Without an endpoint, nothing is indexed and searches return no results.
+
+|`fts:bulkPath`
+|`"/fts/bulk"`
+|Path of the bulk indexing endpoint. For Elasticsearch use `"/<index>/_bulk"`. If the path ends with `/_bulk`, deletions are sent to `/<index>/_delete_by_query`; otherwise to `/_delete_by_query`.
+
+|`fts:searchPath`
+|`"/fts/_search"`
+|Path of the search endpoint. For Elasticsearch use `"/<index>/_search"`.
+
+|`fts:defaultLimit`
+|`100`
+|Number of results per search if the query does not set `fts:limit`. Values below `1` are set to `1`.
+
+|`fts:failOnError`
+|`true`
+|`true`: errors from the search server are passed on and the operation fails. `false`: errors are logged.
+
+|`fts:requestTimeoutMillis`
+|`300000`
+|Timeout for indexing requests in milliseconds. Must be positive.
+
+|`fts:outboxDir`
+|`<java.io.tmpdir>/linkedfactory-fts-outbox`
+|Local directory in which changes are stored until the search server has confirmed them.
+
+|`fts:storeIdentity`
+|none
+|Stable identifier for this RDF store, required for every backend. Must stay the same across restarts and must differ between stores sharing a host; startup fails without it.
+
+|`fts:indexDir`
+|none
+|Directory for the embedded Lucene index. Required when `fts:backend` is `"lucene"`; not used otherwise.
+
+|`fts:excludedModels`
+|none
+|IRI of a model whose statements are not indexed. Repeat the property for several models.
+|===
+
+== SPARQL service
+
+=== Service IRI
+
+[cols="1,3",options="header"]
+|===
+|Service IRI |Search server
+
+|`SERVICE <fts:>`
+|`fts:endpoint`
+
+|`SERVICE <fts:relative/path>`
+|The relative path resolved against `fts:endpoint`.
+|===
+
+Absolute URLs such as `SERVICE <fts:http://host:9200>` are rejected.
+
+=== Patterns
+
+Namespace: `fts:` (`PREFIX fts: <fts:>`)
+
+All patterns in the service block must have the same subject.
+Each predicate may appear at most once.
+
+[cols="1,1,3",options="header"]
+|===
+|Predicate |Required |Meaning
+
+|`fts:keywords`
+|yes
+|Search expression. It is evaluated against the literal value with the configured backend's own query syntax -- Elasticsearch `query_string` for `elastic`, Lucene's `SimpleQueryParser` syntax for `lucene`. The subject binds to the IRIs of matching resources.
+
+|`fts:score`
+|no
+|Binds the relevance score.
+
+|`fts:snippet`
+|no
+|Binds a highlighted excerpt of the matching value.
+
+|`fts:field`
+|no
+|Restricts the search to literals of one predicate, given as IRI.
+
+|`fts:limit`
+|no
+|Maximum number of results, as integer. Overrides `fts:defaultLimit`.
+
+|`fts:boost`
+|no
+|Boost factor for the keyword query, as decimal number.
+|===
+
+If the subject is already bound, only that resource is searched.
+
+=== Results
+
+Each resource appears at most once, represented by its best-scoring literal.
+Results are ordered by score, highest first.
+
+=== Example
+
+[source,sparql]
+----
+PREFIX fts: <fts:>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?iri ?score ?snippet WHERE {
+  SERVICE <fts:> {
+    ?iri fts:keywords "strain gauge" ;
+         fts:field rdfs:label ;
+         fts:limit 10 ;
+         fts:score ?score ;
+         fts:snippet ?snippet .
+  }
+}
+----
+
+== Indexing
+
+A statement is indexed if its object is a literal and it belongs to a model (named graph) that is not listed in `fts:excludedModels`.
+Statements without a model and statements with an IRI or blank node as object are not indexed.
+
+=== Elasticsearch
+
+Each indexed statement becomes one document:
+
+[cols="1,3",options="header"]
+|===
+|Field |Content
+
+|`id`
+|SHA-256 hash of the statement, used as document ID.
+
+|`subject`
+|Subject IRI.
+
+|`predicate`
+|Predicate IRI.
+
+|`value`
+|Literal value.
+
+|`sortValue`
+|Normalised literal value for sorting.
+
+|`context`
+|Model IRI.
+
+|`datatype`
+|Datatype IRI of the literal, if present.
+
+|`language`
+|Language tag of the literal, if present.
+|===
+
+The search requires `subject` to be a keyword field in the index.
+The mapping used in xref:how-to:enable-full-text-search.adoc#_create_the_search_index[Create the search index] matches these fields.
+
+=== Lucene
+
+The embedded Lucene index keeps one document per subject, not per statement.
+Each statement on that subject is one entry in the document; adding, removing, or changing a statement rewrites the whole document with its current set of entries.
+Each entry's predicate IRI is the Lucene field that holds its value: literal entries are tokenized and also copied into an internal all-fields field so that a search without `fts:field` matches any predicate; IRI entries are stored as an exact-match field.
+The index tracks each entry's language tag and datatype internally so that literals with the same lexical value but a different language tag or datatype are not confused with each other when a statement is added or removed, but these are not separately searchable fields.
+
+== Search-server protocol
+
+[cols="1,3",options="header"]
+|===
+|Request |Content
+
+|`POST {fts:endpoint}{fts:bulkPath}`
+|Elasticsearch bulk request, `Content-Type: application/x-ndjson`, with `index` and `delete` actions. Large changes are split into several requests.
+
+|`POST .../_delete_by_query`
+|Removes all documents (`match_all`) or the documents of cleared models (`terms` on `context`).
+
+|`POST {fts:endpoint}{fts:searchPath}`
+|Elasticsearch search request with `query_string` on `value`, optional `term` filters on `predicate` and `subject`, and `collapse` on `subject`.
+|===
+
+Changes are written to `fts:outboxDir` as JSON Lines when a transaction commits and are then sent to the search server.
+If sending fails, the files stay in the outbox and are sent again with the next commit.
+
+The format of these requests is not yet stable.
+Example payloads are in `bundles/io.github.linkedfactory.core/src/test/resources/fts/`.

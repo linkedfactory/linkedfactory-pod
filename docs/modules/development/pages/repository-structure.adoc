@@ -1,0 +1,93 @@
+= Repository structure
+:description: Directories, bundles, and build profiles of the linkedfactory-pod repository.
+
+Pod is an Eclipse Equinox/OSGi application on top of https://github.com/enilink/enilink[eniLINK], built with Maven and bnd.
+The code is written in Java and Scala.
+
+== Directories
+
+[cols="1,3",options="header"]
+|===
+|Path |Content
+
+|`bundles/io.github.linkedfactory.core`
+|KVIN data model and value stores, RDF4J integration (`kvin:` SAIL and SPARQL service, `fts:` full-text search), command-line tool.
+
+|`bundles/io.github.linkedfactory.service`
+|Service layer on eniLINK and Lift: the `/linkedfactory/values` API, value-store configuration, MQTT bridge, web views. The default service configuration is `src/main/resources/OSGI-INF/io.github.linkedfactory.service-default.ttl`.
+
+|`bundles/io.github.linkedfactory.opcua`
+|Conversion of OPC UA NodeSets to RDF.
+
+|`features/`
+|Karaf feature definition of the Pod bundles.
+
+|`server/`
+|Karaf assembly of the runnable server distribution. Its `src/main/resources/workspace/config.ttl` is the platform configuration of the Docker image.
+
+|`launch/equinox/`
+|Maven launch configuration for running Pod from the build.
+
+|`configurations/`
+|Platform configurations for local runs: `default.ttl` (used by `launch/equinox`), `default-with-search.ttl` (with full-text search), and `jaas.conf`.
+
+|`docker/`
+|`Dockerfile`, `entrypoint.sh`, and `docker-compose.yml`.
+
+|`releng/`
+|Release tooling: `update-version.sh` and the license header template.
+
+|`docs/`
+|This documentation, an Antora component in AsciiDoc.
+
+|`.github/workflows/`
+|CI workflows, see <<workflows>>.
+|===
+
+Tests are in `src/test` of each bundle.
+
+== Maven profiles
+
+[cols="1,3",options="header"]
+|===
+|Profile |Effect
+
+|none
+|Builds the three bundles.
+
+|`server`
+|Additionally builds the Karaf feature and the server distribution in `server/target/assembly`.
+
+|`configure`
+|Used in `launch/equinox` to create the launch configuration.
+
+|`versions`
+|Includes `features` and `launch/equinox` in the reactor, for version updates.
+
+|`update-licenses`
+|Adds or updates license headers in Java and Scala sources.
+|===
+
+[#workflows]
+== CI workflows
+
+[cols="1,1,2",options="header"]
+|===
+|Workflow |Trigger |Action
+
+|`verify.yml`
+|Push and pull request to `main`
+|`mvn verify`
+
+|`deploy.yml`
+|Push to `snapshots` branch and `v*` tags
+|`mvn deploy` to GitHub Packages
+
+|`docker.yml`
+|Push to `snapshots` branch and `v*` tags
+|Builds the server distribution and publishes the image `linkedfactory/linkedfactory-pod` to Docker Hub
+
+|`docs.yml`
+|Push and pull request to `main` that change the documentation
+|Builds the documentation; on `main` also publishes it on GitHub Pages
+|===

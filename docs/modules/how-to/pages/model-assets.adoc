@@ -1,0 +1,89 @@
+= Describe assets in RDF
+:description: Describe machines and sensors in RDF with the same IRIs that their measurements use.
+
+This guide describes the sample press frame and its strain gauge in RDF.
+Because the description uses the same sensor IRI as the measurements, queries can later combine both.
+
+== Before you start
+
+* Pod runs, see xref:ROOT:quickstart.adoc[].
+* You know the model to use. The examples use the default model of a local instance, `http://linkedfactory.github.io/data/`. To create your own, see xref:how-to:manage-models.adoc[].
+
+== Choose stable IRIs
+
+Give each asset one IRI and use it everywhere: in the RDF description and as the item in every measurement.
+Do not generate new identifiers when a collector restarts.
+
+The namespaces used in the examples:
+
+include::ROOT:partial$namespaces.adoc[]
+
+The `ex:` terms are made up for the example.
+Pod does not require a particular ontology; use the vocabulary of your domain.
+
+== Write the description
+
+Save the description as `assets.ttl`:
+
+[source,turtle]
+----
+@prefix ex: <https://example.org/vocab/> .
+@prefix lf: <http://linkedfactory.github.io/vocab#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<https://example.org/Press/Frame>
+    a ex:MachineComponent ;
+    rdfs:label "Press frame" ;
+    lf:contains <https://example.org/Press/Frame/StrainGauge> .
+
+<https://example.org/Press/Frame/StrainGauge>
+    a ex:StrainGauge ;
+    rdfs:label "Frame strain gauge" .
+----
+
+`lf:contains` builds the hierarchy that the Pod web interface shows.
+
+== Import it into the model
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+
+curl --fail-with-body \
+  "$POD_URL/models?model=$POD_MODEL" \
+  --header 'Content-Type: text/turtle' \
+  --data-binary @assets.ttl
+----
+
+To import JSON-LD instead, see xref:reference:json-ld.adoc[].
+
+== Check the description
+
+Run this query against the model, as described in xref:how-to:use-sparql.adoc[]:
+
+[source,sparql]
+----
+PREFIX lf: <http://linkedfactory.github.io/vocab#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?sensor ?label
+WHERE {
+  <https://example.org/Press/Frame> lf:contains ?sensor .
+  ?sensor rdfs:label ?label .
+}
+----
+
+The result contains the strain gauge with its label.
+
+== Extend the description
+
+* Record the unit of each measured property in RDF; the measured values carry numbers only.
+* Reuse existing domain vocabularies for asset types, units, and properties, and share them between models with `owl:imports`, see xref:explanation:semantic-concepts.adoc[].
+* Inference is switched off in the shipped configuration. Subclass relations and other OWL axioms do not produce additional query results.
+* Attach manuals or calibration reports by uploading them with xref:reference:files-api.adoc[] and adding the returned URL to the asset.
+
+== Next steps
+
+* xref:how-to:query-data.adoc[]: combine the description with measurements
+* xref:how-to:manage-models.adoc[]: replace, export, or delete the model

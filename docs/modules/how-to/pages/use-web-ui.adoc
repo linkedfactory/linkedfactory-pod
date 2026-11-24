@@ -1,0 +1,57 @@
+= Use the web interface
+:description: Browse assets, models, and resources in the Pod web interface and run SPARQL queries in the browser.
+
+Pod has a web interface for browsing assets and models and for trying out queries.
+It combines Pod's own views with the model tools of eniLINK.
+For automated access, use the HTTP interfaces instead, see xref:reference:http-interfaces.adoc[].
+
+== Open the Pod views
+
+Open `/linkedfactory/`, locally http://localhost:8080/linkedfactory/.
+Pod redirects to its dashboard.
+
+The dashboard and asset views show the asset hierarchy built from `lf:contains` relationships in the selected model, see xref:how-to:model-assets.adoc[].
+They show RDF descriptions only: an empty hierarchy can still have measurements.
+Check measurements with xref:how-to:query-data.adoc[].
+
+== Use the model and query tools
+
+[cols="1,2",options="header"]
+|===
+|Path |Use
+
+|`/models`
+|List the models you can access, with labels and owners.
+
+|`/models?model=…`
+|Show the model as an ontology overview.
+
+|`/describe?model=…&resource=…`
+|Show and edit the properties of a resource; a separate tab shows its access rules.
+
+|`/sparql`
+|Run SPARQL queries interactively.
+
+|`/upload`
+|Upload an RDF file into a model.
+
+|`/login`, `/profile`
+|Log in and view your account.
+|===
+
+What you can change depends on your permissions, see xref:explanation:security-model.adoc[].
+The exact menus depend on the eniLINK bundles installed in your deployment.
+
+The same paths answer with data instead of HTML when a client sends an RDF or SPARQL result type in the `Accept` header.
+
+== Check identity and model before editing
+
+If data you expect is missing, check which user you are logged in as (`/profile`) and which model is selected before importing the data again; otherwise you may create duplicates.
+
+eniLINK also contains a registration page.
+In a deployment that others can reach, create accounts yourself instead of allowing self-registration, see xref:how-to:grant-access-with-groups.adoc[].
+
+== Next steps
+
+* xref:how-to:manage-models.adoc[]: create and manage models over HTTP
+* xref:how-to:use-sparql.adoc[]: send the same queries from scripts

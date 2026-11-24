@@ -1,0 +1,96 @@
+= Query and update models with SPARQL
+:description: Send SPARQL queries and updates to Pod with curl.
+
+This guide sends SPARQL queries and updates to a model.
+Queries that read measurements are covered in xref:how-to:query-data.adoc[].
+
+== Before you start
+
+* Pod runs, see xref:ROOT:quickstart.adoc[].
+* You have read access to the model, and write access for updates.
+
+The examples use the defaults of a local development instance:
+
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='http://linkedfactory.github.io/data/'
+----
+
+For another deployment, use its base URL and model IRI, and add credentials as described in xref:how-to:secure-deployment.adoc[].
+
+== Send a query
+
+[source,bash]
+----
+curl --fail-with-body "$POD_URL/sparql" \
+  --header 'Accept: application/sparql-results+json' \
+  --data-urlencode "model=$POD_MODEL" \
+  --data-urlencode 'query=SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 20'
+----
+
+The `model` parameter is always required.
+The query sees the statements of this model and of the models it imports, see xref:explanation:semantic-concepts.adoc[].
+
+== Send a query from a file
+
+For longer queries, save the query as `assets.rq` and send it as the request body:
+
+[source,bash]
+----
+curl --fail-with-body "$POD_URL/sparql?model=$POD_MODEL" \
+  --header 'Content-Type: application/sparql-query' \
+  --header 'Accept: application/sparql-results+json' \
+  --data-binary @assets.rq
+----
+
+Percent-encode the model IRI in the URL if it contains characters such as `&` or `#`.
+
+== Choose the result format
+
+Set the `Accept` header explicitly:
+
+* `application/sparql-results+json` or `text/csv` for SELECT
+* `application/sparql-results+json` for ASK
+* `text/turtle` for CONSTRUCT and DESCRIBE
+
+Without an `Accept` header, a browser gets the interactive query page instead of results.
+
+== Update an asset description
+
+This update adds a label to the strain gauge:
+
+[source,bash]
+----
+curl --fail-with-body "$POD_URL/sparql" \
+  --data-urlencode "model=$POD_MODEL" \
+  --data-urlencode 'update=INSERT DATA {
+    <https://example.org/Press/Frame/StrainGauge>
+      <http://www.w3.org/2000/01/rdf-schema#label>
+      "Frame strain gauge" .
+  }'
+----
+
+A successful update returns `200` with an empty body.
+Query the model to check the change.
+
+To send an update from a file, use `Content-Type: application/sparql-update` and the file as body.
+
+Updates change RDF statements only; measurements are written with the time-series API, see xref:how-to:ingest-measurements.adoc[].
+Before a `DELETE` update, export the model as a backup, see xref:how-to:manage-models.adoc#_export_the_model[Export the model].
+
+== Fix errors
+
+The error codes are listed in xref:reference:sparql-endpoint.adoc#_errors[SPARQL endpoint].
+The most common ones:
+
+* `MISSING_MODEL`: add the `model` parameter.
+* `MODEL_NOT_FOUND`: the model does not exist; create it first.
+* `FORBIDDEN`: you lack the permission for this model.
+* `QUERY_TIMEOUT`: restrict the query, or raise the timeout in the configuration.
+
+== Next steps
+
+* xref:reference:sparql-endpoint.adoc[]: all request forms, formats, and errors
+* xref:how-to:query-data.adoc[]: query measurements with `SERVICE <kvin:>`
+* xref:how-to:enable-full-text-search.adoc[]: search by keyword

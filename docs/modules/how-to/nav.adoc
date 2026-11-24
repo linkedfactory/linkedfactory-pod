@@ -1,0 +1,16 @@
+.How-to guides
+* Get data in
+** xref:how-to:ingest-measurements.adoc[Ingest measurements]
+* Describe assets
+** xref:how-to:manage-models.adoc[Create and manage models]
+** xref:how-to:model-assets.adoc[Describe assets in RDF]
+* Query and search
+** xref:how-to:query-data.adoc[Query measurements and asset descriptions]
+** xref:how-to:use-sparql.adoc[Query and update models with SPARQL]
+** xref:how-to:enable-full-text-search.adoc[Enable full-text search]
+** xref:how-to:enable-full-text-search-with-lucene.adoc[Enable full-text search with the embedded Lucene index]
+* Control access
+** xref:how-to:grant-access-with-groups.adoc[Grant access to models with groups]
+** xref:how-to:secure-deployment.adoc[Secure a deployment]
+* Use the browser
+** xref:how-to:use-web-ui.adoc[Use the web interface]

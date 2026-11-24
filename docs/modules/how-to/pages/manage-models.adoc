@@ -1,0 +1,110 @@
+= Create and manage models
+:description: Create a model (named graph), add and replace its content, export it, and delete it.
+
+In Pod, asset descriptions live in *models*.
+A model is a named graph identified by an IRI, for example `http://linkedfactory.github.io/data/`.
+The same IRI is the context under which measurements are stored, so ingestion, queries, and the asset description must name the same model.
+xref:explanation:semantic-concepts.adoc[] explains models, imports, and identifiers in more detail.
+
+This guide uses the model API of eniLINK on `/models`.
+All requests and status codes are listed in xref:reference:models-api.adoc[].
+
+== Before you start
+
+* Pod runs, and you have write access, see xref:explanation:security-model.adoc[]. The local development configuration allows everything.
+* Set the connection values:
++
+[source,bash]
+----
+export POD_URL='http://localhost:8080'
+export POD_MODEL='https://example.org/models/press'
+----
+
+== Choose the model IRI
+
+Use an absolute IRI without a file extension such as `.ttl`, for example `https://example.org/models/press`.
+The IRI is a name; it does not need to resolve to a web page.
+Always pass it explicitly with the `model` parameter.
+
+== Create the model
+
+A model is created when RDF is imported into it for the first time.
+Save an asset description as `assets.ttl`, for example the one from xref:how-to:model-assets.adoc[], and import it:
+
+[source,bash]
+----
+curl --fail-with-body \
+  "$POD_URL/models?model=$POD_MODEL" \
+  --header 'Content-Type: text/turtle' \
+  --data-binary @assets.ttl
+----
+
+Pod answers with `200`.
+If you sent credentials, you become the owner of the new model and may administer its permissions.
+
+Naming an unknown IRI in a SPARQL query or a time-series request does not create a model; Pod answers `MODEL_NOT_FOUND` or `INVALID_MODEL`.
+
+Models can also be created at startup: every `.ttl` or `.owl` file in the directory set with the OSGi property `net.enilink.models.dir` becomes a model.
+See xref:reference:configuration.adoc[].
+
+== Check the model
+
+List all models you can access by opening `$POD_URL/models` in a browser.
+To check the content, run a SPARQL query against the model as described in xref:how-to:use-sparql.adoc[].
+
+== Add statements
+
+Each further `POST` adds its statements to the model; existing statements stay.
+For single changes, use a SPARQL update, see xref:how-to:use-sparql.adoc#_update_an_asset_description[Update an asset description].
+
+Blank nodes are new on every import.
+If you import the same document twice, structures with blank nodes appear twice, so give assets stable IRIs.
+
+== Replace the content
+
+`PUT` deletes the model's content and then loads the new document:
+
+[source,bash]
+----
+curl --fail-with-body -X PUT \
+  "$POD_URL/models?model=$POD_MODEL" \
+  --header 'Content-Type: text/turtle' \
+  --data-binary @assets.ttl
+----
+
+The model is cleared before the new document is read.
+If the document is invalid or its media type is not supported, the model stays empty.
+Export a backup first, as described in the next step.
+
+== Export the model
+
+[source,bash]
+----
+curl --fail-with-body --get "$POD_URL/models" \
+  --header 'Accept: text/turtle' \
+  --data-urlencode "model=$POD_MODEL" \
+  --output model-backup.ttl
+----
+
+The export contains the RDF statements of the model only, not its measurements, attached files, or permissions.
+
+== Delete the model
+
+[source,bash]
+----
+curl --fail-with-body -X DELETE "$POD_URL/models?model=$POD_MODEL"
+----
+
+This removes the RDF model and its metadata.
+Measurements stored under the model IRI and attached files stay.
+
+== Use a vocabulary from another model
+
+To use classes and properties defined in a separate vocabulary model, import it with `owl:imports`.
+xref:explanation:semantic-concepts.adoc#_import_vocabularies_into_an_asset_model[Import vocabularies into an asset model] shows how and explains what imports change in queries.
+
+== Next steps
+
+* xref:how-to:model-assets.adoc[]: describe assets in the new model
+* xref:how-to:grant-access-with-groups.adoc[]: control who may read or change the model
+* xref:reference:configuration.adoc[]: keep models across restarts; the shipped configuration holds them in memory

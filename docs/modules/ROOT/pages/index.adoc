@@ -1,0 +1,74 @@
+= LinkedFactory Pod
+:description: LinkedFactory Pod connects descriptions of industrial assets with their time-series measurements.
+
+LinkedFactory Pod connects descriptions of industrial assets with their measurements.
+You describe machines and sensors in RDF, write their measurements over HTTP, and query both together.
+
+Pod is the reference implementation of the https://github.com/linkedfactory/specification[LinkedFactory architecture].
+It is built on the semantic platform https://github.com/enilink/enilink[eniLINK].
+
+== How it works
+
+An asset such as `https://example.org/Press/Frame/StrainGauge` appears in two places:
+
+* in an RDF *model*, with its type, label, and relationships to other assets
+* in the *KVIN store*, as the item of measurement series such as `p:force`
+
+Both use the same IRI.
+A SPARQL query can therefore find the sensor by its description and read its measurements in one step.
+xref:explanation:kvin-data-model.adoc[] explains the data model, xref:explanation:architecture.adoc[] the building blocks and their limits.
+
+== What comes from where
+
+[cols="2,1",options="header"]
+|===
+|Capability |Provided by
+
+|RDF and OWL models, model API
+|eniLINK
+
+|SPARQL endpoint
+|eniLINK, extended by Pod with `SERVICE <kvin:>` and `SERVICE <fts:>`
+
+|Users, groups, and permissions
+|eniLINK
+
+|Web interface
+|eniLINK, with Pod's asset views
+
+|Time-series API and KVIN store
+|Pod
+
+|Full-text search
+|Pod
+|===
+
+== Where to start
+
+[cols="1,2",options="header"]
+|===
+|You want to … |Read
+
+|try Pod
+|xref:ROOT:quickstart.adoc[]
+
+|write and read measurements
+|xref:how-to:ingest-measurements.adoc[], xref:how-to:query-data.adoc[]
+
+|describe assets
+|xref:how-to:manage-models.adoc[], xref:how-to:model-assets.adoc[]
+
+|control who may do what
+|xref:how-to:grant-access-with-groups.adoc[], xref:explanation:security-model.adoc[]
+
+|run Pod for others
+|xref:how-to:secure-deployment.adoc[], xref:reference:configuration.adoc[]
+
+|integrate a client
+|xref:reference:http-interfaces.adoc[]
+
+|build or change Pod itself
+|xref:development:build-and-run.adoc[]
+|===
+
+The pages on eniLINK functionality describe eniLINK as of the revision listed in xref:development:upstream-baseline.adoc[].

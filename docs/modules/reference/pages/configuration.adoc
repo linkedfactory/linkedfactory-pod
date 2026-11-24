@@ -1,0 +1,170 @@
+= Configuration
+:description: Configuration files, storage, users and permissions, login, query timeout, bundle settings, and system properties of Pod.
+
+Pod is configured on two levels:
+
+* The *platform configuration* of eniLINK, an RDF file usually named `config.ttl`. It defines storage, users, groups, permissions, login, and the query timeout.
+* *Bundle configurations* for Pod's own services, for example the KVIN store.
+
+Changing one does not change the other: selecting an RDF repository does not select a KVIN store.
+
+== Platform configuration file
+
+[cols="1,2",options="header"]
+|===
+|Setup |File
+
+|Docker image
+|`config.ttl` in the workspace volume. On first start, the image copies its default there; later starts keep your version.
+
+|Local launch from `launch/equinox`
+|`configurations/default.ttl`, set through `net.enilink.config` in `launch/equinox/pom.xml`.
+|===
+
+eniLINK selects the platform configuration in this order:
+
+. The JVM property `net.enilink.config`, if it names a readable path or absolute URI.
+. `config.ttl` in the workspace (Eclipse instance location).
+. `config.ttl` in the installation directory.
+
+The file can include others with `owl:imports`; relative IRIs resolve against the file's location.
+The startup log shows which files were loaded.
+
+Without any configuration, eniLINK starts with full anonymous access.
+The JVM property `net.enilink.acl.anonymous=all` has the same effect.
+Removing `config.ttl` therefore opens Pod instead of closing it.
+
+== Storage
+
+[cols="1,2",options="header"]
+|===
+|Setting |Stores
+
+|`urn:enilink:data`
+|RDF models with asset descriptions and ontologies, with Pod's KVIN query integration.
+
+|`urn:enilink:metadata`
+|Platform metadata such as model owners and permissions, if configured separately.
+
+|JVM property `net.enilink.filestore.path`
+|Attached files. Default: `files/` in the workspace.
+
+|Bundle configuration `io.github.linkedfactory.service`
+|The KVIN store for measurements and the default model, see <<_bundle_configuration>>.
+|===
+
+The shipped configuration uses `models:KvinMemoryModelSet`: RDF models are kept in memory and lost on restart.
+For persistent models, use `models:KvinPersistentModelSet`; a generic eniLINK model set would lose the KVIN query integration:
+
+[source,turtle]
+----
+@prefix models: <http://enilink.net/vocab/komma/models#> .
+
+<urn:enilink:data>
+    a models:KvinPersistentModelSet ;
+    models:inference false ;
+    models:repository <workspace:/data/> .
+
+<urn:enilink:metadata>
+    a models:PersistentModelSet ;
+    models:inference false ;
+    models:repository <workspace:/meta/> .
+----
+
+`workspace:/` resolves within the workspace.
+After changing the storage, restart Pod and check that models and a query with `SERVICE <kvin:>` still work.
+Existing data is not migrated.
+
+To add full-text search, the data model set is defined as a repository with a SAIL chain, see xref:how-to:enable-full-text-search.adoc[].
+
+Back up RDF data, metadata, files, configuration, and the KVIN store together.
+
+== Users, groups, and permissions
+
+Users (`enilink:user:…`, `foaf:Agent` with `auth:password`), groups (`foaf:Group` with `foaf:member`), and authorizations (`acl:Authorization`) are defined in the platform configuration and read at startup.
+xref:how-to:grant-access-with-groups.adoc[] shows an example; xref:explanation:security-model.adoc[] explains the model.
+
+== Query timeout
+
+[source,turtle]
+----
+@prefix config: <enilink:config/> .
+
+config: config:queryTimeout 60000 .
+----
+
+The value is in milliseconds.
+Without it, eniLINK uses `20000`; the shipped configuration sets `60000`.
+It applies to query execution on models, not to HTTP connections or storage.
+A query that exceeds it fails with `503 QUERY_TIMEOUT`.
+
+== Login
+
+[source,turtle]
+----
+@prefix login: <plugin://net.enilink.platform.core/Login/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+login:
+    login:jaasConfigUrl <jaas.conf> ;
+    login:loginModule [
+        login:jaasConfigName "LinkedFactory-POD" ;
+        rdfs:label "LinkedFactory-POD"
+    ] .
+----
+
+`login:jaasConfigName` must match an entry in the JAAS file; Pod's `configurations/jaas.conf` defines `LinkedFactory-POD` with eniLINK's `EnilinkLoginModule`.
+Several login methods can be configured; `rdfs:label` is the name shown in the browser.
+Without this configuration, eniLINK uses its own JAAS file and a method named `eniLINK`.
+
+The JVM property `enilink.loginrequired=true` makes the browser interface require a login.
+It does not change model permissions or protect the time-series API.
+
+== Bundle configuration
+
+For the bundle `io.github.linkedfactory.service`, eniLINK uses the first file it finds:
+
+. `config/io.github.linkedfactory.service.ttl` in the workspace
+. the same file under the installation directory
+. `OSGI-INF/io.github.linkedfactory.service-default.ttl` in the bundle
+
+A file replaces the default completely; it is not merged.
+Include all settings you need.
+
+Example with the default model and a LevelDB store:
+
+[source,turtle]
+----
+@base <plugin://io.github.linkedfactory.service/data/> .
+
+<> <defaultModel> <http://linkedfactory.github.io/data/> ;
+   <store> [
+       a <KvinLevelDb> ;
+       <dirName> "linkedfactory-valuestore"
+   ] .
+----
+
+eniLINK watches bundle configuration files.
+When one changes, the affected bundles are stopped and restarted, which interrupts their service.
+Prepare changes completely and apply storage changes in a maintenance window.
+The platform configuration is not reloaded this way; restart Pod after changing it.
+
+== Models loaded at startup
+
+The OSGi property `net.enilink.models.dir` names a directory whose `.ttl` and `.owl` files become models at startup.
+A file that declares an ontology IRI is registered under that IRI, so other models can import it by IRI, see xref:explanation:semantic-concepts.adoc[].
+
+== Remote repositories
+
+For repository types that connect to a server, the JVM properties `net.enilink.data.server`, `net.enilink.data.username`, and `net.enilink.data.password` override the corresponding settings of the data model set; `net.enilink.metadata.…` does the same for the metadata.
+They do not select a repository type or configure the KVIN store.
+Keep the password out of version control.
+
+== Setting system properties
+
+JVM system properties are not environment variables.
+
+* Docker image: pass them through the Karaf start script, for example `-e EXTRA_JAVA_OPTS="-Denilink.loginrequired=true"`.
+* Local launch: add them to the `vmProperties` in `launch/equinox/pom.xml`.
+
+The setting `enilink.loginrequired=false` in `docker/docker-compose.yml` is an environment variable and has no effect; the login is not required by default anyway.
