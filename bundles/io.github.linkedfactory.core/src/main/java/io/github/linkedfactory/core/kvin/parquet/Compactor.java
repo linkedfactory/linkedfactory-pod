@@ -45,16 +45,13 @@ public class Compactor {
 		FileUtils.deleteDirectory(compactionFolder);
 
 		Set<String> compactedMappings;
-		List<File> weekFolders;
+		List<File> weekFolders = new ArrayList<>();
 		Lock readLock = kvinParquet.readLock();
 		try {
 			compactedMappings = compactMappingFiles();
-			weekFolders = getCompactionEligibleWeekFolders();
-			for (File weekFolder : weekFolders) {
-				try {
-					compactDataFiles(weekFolder);
-				} catch (IOException e) {
-					throw new KvinException(e);
+			for (File weekFolder : getCompactionEligibleWeekFolders()) {
+				if (compactDataFiles(weekFolder)) {
+					weekFolders.add(weekFolder);
 				}
 			}
 		} finally {
@@ -164,63 +161,74 @@ public class Compactor {
 				.build();
 	}
 
-	private void compactDataFiles(File weekFolder) throws IOException {
+	/**
+	 * Compacts the data files of a week folder into a single file in the compaction folder.
+	 * <p>
+	 * If a data file cannot be read, the week folder is not compacted. Its files are kept
+	 * unchanged, as replacing them with a compacted file would lose the unreadable data.
+	 *
+	 * @return <code>true</code> if the data files were compacted, else <code>false</code>
+	 */
+	private boolean compactDataFiles(File weekFolder) throws IOException {
+		java.nio.file.Path targetFolder = compactionFolder.toPath().resolve(
+				Paths.get(archiveLocation).relativize(weekFolder.toPath()));
 		Lock readLock = kvinParquet.readLock();
 		try {
-			List<java.nio.file.Path> dataFiles = Files.walk(weekFolder.toPath(), 1)
-					.skip(1)
-					.filter(path -> path.getFileName().toString().startsWith("data_"))
-					// sort descending by index
-					.sorted(Comparator.comparing(p -> {
-						try {
-							return -Integer.parseInt(p.getFileName().toString()
-									.replaceAll("^.*__", "")
-									.replaceAll("\\..*$", ""));
-						} catch (NumberFormatException nfe) {
-							return 0;
-						}
-					}))
-					.toList();
-
-			java.nio.file.Path targetFolder = compactionFolder.toPath().resolve(
-					Paths.get(archiveLocation).relativize(weekFolder.toPath()));
+			List<java.nio.file.Path> dataFiles;
+			try (var paths = Files.walk(weekFolder.toPath(), 1)) {
+				dataFiles = paths
+						.skip(1)
+						.filter(path -> path.getFileName().toString().startsWith("data_"))
+						// sort descending by index
+						.sorted(Comparator.comparing(p -> {
+							try {
+								return -Integer.parseInt(p.getFileName().toString()
+										.replaceAll("^.*__", "")
+										.replaceAll("\\..*$", ""));
+							} catch (NumberFormatException nfe) {
+								return 0;
+							}
+						}))
+						.toList();
+			}
 
 			Path compactionFile = new Path(targetFolder.toAbsolutePath().toString(), "data__1.parquet");
-			ParquetWriter<KvinRecord> compactionFileWriter = getKvinRecordWriter(compactionFile);
-
-			PriorityQueue<Pair<KvinRecord, IExtendedIterator<KvinRecord>>> nextRecords =
-					new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
-			for (java.nio.file.Path dataFile : dataFiles) {
-				try {
+			List<IExtendedIterator<KvinRecord>> readers = new ArrayList<>();
+			try (ParquetWriter<KvinRecord> compactionFileWriter = getKvinRecordWriter(compactionFile)) {
+				PriorityQueue<Pair<KvinRecord, IExtendedIterator<KvinRecord>>> nextRecords =
+						new PriorityQueue<>(Comparator.comparing(Pair::getFirst));
+				for (java.nio.file.Path dataFile : dataFiles) {
 					IExtendedIterator<KvinRecord> it = createKvinRecordReader(new Path(dataFile.toString()), null);
+					readers.add(it);
 					if (it.hasNext()) {
 						nextRecords.add(new Pair<>(it.next(), it));
-					} else {
-						it.close();
 					}
-				} catch (Exception e) {
-					log.error("Error while reading data file {}. Content is omitted from compaction.", dataFile, e);
+				}
+
+				KvinRecord prevRecord = null;
+				while (!nextRecords.isEmpty()) {
+					var pair = nextRecords.poll();
+					if (prevRecord == null || prevRecord.compareTo(pair.getFirst()) != 0) {
+						var tuple = pair.getFirst();
+						compactionFileWriter.write(tuple);
+						prevRecord = tuple;
+					}
+					// else: omit tuple as it is duplicate in terms of id, time, and seqNr
+
+					if (pair.getSecond().hasNext()) {
+						nextRecords.add(new Pair<>(pair.getSecond().next(), pair.getSecond()));
+					}
+				}
+			} catch (KvinException e) {
+				log.error("Error while reading data files of {}. The folder is not compacted.", weekFolder, e);
+				FileUtils.deleteDirectory(targetFolder.toFile());
+				return false;
+			} finally {
+				for (IExtendedIterator<KvinRecord> reader : readers) {
+					reader.close();
 				}
 			}
-
-			KvinRecord prevRecord = null;
-			while (!nextRecords.isEmpty()) {
-				var pair = nextRecords.poll();
-				if (prevRecord == null || prevRecord.compareTo(pair.getFirst()) != 0) {
-					var tuple = pair.getFirst();
-					compactionFileWriter.write(tuple);
-					prevRecord = tuple;
-				}
-				// else: omit tuple as it is duplicate in terms of id, time, and seqNr
-
-				if (pair.getSecond().hasNext()) {
-					nextRecords.add(new Pair<>(pair.getSecond().next(), pair.getSecond()));
-				} else {
-					pair.getSecond().close();
-				}
-			}
-
-			compactionFileWriter.close();
+			return true;
 		} finally {
 			readLock.release();
 		}

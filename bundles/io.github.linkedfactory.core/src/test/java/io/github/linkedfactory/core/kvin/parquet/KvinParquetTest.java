@@ -12,8 +12,12 @@ import org.junit.*;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static org.junit.Assert.*;
 
@@ -159,6 +163,70 @@ public class KvinParquetTest {
 		File nonSeqFolder = getNonSeqInsertFolder();
 		File[] dataFiles = nonSeqFolder.listFiles((file, s) -> s.endsWith(".parquet"));
 		assertEquals(1, dataFiles.length);
+	}
+
+	private File getSecondWeekFolder() {
+		return new File(new File(tempDir, "2023"), "42");
+	}
+
+	private static File[] dataFiles(File weekFolder) {
+		File[] files = weekFolder.listFiles((file, s) -> s.endsWith(".parquet"));
+		Arrays.sort(files);
+		return files;
+	}
+
+	private static Map<String, byte[]> contents(File[] files) throws IOException {
+		Map<String, byte[]> contents = new TreeMap<>();
+		for (File file : files) {
+			contents.put(file.getName(), Files.readAllBytes(file.toPath()));
+		}
+		return contents;
+	}
+
+	private void assertCompactionKeepsUnreadableFiles(File unreadableFile) throws IOException {
+		// add a second data file to the second week, so that it can also be compacted
+		kvinParquet.put(tupleGenerator.setStartTime(startTimeSecondWeek)
+				.setItems(10)
+				.setPropertiesPerItem(10)
+				.setValuesPerProperty(10)
+				.setItemPattern("http://localhost:8080/linkedfactory/demofactory/new-week-2/{}")
+				.setPropertyPattern("http://example.org/{}")
+				.generate());
+		assertEquals(2, dataFiles(getSecondWeekFolder()).length);
+
+		File[] filesBefore = dataFiles(getNonSeqInsertFolder());
+		Map<String, byte[]> contentsBefore = contents(filesBefore);
+
+		new Compactor(kvinParquet, 2, 1).execute();
+
+		// the week with the unreadable file is kept unchanged
+		File[] filesAfter = dataFiles(getNonSeqInsertFolder());
+		assertEquals(contentsBefore.keySet(), contents(filesAfter).keySet());
+		for (Map.Entry<String, byte[]> entry : contents(filesAfter).entrySet()) {
+			assertArrayEquals(contentsBefore.get(entry.getKey()), entry.getValue());
+		}
+		// the other week is compacted
+		assertEquals(1, dataFiles(getSecondWeekFolder()).length);
+		assertFalse(new File(tempDir, ".compaction").exists());
+
+		URI item = URIs.createURI("http://localhost:8080/linkedfactory/demofactory/new-week-2/1");
+		URI property = URIs.createURI("http://example.org/1");
+		assertEquals(10, kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 0).toList().size());
+	}
+
+	@Test
+	public void compactionKeepsDataFilesThatCannotBeOpened() throws IOException {
+		File unreadable = dataFiles(getNonSeqInsertFolder())[0];
+		Files.write(unreadable.toPath(), "not a parquet file".getBytes(StandardCharsets.UTF_8));
+		Files.deleteIfExists(new File(unreadable.getParentFile(), "." + unreadable.getName() + ".crc").toPath());
+		assertCompactionKeepsUnreadableFiles(unreadable);
+	}
+
+	@Test
+	public void compactionKeepsDataFilesThatCannotBeRead() throws IOException {
+		File unreadable = dataFiles(getNonSeqInsertFolder())[1];
+		ParquetHelpersTest.corruptData(unreadable);
+		assertCompactionKeepsUnreadableFiles(unreadable);
 	}
 
 	@Test

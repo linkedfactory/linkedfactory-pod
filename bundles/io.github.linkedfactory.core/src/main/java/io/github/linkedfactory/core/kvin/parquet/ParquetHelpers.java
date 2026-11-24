@@ -190,8 +190,8 @@ public class ParquetHelpers {
 					}
 				}
 			};
-		} catch (IOException e) {
-			throw new KvinException(e);
+		} catch (IOException | RuntimeException e) {
+			throw new KvinException("Error while opening file " + path, e);
 		}
 	}
 

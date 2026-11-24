@@ -46,7 +46,7 @@ public class ParquetHelpersTest {
 	 * Overwrites the data pages of the file but keeps its footer intact. The
 	 * Hadoop checksum file is removed so that the error occurs while reading.
 	 */
-	void corruptData(File file) throws IOException {
+	static void corruptData(File file) throws IOException {
 		Files.deleteIfExists(new File(file.getParentFile(), "." + file.getName() + ".crc").toPath());
 		try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
 			byte[] tail = new byte[8];
