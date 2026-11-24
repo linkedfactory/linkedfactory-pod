@@ -214,6 +214,34 @@ Use `PartitionSpecParser.toJson(spec)` to generate configuration from a Java-bui
 `KvinIceberg.withPartitionSpec(location, json)` also accepts this JSON without exposing Iceberg types to callers in other OSGi bundles.
 Omit `<partitionSpec>` to use the default/adoption behavior; invalid JSON, unsupported sources, and incompatible specs fail initialization.
 
+The following Iceberg table properties of the value table control how data is written.
+Set them with Iceberg's `Table.updateProperties()`; each write reads the current values.
+
+[cols="2,1,3"]
+|===
+|Property |Default |Meaning
+
+|`kvin.write.batch-records`
+|131072
+|Number of records that a write sorts in memory and stores as one data file per partition. A write with more records creates several files. Must be at least 1.
+
+|`write.parquet.row-group-size-bytes`
+|8 MB
+|Parquet row group size of data files. Compaction limits it to the target file size.
+
+|`write.parquet.page-size-bytes`
+|8 KB
+|Parquet page size of data files. Reads skip pages that cannot contain the requested values.
+
+|`kvin.compaction.min-files`
+|32
+|Number of small files in a partition that starts compaction after a write. Must be at least 2.
+
+|`write.target-file-size-bytes`
+|128 MB
+|Target size of compacted files. Files smaller than half of it are compacted.
+|===
+
 ID allocation stages mappings, including forward and reverse lookups, until `flush()` or `close()`; batches automatically flush at 8192 new mappings.
 Allocation is serialized using `iceberg-ids.lock`, held until flushing, so independent processes must flush before waiting for another process to allocate.
 Instances within the same JVM coordinate automatically, flushing the previous writer when another instance allocates.

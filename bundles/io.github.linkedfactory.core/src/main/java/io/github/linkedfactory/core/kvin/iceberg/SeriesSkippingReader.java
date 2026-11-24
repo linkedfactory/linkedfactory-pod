@@ -18,8 +18,15 @@ import org.apache.parquet.column.ColumnReader;
 import org.apache.parquet.column.impl.ColumnReadStoreImpl;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.example.data.simple.convert.GroupRecordConverter;
+import org.apache.parquet.filter2.compat.FilterCompat;
+import org.apache.parquet.filter2.predicate.FilterPredicate;
+import org.apache.parquet.internal.column.columnindex.ColumnIndex;
+import org.apache.parquet.internal.column.columnindex.OffsetIndex;
+import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.io.SeekableInputStream;
@@ -28,11 +35,17 @@ import org.apache.parquet.schema.MessageType;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Flat KVIN reader that skips value decoding for completed series and prunes
- * subsequent row groups using the advancing series boundary.
+ * subsequent row groups using the advancing series boundary. Within a row group,
+ * only the pages that may match the filter are read (via Parquet's column index).
+ * Column indexes can be cached per file like footers.
  *
  * <p>File footers are taken from a shared cache keyed by file location (data
  * files are immutable). Because a reader opened with a complete footer sees
@@ -66,6 +79,16 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 
 	SeriesSkippingReader(Schema schema, FileScanTask task, Expression filter,
 			Cache<String, ParquetMetadata> footers) throws IOException {
+		this(schema, task, filter, footers, null);
+	}
+
+	/**
+	 * @param columnIndexes optional cache of page indexes, keyed by file location
+	 *                      and row group start position; {@code null} reads them per reader
+	 */
+	SeriesSkippingReader(Schema schema, FileScanTask task, Expression filter,
+			Cache<String, ParquetMetadata> footers,
+			Cache<String, Map<Long, ColumnIndexStore>> columnIndexes) throws IOException {
 		this.schema = schema;
 		this.filter = filter;
 		this.evaluator = new Evaluator(schema.asStruct(), filter);
@@ -76,7 +99,15 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 		String location = task.file().location();
 		var path = new org.apache.hadoop.fs.Path(location);
 		HadoopInputFile inputFile = HadoopInputFile.fromPath(path, CONF);
-		ParquetReadOptions options = HadoopReadOptions.builder(CONF, path).build();
+		// The record filter lets readFilteredRowGroup skip pages via the column index.
+		// Dictionary and bloom filters would read extra data on every open.
+		ParquetReadOptions.Builder optionsBuilder = HadoopReadOptions.builder(CONF, path)
+				.useDictionaryFilter(false).useBloomFilter(false);
+		FilterPredicate pageFilter = ParquetPageFilters.convert(schema, filter);
+		if (pageFilter != null) {
+			optionsBuilder.withRecordFilter(FilterCompat.get(pageFilter));
+		}
+		ParquetReadOptions options = optionsBuilder.build();
 		ParquetMetadata footer = footers.getIfPresent(location);
 		if (footer == null) {
 			try (ParquetFileReader footerReader = ParquetFileReader.open(inputFile, options)) {
@@ -86,12 +117,68 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 		}
 		SeekableInputStream stream = inputFile.newStream();
 		try {
-			this.reader = ParquetFileReader.open(inputFile, footer, options, stream);
+			this.reader = columnIndexes == null ? ParquetFileReader.open(inputFile, footer, options, stream)
+					: new ParquetFileReader(inputFile, footer, options, stream) {
+				@Override
+				public ColumnIndexStore getColumnIndexStore(int blockIndex) {
+					BlockMetaData block = getRowGroups().get(blockIndex);
+					try {
+						return columnIndexes.get(location, ConcurrentHashMap::new)
+								.computeIfAbsent(block.getStartingPos(), ignored -> readColumnIndexes(this, block));
+					} catch (ExecutionException e) {
+						throw new UncheckedIOException(new IOException(e.getCause()));
+					}
+				}
+			};
 		} catch (IOException | RuntimeException e) {
 			stream.close();
 			throw e;
 		}
 		this.fileSchema = reader.getFileMetaData().getSchema();
+	}
+
+	/**
+	 * Reads the column and offset indexes of all columns of a row group. Unlike
+	 * Parquet's own store, the result does not read lazily through the reader and
+	 * can be cached beyond the reader's lifetime.
+	 */
+	private static ColumnIndexStore readColumnIndexes(ParquetFileReader reader, BlockMetaData block) {
+		Map<ColumnPath, ColumnIndex> columnIndexes = new HashMap<>();
+		Map<ColumnPath, OffsetIndex> offsetIndexes = new HashMap<>();
+		boolean complete = true;
+		try {
+			for (ColumnChunkMetaData column : block.getColumns()) {
+				ColumnIndex columnIndex = reader.readColumnIndex(column);
+				if (columnIndex != null) {
+					columnIndexes.put(column.getPath(), columnIndex);
+				}
+				OffsetIndex offsetIndex = reader.readOffsetIndex(column);
+				if (offsetIndex == null) {
+					complete = false;
+				} else {
+					offsetIndexes.put(column.getPath(), offsetIndex);
+				}
+			}
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+		// like Parquet: without all offset indexes, pages cannot be skipped
+		boolean skipPages = complete;
+		return new ColumnIndexStore() {
+			@Override
+			public ColumnIndex getColumnIndex(ColumnPath column) {
+				return skipPages ? columnIndexes.get(column) : null;
+			}
+
+			@Override
+			public OffsetIndex getOffsetIndex(ColumnPath column) throws MissingOffsetIndexException {
+				OffsetIndex offsetIndex = skipPages ? offsetIndexes.get(column) : null;
+				if (offsetIndex == null) {
+					throw new MissingOffsetIndexException(column);
+				}
+				return offsetIndex;
+			}
+		};
 	}
 
 	private boolean inRange(BlockMetaData group) {
@@ -127,12 +214,16 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 			groupFilterDirty = false;
 		}
 		while (groupIndex < reader.getRowGroups().size()) {
-			var group = reader.getRowGroups().get(groupIndex++);
+			int index = groupIndex++;
+			var group = reader.getRowGroups().get(index);
 			if (!inRange(group) || !groupFilter.shouldRead(fileSchema, group)) {
-				reader.skipNextRowGroup();
 				continue;
 			}
-			pages = reader.readNextRowGroup();
+			// reads only the pages that may match, or null if none does
+			pages = reader.readFilteredRowGroup(index);
+			if (pages == null) {
+				continue;
+			}
 			var store = new ColumnReadStoreImpl(pages,
 					new GroupRecordConverter(fileSchema).getRootConverter(), fileSchema,
 					reader.getFileMetaData().getCreatedBy());

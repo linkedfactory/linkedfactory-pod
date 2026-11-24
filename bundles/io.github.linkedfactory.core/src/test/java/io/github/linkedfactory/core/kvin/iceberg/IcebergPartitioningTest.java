@@ -253,7 +253,9 @@ public class IcebergPartitioningTest {
 	public void partitionWritersHandleBatchBoundaries() throws Exception {
 		try (var store = new IcebergRecordStore(root().toString(), null,
 				schema -> PartitionSpec.builderFor(schema).identity("contextId").build())) {
+			table().updateProperties().set(IcebergRecordStore.WRITE_BATCH_RECORDS, "8192").commit();
 			List<KvinRecord> input = new ArrayList<>();
+			// two batches, each split into both partitions
 			for (int time = 0; time < 8200; time++) {
 				input.add(new KvinRecord(1, time % 2, 2, time, 0, time));
 			}

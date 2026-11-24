@@ -187,7 +187,128 @@ public class KvinIcebergReadOptimizationTest {
 			reader.skipThrough((Long) first.get(0), (Long) first.get(1), (Long) first.get(2));
 			assertEquals("next", reader.next().get(10));
 			assertFalse(reader.hasNext());
-			verify(file, atLeastOnce()).skipNextRowGroup();
+			long reads = mockingDetails(file).getInvocations().stream()
+					.filter(invocation -> invocation.getMethod().getName().equals("readFilteredRowGroup")).count();
+			assertTrue("pruned row groups must not be read, read " + reads + " of " + file.getRowGroups().size(),
+					reads < file.getRowGroups().size());
+		}
+	}
+
+	@Test
+	public void pageIndexesAreCachedAcrossReaders() throws Exception {
+		URI other = URIs.createURI("urn:test:other");
+		int count = 8000;
+		List<KvinTuple> tuples = new ArrayList<>();
+		for (int time = count; time > 0; time--) {
+			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+		}
+		tuples.add(new KvinTuple(other, property, null, 1, 0, 1L));
+		store.put(tuples);
+		long otherId = store.getIdStore().getId(other, io.github.linkedfactory.core.kvin.ids.IdKind.ITEM, false);
+		Table table = table();
+		var footers = CacheBuilder.newBuilder().<String, ParquetMetadata>build();
+		var indexes = CacheBuilder.newBuilder()
+				.<String, java.util.Map<Long, org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore>>build();
+		String location;
+		try (var tasks = table.newScan().planFiles()) {
+			var task = tasks.iterator().next();
+			location = task.file().location();
+			try (var reader = new SeriesSkippingReader(table.schema(), task, Expressions.equal("itemId", otherId), footers, indexes)) {
+				assertEquals(1L, reader.next().get(3));
+				assertFalse(reader.hasNext());
+			}
+		}
+		var cached = indexes.getIfPresent(location);
+		assertNotNull(cached);
+		assertEquals(1, cached.size());
+		// a second reader of the same file uses the cached store, after the first reader was closed
+		var uses = new java.util.concurrent.atomic.AtomicInteger();
+		cached.replaceAll((position, delegate) -> new org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore() {
+			@Override
+			public org.apache.parquet.internal.column.columnindex.ColumnIndex getColumnIndex(org.apache.parquet.hadoop.metadata.ColumnPath column) {
+				uses.incrementAndGet();
+				return delegate.getColumnIndex(column);
+			}
+
+			@Override
+			public org.apache.parquet.internal.column.columnindex.OffsetIndex getOffsetIndex(org.apache.parquet.hadoop.metadata.ColumnPath column) {
+				return delegate.getOffsetIndex(column);
+			}
+		});
+		try (var tasks = table.newScan().planFiles();
+			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(),
+					 Expressions.equal("itemId", otherId), footers, indexes)) {
+			assertEquals(1L, reader.next().get(3));
+			assertFalse(reader.hasNext());
+		}
+		assertTrue("expected the cached page index to be used", uses.get() > 0);
+		try (var values = store.fetch(other, property, null, 0)) {
+			assertEquals(List.of(1L), values.toList().stream().map(tuple -> tuple.time).toList());
+		}
+	}
+
+	@Test
+	public void writerUsesSmallPagesByDefault() throws Exception {
+		List<KvinTuple> tuples = new ArrayList<>();
+		for (int time = 8000; time > 0; time--) {
+			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+		}
+		store.put(tuples);
+		Table table = table();
+		try (var tasks = table.newScan().planFiles()) {
+			var task = tasks.iterator().next();
+			var path = new org.apache.hadoop.fs.Path(task.file().location());
+			try (var file = ParquetFileReader.open(org.apache.parquet.hadoop.util.HadoopInputFile.fromPath(path, new Configuration()))) {
+				var block = file.getRowGroups().get(0);
+				var timeColumn = block.getColumns().stream()
+						.filter(column -> column.getPath().toDotString().equals("time")).findFirst().orElseThrow();
+				var offsets = file.readOffsetIndex(timeColumn);
+				assertNotNull("data files need an offset index for page skipping", offsets);
+				assertTrue("expected several pages, got " + offsets.getPageCount(), offsets.getPageCount() > 1);
+			}
+		}
+	}
+
+	@Test
+	public void pointFetchReadsOnlyMatchingPages() throws Exception {
+		URI other = URIs.createURI("urn:test:other");
+		int count = 8000;
+		List<KvinTuple> tuples = new ArrayList<>();
+		for (int time = count; time > 0; time--) {
+			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+		}
+		for (int time = 3; time > 0; time--) {
+			tuples.add(new KvinTuple(other, property, null, time, 0, (long) time));
+		}
+		store.put(tuples);
+		long otherId = store.getIdStore().getId(other, io.github.linkedfactory.core.kvin.ids.IdKind.ITEM, false);
+		Table table = table();
+		var footers = CacheBuilder.newBuilder().<String, ParquetMetadata>build();
+		try (var tasks = table.newScan().planFiles();
+			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(),
+					 Expressions.equal("itemId", otherId), footers)) {
+			assertEquals(otherId, reader.next().get(0));
+			var field = SeriesSkippingReader.class.getDeclaredField("pages");
+			field.setAccessible(true);
+			long rows = ((org.apache.parquet.column.page.PageReadStore) field.get(reader)).getRowCount();
+			assertTrue("expected only matching pages, read " + rows + " rows", rows < count);
+			assertEquals(otherId, reader.next().get(0));
+			assertEquals(otherId, reader.next().get(0));
+			assertFalse(reader.hasNext());
+		}
+		// the cached footer must still hold all row groups for other filters
+		try (var tasks = table.newScan().planFiles();
+			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(),
+					 Expressions.alwaysTrue(), footers)) {
+			int rows = 0;
+			while (reader.hasNext()) {
+				reader.next();
+				rows++;
+			}
+			assertEquals(count + 3, rows);
+		}
+		try (var values = store.fetch(other, property, null, 0)) {
+			assertEquals(List.of(3L, 2L, 1L), values.toList().stream().map(tuple -> tuple.time).toList());
 		}
 	}
 

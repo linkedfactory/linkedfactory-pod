@@ -309,6 +309,38 @@ public class KvinIcebergCompactionTest {
 	}
 
 	@Test
+	public void writeBatchSizeControlsDataFilesPerPut() throws Exception {
+		// the default keeps a large write in one sorted file
+		List<KvinTuple> tuples = new ArrayList<>();
+		for (int time = 0; time < 20_000; time++) {
+			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+		}
+		store.put(tuples);
+		assertEquals(1, files().size());
+
+		table().updateProperties().set(IcebergRecordStore.WRITE_BATCH_RECORDS, "100").commit();
+		List<KvinTuple> more = new ArrayList<>();
+		for (int time = 20_000; time < 20_250; time++) {
+			more.add(new KvinTuple(item, property, null, time, 0, (long) time));
+		}
+		store.put(more);
+		// 250 records in batches of 100
+		assertEquals(4, files().size());
+		assertSortedAndMarked(files());
+		try (IExtendedIterator<KvinTuple> rows = store.fetch(item, property, null, 0)) {
+			assertEquals(20_250, rows.toList().size());
+		}
+	}
+
+	@Test
+	public void invalidWriteBatchSizeIsRejectedBeforeWriting() throws Exception {
+		store.put(new KvinTuple(item, property, null, 1, 0, "committed"));
+		table().updateProperties().set(IcebergRecordStore.WRITE_BATCH_RECORDS, "0").commit();
+		assertThrows(IllegalArgumentException.class, () -> store.put(new KvinTuple(item, property, null, 2, 0, "rejected")));
+		assertEquals(1, files().size());
+	}
+
+	@Test
 	public void compactionFailureDoesNotRollBackCommittedAppend() throws Exception {
 		table().updateProperties().set("kvin.compaction.min-files", "invalid").commit();
 		assertThrows(NumberFormatException.class, () -> store.put(new KvinTuple(item, property, null, 1, 0, "committed")));

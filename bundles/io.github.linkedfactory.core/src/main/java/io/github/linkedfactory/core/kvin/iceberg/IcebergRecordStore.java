@@ -42,9 +42,11 @@ import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.types.Conversions;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.util.PropertyUtil;
 import org.apache.iceberg.util.StructLikeWrapper;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,13 +96,20 @@ import java.util.function.Function;
 public class IcebergRecordStore implements KvinRecordStore {
 	private static final Logger log = LoggerFactory.getLogger(IcebergRecordStore.class);
 
-	private static final int BATCH_SIZE = 8192;
+	// Records sorted in memory and written as one data file per partition. Larger
+	// batches give fewer, non-overlapping files for bulk writes but need more memory.
+	static final String WRITE_BATCH_RECORDS = "kvin.write.batch-records";
+	static final int DEFAULT_WRITE_BATCH_RECORDS = 131_072;
 	private static final int MAX_COMMIT_RETRIES = 5;
 	private static final String COMPACTION_MIN_FILES = "kvin.compaction.min-files";
 	private static final int DEFAULT_COMPACTION_MIN_FILES = 32;
 	private static final long DEFAULT_COMPACTION_TARGET_SIZE = 128L * 1024 * 1024;
 	private static final int COMPACTION_MAX_INPUT_FILES = 128;
 	private static final int FOOTER_CACHE_SIZE = 4096;
+	// Defaults for data files unless the table sets them. Iceberg's 128 MB row groups
+	// and 1 MB pages would make a point fetch decode large parts of a file.
+	static final long DEFAULT_ROW_GROUP_SIZE = 8L * 1024 * 1024;
+	static final long DEFAULT_PAGE_SIZE = 8L * 1024;
 	// Column statistics used to order and lazily open data files during fetches.
 	private static final List<String> FETCH_STATS_COLUMNS = List.of("itemId", "propertyId", "time");
 
@@ -116,6 +125,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private final Table table;
 	// Data files are immutable, so cached footers never become stale.
 	private final Cache<String, ParquetMetadata> footers = CacheBuilder.newBuilder().maximumSize(FOOTER_CACHE_SIZE).build();
+	// Page indexes per file and row group start position, for skipping pages in point fetches.
+	private final Cache<String, Map<Long, ColumnIndexStore>> columnIndexes =
+			CacheBuilder.newBuilder().maximumSize(FOOTER_CACHE_SIZE).build();
 
 	public IcebergRecordStore(String archiveLocation) {
 		this(archiveLocation, null);
@@ -218,7 +230,12 @@ public class IcebergRecordStore implements KvinRecordStore {
 	@Override
 	public synchronized void put(Iterable<KvinRecord> records) {
 		table.refresh();
-		List<GenericRecord> batch = new ArrayList<>(BATCH_SIZE);
+		int batchSize = PropertyUtil.propertyAsInt(table.properties(), WRITE_BATCH_RECORDS, DEFAULT_WRITE_BATCH_RECORDS);
+		if (batchSize < 1) {
+			throw new IllegalArgumentException(WRITE_BATCH_RECORDS + " must be at least 1");
+		}
+		// grows with the input, so small writes do not allocate a full batch
+		List<GenericRecord> batch = new ArrayList<>();
 		List<DataFile> files = new ArrayList<>();
 		List<String> paths = new ArrayList<>();
 
@@ -238,7 +255,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 				setValue(row, record.value());
 				batch.add(row);
 
-				if (batch.size() == BATCH_SIZE) {
+				if (batch.size() >= batchSize) {
 					writeBatch(batch, files, paths);
 				}
 			}
@@ -415,9 +432,15 @@ public class IcebergRecordStore implements KvinRecordStore {
 		paths.add(path);
 		Files.createDirectories(Path.of(path).getParent());
 		var builder = Parquet.write(table.io().newOutputFile(path)).forTable(table);
+		Map<String, String> properties = table.properties();
+		long rowGroupSize = PropertyUtil.propertyAsLong(properties, TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES,
+				DEFAULT_ROW_GROUP_SIZE);
 		if (targetSize != null) {
-			builder.set(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, Long.toString(Math.min(targetSize, 8L * 1024 * 1024)));
+			rowGroupSize = Math.min(targetSize, rowGroupSize);
 		}
+		builder.set(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, Long.toString(rowGroupSize));
+		builder.set(TableProperties.PARQUET_PAGE_SIZE_BYTES, Long.toString(PropertyUtil.propertyAsLong(properties,
+				TableProperties.PARQUET_PAGE_SIZE_BYTES, DEFAULT_PAGE_SIZE)));
 		var appender = builder.writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
 				.createWriterFunc(message -> GenericParquetWriter.create(SCHEMA, message)).<org.apache.iceberg.data.Record>build();
 		return new DataWriter<>(appender, FileFormat.PARQUET, path, spec, partition, null, table.sortOrder());
@@ -661,7 +684,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 			private void openFiles() {
 				while (nextFile < files.size() && (cursors.isEmpty()
 						|| ROW_ORDER.compare(files.get(nextFile).bound(), cursors.peek().row) <= 0)) {
-					RowCursor cursor = new RowCursor(files.get(nextFile++).task(), readFilter, footers);
+					RowCursor cursor = new RowCursor(files.get(nextFile++).task(), readFilter, footers, columnIndexes);
 					opened++;
 					try {
 						if (skipping) {
@@ -930,7 +953,10 @@ public class IcebergRecordStore implements KvinRecordStore {
 	}
 
 	private void invalidateFooters(Set<DataFile> replaced) {
-		replaced.forEach(file -> footers.invalidate(file.location()));
+		replaced.forEach(file -> {
+			footers.invalidate(file.location());
+			columnIndexes.invalidate(file.location());
+		});
 	}
 
 	private static boolean matchesDelete(KvinRow row, long itemId, Long propertyId, long contextId, long begin, long end) {
@@ -974,13 +1000,14 @@ public class IcebergRecordStore implements KvinRecordStore {
 		final CloseableIterator<org.apache.iceberg.data.Record> iterator;
 		KvinRow row;
 
-		RowCursor(FileScanTask task, Expression filter, Cache<String, ParquetMetadata> footers) {
+		RowCursor(FileScanTask task, Expression filter, Cache<String, ParquetMetadata> footers,
+				Cache<String, Map<Long, ColumnIndexStore>> columnIndexes) {
 			if (!task.deletes().isEmpty()) {
 				throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
 			}
 
 			try {
-				this.rows = new SeriesSkippingReader(SCHEMA, task, filter, footers);
+				this.rows = new SeriesSkippingReader(SCHEMA, task, filter, footers, columnIndexes);
 			} catch (IOException e) {
 				throw new UncheckedIOException("Unable to open Iceberg series reader", e);
 			}
