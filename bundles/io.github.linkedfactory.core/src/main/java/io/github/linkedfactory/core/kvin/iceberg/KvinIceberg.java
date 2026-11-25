@@ -293,9 +293,10 @@ public class KvinIceberg implements Kvin {
 	}
 
 	/**
-	 * Removes the values that are older than the retention period of the record store.
-	 * Does nothing without a retention period or for record stores other than
-	 * {@link IcebergRecordStore}. URI-ID mappings are kept.
+	 * Removes the values that are older than the retention period of the record store,
+	 * and expires old snapshots of the record store, see {@link IcebergRecordStore#cleanUp()}.
+	 * Does nothing for record stores other than {@link IcebergRecordStore}. URI-ID mappings
+	 * and the snapshots of the URI-ID tables are kept.
 	 *
 	 * @return the number of removed values
 	 */

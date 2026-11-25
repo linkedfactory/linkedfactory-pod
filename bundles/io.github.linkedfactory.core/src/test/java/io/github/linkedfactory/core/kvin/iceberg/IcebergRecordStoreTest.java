@@ -12,6 +12,7 @@ import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.CloseableIterable;
 import org.junit.After;
@@ -248,5 +249,86 @@ public class IcebergRecordStoreTest {
 	public void rejectsRetentionPeriodsThatAreNotPositive() {
 		assertThrows(IllegalArgumentException.class, () -> new IcebergRecordStore(directory.toString(), Duration.ZERO));
 		assertThrows(IllegalArgumentException.class, () -> new IcebergRecordStore(directory.toString(), Duration.ofDays(-1)));
+	}
+
+	private static Path localPath(String location) {
+		return location.startsWith("file:") ? Path.of(java.net.URI.create(location)) : Path.of(location);
+	}
+
+	private static void waitForNextMillisecond(long time) {
+		while (System.currentTimeMillis() <= time) {
+			Thread.onSpinWait();
+		}
+	}
+
+	@Test
+	public void expiringSnapshotsDeletesReplacedFiles() throws Exception {
+		store.put(new KvinRecord(0, 1, 2, 1, 0, "old"));
+		Set<String> oldFiles = dataFiles();
+		store.put(new KvinRecord(0, 1, 2, 10, 0, "new"));
+		assertEquals(1, store.deleteOlderThan(5));
+		assertFalse(dataFiles().containsAll(oldFiles));
+		// still referenced by the older snapshots
+		oldFiles.forEach(file -> assertTrue(Files.exists(localPath(file))));
+
+		long afterDelete = System.currentTimeMillis();
+		waitForNextMillisecond(afterDelete);
+		assertEquals(2, store.expireSnapshotsReplacedBefore(afterDelete + 1));
+		oldFiles.forEach(file -> assertFalse(Files.exists(localPath(file))));
+		dataFiles().forEach(file -> assertTrue(Files.exists(localPath(file))));
+		assertEquals(List.of(10L), times(store));
+		assertEquals(0, store.expireSnapshotsReplacedBefore(System.currentTimeMillis() + 1));
+	}
+
+	@Test
+	public void expiringSnapshotsKeepsFilesOfRecentlyReplacedSnapshots() throws Exception {
+		store.put(new KvinRecord(0, 1, 2, 1, 0, "old"));
+		Set<String> oldFiles = dataFiles();
+		long beforeDelete = System.currentTimeMillis();
+		waitForNextMillisecond(beforeDelete);
+		assertEquals(1, store.deleteOlderThan(5));
+
+		// the old snapshot was created before, but replaced after the given time
+		assertEquals(0, store.expireSnapshotsReplacedBefore(beforeDelete));
+		oldFiles.forEach(file -> assertTrue(Files.exists(localPath(file))));
+		// with the default maximum age of 5 days nothing is expired
+		assertEquals(0, store.expireSnapshots());
+		oldFiles.forEach(file -> assertTrue(Files.exists(localPath(file))));
+	}
+
+	@Test
+	public void cleanUpExpiresSnapshotsAccordingToTheTableProperty() throws Exception {
+		long now = System.currentTimeMillis();
+		long day = Duration.ofDays(1).toMillis();
+		store.close();
+		store = new IcebergRecordStore(directory.toString(), Duration.ofDays(7));
+		store.put(new KvinRecord(0, 1, 2, now - 14 * day, 0, "old"));
+		Set<String> oldFiles = dataFiles();
+		store.put(new KvinRecord(0, 1, 2, now, 0, "new"));
+		new HadoopTables(new Configuration()).load(directory.resolve("iceberg").toString())
+				.updateProperties().set(TableProperties.MAX_SNAPSHOT_AGE_MS, "0").commit();
+		waitForNextMillisecond(System.currentTimeMillis());
+
+		assertEquals(1, store.cleanUp());
+		waitForNextMillisecond(System.currentTimeMillis());
+		// the snapshot of the delete is current now, the older ones are expired
+		store.cleanUp();
+		oldFiles.forEach(file -> assertFalse(Files.exists(localPath(file))));
+		assertEquals(List.of(now), times(store));
+	}
+
+	@Test
+	public void expiringSnapshotsKeepsFilesOfBranches() throws Exception {
+		store.put(new KvinRecord(0, 1, 2, 1, 0, "old"));
+		Set<String> oldFiles = dataFiles();
+		store.createBranch("keep");
+		store.put(new KvinRecord(0, 1, 2, 10, 0, "new"));
+		assertEquals(1, store.deleteOlderThan(5));
+
+		long afterDelete = System.currentTimeMillis();
+		waitForNextMillisecond(afterDelete);
+		// only the snapshot that is not the head of a branch expires
+		assertEquals(1, store.expireSnapshotsReplacedBefore(afterDelete + 1));
+		oldFiles.forEach(file -> assertTrue(Files.exists(localPath(file))));
 	}
 }

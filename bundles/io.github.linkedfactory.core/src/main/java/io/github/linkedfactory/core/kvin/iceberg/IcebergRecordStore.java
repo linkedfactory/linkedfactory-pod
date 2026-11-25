@@ -17,7 +17,9 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
+import org.apache.iceberg.ExpireSnapshots;
 import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.HistoryEntry;
 import org.apache.iceberg.ManifestFiles;
 import org.apache.iceberg.PartitionKey;
 import org.apache.iceberg.PartitionSpec;
@@ -913,18 +915,85 @@ public class IcebergRecordStore implements KvinRecordStore {
 	}
 
 	/**
-	 * Removes the records whose time is older than the retention period, measured from now.
-	 * Does nothing if the store has no retention period.
+	 * Removes the records whose time is older than the retention period, measured from now,
+	 * if the store has a retention period. Then expires old snapshots with
+	 * {@link #expireSnapshots()}.
 	 *
 	 * @return the number of removed records
 	 */
 	public synchronized long cleanUp() {
-		if (retentionPeriod == null) {
+		long removed = 0;
+		if (retentionPeriod != null) {
+			long cutoff = System.currentTimeMillis() - retentionPeriod.toMillis();
+			log.info("Removing Iceberg records older than {}", Instant.ofEpochMilli(cutoff));
+			removed = deleteOlderThan(cutoff);
+		}
+		expireSnapshots();
+		return removed;
+	}
+
+	/**
+	 * Expires the snapshots that were replaced by a newer snapshot longer ago than the table
+	 * property {@code history.expire.max-snapshot-age-ms} (default 5 days), and deletes the
+	 * files that only they reference. The table property
+	 * {@code history.expire.min-snapshots-to-keep} and branches keep snapshots as well.
+	 *
+	 * @return the number of expired snapshots
+	 */
+	public synchronized int expireSnapshots() {
+		table.refresh();
+		long maxAge = PropertyUtil.propertyAsLong(table.properties(), TableProperties.MAX_SNAPSHOT_AGE_MS,
+				TableProperties.MAX_SNAPSHOT_AGE_MS_DEFAULT);
+		return expireSnapshotsReplacedBefore(System.currentTimeMillis() - maxAge);
+	}
+
+	/**
+	 * Expires the snapshots that stopped being current before {@code time}. Fetches read the
+	 * files of the snapshot that was current when they started, so a snapshot is not expired
+	 * just because it was created long ago.
+	 *
+	 * @return the number of expired snapshots
+	 */
+	synchronized int expireSnapshotsReplacedBefore(long time) {
+		table.refresh();
+		// the snapshot that was current at the given time; all older snapshots were replaced before
+		Snapshot currentAtTime = null;
+		for (HistoryEntry entry : table.history()) {
+			if (entry.timestampMillis() > time) {
+				break;
+			}
+			Snapshot snapshot = table.snapshot(entry.snapshotId());
+			if (snapshot != null) {
+				currentAtTime = snapshot;
+			}
+		}
+		if (currentAtTime == null) {
 			return 0;
 		}
-		long cutoff = System.currentTimeMillis() - retentionPeriod.toMillis();
-		log.info("Removing Iceberg records older than {}", Instant.ofEpochMilli(cutoff));
-		return deleteOlderThan(cutoff);
+		long olderThan = currentAtTime.timestampMillis();
+		// Iceberg decides which snapshots expire, for example it keeps snapshots of branches
+		List<Snapshot> expired = table.expireSnapshots().expireOlderThan(olderThan).apply();
+		if (expired.isEmpty()) {
+			return 0;
+		}
+		/*
+		 * Naming the snapshots selects the cleanup that deletes every file the remaining
+		 * snapshots do not reach. The default incremental cleanup deletes a data file only
+		 * when the snapshot that removed it expires, so files dropped by the latest rewrite
+		 * would stay until a later expiry.
+		 */
+		ExpireSnapshots expire = table.expireSnapshots().expireOlderThan(olderThan)
+				.deleteWith(this::deleteExpiredFile);
+		expired.forEach(snapshot -> expire.expireSnapshotId(snapshot.snapshotId()));
+		expire.commit();
+		log.info("Expired {} Iceberg snapshots replaced before {}", expired.size(), Instant.ofEpochMilli(time));
+		return expired.size();
+	}
+
+	private void deleteExpiredFile(String location) {
+		footers.invalidate(location);
+		columnIndexes.invalidate(location);
+		table.io().deleteFile(location);
 	}
 
 	/**

@@ -208,7 +208,13 @@ It must be positive.
 Data files that contain only older values are dropped without being rewritten; other files that contain them are rewritten without them.
 With a partition on `time`, most old files are dropped as a whole.
 `deleteOlderThan(time)` of `IcebergRecordStore` removes the values before a given time in the same way.
-The removed data files stay on disk because older Iceberg snapshots still reference them.
+
+`cleanUp()` also expires old snapshots of the value table, with or without a retention period.
+A snapshot expires once a newer snapshot has replaced it for longer than the table property `history.expire.max-snapshot-age-ms` (default 5 days).
+Data files that no remaining snapshot references are then deleted from disk.
+Snapshots of branches, and as many snapshots as the table property `history.expire.min-snapshots-to-keep` requires, are kept.
+`expireSnapshots()` of `IcebergRecordStore` expires snapshots without removing values.
+The URI-ID tables keep all their snapshots.
 
 `delete(context)` removes all values of a context in one commit.
 Data files that contain only this context are dropped without being rewritten; other files that contain it are rewritten without its rows.
