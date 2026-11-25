@@ -334,6 +334,20 @@ public class KvinPartitioned implements Kvin {
 		}
 	}
 
+	/**
+	 * Deletes the values of the context in the hot store. Like the other delete methods,
+	 * this does not change archived values.
+	 */
+	@Override
+	public long delete(URI context) {
+		Lock readLock = readLock();
+		try {
+			return hotStore.delete(context);
+		} finally {
+			readLock.release();
+		}
+	}
+
 	@Override
 	public IExtendedIterator<URI> descendants(URI item, URI context) {
 		Lock readLock = readLock();

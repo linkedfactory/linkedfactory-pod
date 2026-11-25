@@ -284,6 +284,59 @@ public class KvinLevelDbTest extends KvinTestBase {
 	}
 
 	@Test
+	public void testDeleteContext() {
+		URI item1 = URIs.createURI("http://example.org/item1");
+		URI item2 = URIs.createURI("http://example.org/item2");
+		URI ctxA = URIs.createURI("ctx:a");
+		URI ctxB = URIs.createURI("ctx:b");
+		URI prefix = URIs.createURI("http://example.org/");
+		store.put(new KvinTuple(item1, valueProperty, ctxA, 100, 1),
+				new KvinTuple(item1, valueProperty, ctxA, 200, 2),
+				new KvinTuple(item2, propertyUri(1), ctxA, 100, 3),
+				new KvinTuple(item1, valueProperty, ctxB, 100, 4),
+				new KvinTuple(item2, valueProperty, null, 100, 5));
+
+		assertEquals(3, store.delete(ctxA));
+		assertEquals(List.of(), fetched(item1, valueProperty, ctxA));
+		assertEquals(List.of(), fetched(item2, propertyUri(1), ctxA));
+		assertEquals(List.of(), store.properties(item1, ctxA).toList());
+		assertEquals(List.of(), store.descendants(prefix, ctxA).toList());
+
+		// other contexts are not changed
+		assertEquals(List.of(new KvinTuple(item1, valueProperty, ctxB, 100, 4)), fetched(item1, valueProperty, ctxB));
+		assertEquals(List.of(new KvinTuple(item2, valueProperty, Kvin.DEFAULT_CONTEXT, 100, 5)),
+				fetched(item2, valueProperty, null));
+
+		// deleting again or deleting an unknown context deletes nothing
+		assertEquals(0, store.delete(ctxA));
+		assertEquals(0, store.delete(URIs.createURI("ctx:unknown")));
+
+		// the context can be used again
+		store.put(new KvinTuple(item2, valueProperty, ctxA, 300, 6));
+		assertEquals(List.of(new KvinTuple(item2, valueProperty, ctxA, 300, 6)), fetched(item2, valueProperty, ctxA));
+		assertEquals(List.of(item2), store.descendants(prefix, ctxA).toList());
+
+		// null selects the default context
+		assertEquals(1, store.delete((URI) null));
+		assertEquals(List.of(), fetched(item2, valueProperty, null));
+		assertEquals(List.of(new KvinTuple(item2, valueProperty, ctxA, 300, 6)), fetched(item2, valueProperty, ctxA));
+	}
+
+	@Test
+	public void testDeleteContextAcrossBatches() {
+		URI item = URIs.createURI("http://example.org/item");
+		URI ctx = URIs.createURI("ctx:large");
+		int count = 100000 + 10;
+		List<KvinTuple> tuples = new ArrayList<>();
+		for (int i = 0; i < count; i++) {
+			tuples.add(new KvinTuple(item, valueProperty, ctx, i, i));
+		}
+		store.put(tuples);
+		assertEquals(count, store.delete(ctx));
+		assertEquals(List.of(), fetched(item, valueProperty, ctx));
+	}
+
+	@Test
 	public void testReopenStoreWithFormatVersion() {
 		URI item = URIs.createURI("http://example.org/item");
 		store.put(new KvinTuple(item, valueProperty, null, 100, 1));

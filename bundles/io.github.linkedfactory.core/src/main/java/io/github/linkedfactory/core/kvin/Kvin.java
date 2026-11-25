@@ -177,6 +177,20 @@ public interface Kvin extends Closeable {
 	boolean delete(URI item, URI context);
 
 	/**
+	 * Deletes all values of all items in the given context.
+	 * <p>
+	 * The IDs of the context, its items and their properties are kept, so the context can be
+	 * used again afterwards. Values that are added concurrently to the same context may or may not be deleted.
+	 *
+	 * @param context The context URI, <code>null</code> for the default context.
+	 * @return Number of deleted values.
+	 * @throws UnsupportedOperationException if the store does not support deleting contexts
+	 */
+	default long delete(URI context) {
+		throw new UnsupportedOperationException("Deleting a context is not supported by " + getClass().getName());
+	}
+
+	/**
 	 * Returns all known sub-items of a given item.
 	 *
 	 * @param item    The item URI.

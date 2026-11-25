@@ -53,6 +53,11 @@ public class DelegatingKvin implements Kvin {
     }
 
     @Override
+    public long delete(URI context) {
+        return getDelegate().delete(context);
+    }
+
+    @Override
     public IExtendedIterator<URI> descendants(URI item, URI context) {
         return getDelegate().descendants(item, context);
     }

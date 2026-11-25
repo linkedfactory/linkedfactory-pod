@@ -352,49 +352,59 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 	public boolean delete(URI item, URI context) {
 		byte[] contextId = toId(contextOrDefault(context), EntryType.ContextToId, false, null);
 		byte[] itemId = toId(item, EntryType.SubjectToId, false, null);
-		boolean deletedAny = false;
-		if (itemId != null && contextId != null) {
-			byte[] prefix = new byte[contextId.length + itemId.length];
-			System.arraycopy(contextId, 0, prefix, 0, contextId.length);
-			System.arraycopy(itemId, 0, prefix, contextId.length, itemId.length);
+		if (itemId == null || contextId == null) {
+			return false;
+		}
+		byte[] prefix = new byte[contextId.length + itemId.length];
+		System.arraycopy(contextId, 0, prefix, 0, contextId.length);
+		System.arraycopy(itemId, 0, prefix, contextId.length, itemId.length);
+		return deleteByPrefix(prefix) > 0;
+	}
 
-			DBIterator it = values.iterator();
-			WriteBatch batch = null;
-			try {
-				long count = 0L;
+	/**
+	 * Deletes all values of the context with one range scan, as the context ID is the leading part of the keys.
+	 */
+	@Override
+	public long delete(URI context) {
+		byte[] contextId = toId(contextOrDefault(context), EntryType.ContextToId, false, null);
+		return contextId == null ? 0L : deleteByPrefix(contextId);
+	}
 
-				it.seek(prefix);
-				while (it.hasNext()) {
-					Map.Entry<byte[], byte[]> entry = it.next();
-					byte[] key = entry.getKey();
-					if (!startsWith(key, prefix)) {
-						break;
-					}
-					deletedAny = true;
-
-					if (batch == null) {
-						batch = values.createWriteBatch();
-					}
-					count += 1;
-					batch.delete(key);
-					if (count % DELETE_BATCH_SIZE == 0) {
-						values.write(batch, new WriteOptions().sync(false));
-						closeUnchecked(batch);
-						batch = values.createWriteBatch();
-					}
+	/**
+	 * Deletes all values whose keys start with the given prefix.
+	 *
+	 * @return the number of deleted values
+	 */
+	private long deleteByPrefix(byte[] prefix) {
+		long count = 0L;
+		WriteBatch batch = null;
+		try (DBIterator it = values.iterator()) {
+			it.seek(prefix);
+			while (it.hasNext()) {
+				byte[] key = it.next().getKey();
+				if (!startsWith(key, prefix)) {
+					break;
 				}
-
-				if (batch != null && count % DELETE_BATCH_SIZE != 0) {
+				if (batch == null) {
+					batch = values.createWriteBatch();
+				}
+				count += 1;
+				batch.delete(key);
+				if (count % DELETE_BATCH_SIZE == 0) {
 					values.write(batch, new WriteOptions().sync(false));
-				}
-			} finally {
-				it.close();
-				if (batch != null) {
 					closeUnchecked(batch);
+					batch = null;
 				}
 			}
+			if (batch != null) {
+				values.write(batch, new WriteOptions().sync(false));
+			}
+		} finally {
+			if (batch != null) {
+				closeUnchecked(batch);
+			}
 		}
-		return deletedAny;
+		return count;
 	}
 
 	@Override
