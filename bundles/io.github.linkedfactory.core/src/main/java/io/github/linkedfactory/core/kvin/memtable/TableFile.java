@@ -18,8 +18,30 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentSkipListMap;
 
+/**
+ * An append-only file of KVIN records with an in-memory index.
+ * <p>
+ * Each entry starts with its length, followed by a kind field. The kinds 0 to 3 are value records,
+ * where the kind is the number of leading IDs shared with the previous value record. Larger kinds
+ * are tombstones of deletes. When an existing file is opened, the entries are replayed in order,
+ * so a tombstone removes only the records written before it.
+ */
 public class TableFile implements KvinRecordStore {
 	static long LENGTH = 5L * 1024 * 1024;
+
+	/**
+	 * Tombstone of a context: kind, context ID.
+	 */
+	static final int CONTEXT_TOMBSTONE = 4;
+	/**
+	 * Tombstone of an item in a context: kind, context ID, item ID.
+	 */
+	static final int ITEM_TOMBSTONE = 5;
+	/**
+	 * Tombstone of a time range: kind, context ID, item ID, property ID + 1 (0 for all properties),
+	 * end and begin as 8-byte values, as times may be negative.
+	 */
+	static final int RANGE_TOMBSTONE = 6;
 
 	Path path;
 	RandomAccessFile rafile;
@@ -61,7 +83,7 @@ public class TableFile implements KvinRecordStore {
 		}
 	}
 
-	void put(KvinRecord record) throws IOException {
+	synchronized void put(KvinRecord record) throws IOException {
 		ItemWithContext icp = new ItemWithContext(record.itemId(), record.contextId());
 
 		int itemLength = compressedIdsLength(record.itemId(), record.contextId(), record.propertyId());
@@ -69,10 +91,7 @@ public class TableFile implements KvinRecordStore {
 				+ Varint.calcLengthUnsigned(record.seqNr());
 		int valueLength = ((byte[]) record.value()).length;
 
-		int requiredSpace = Varint.MAX_BYTES + itemLength + keyLength + valueLength;
-		if (buffer.remaining() < requiredSpace) {
-			buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, buffer.capacity() * 2L);
-		}
+		ensureCapacity(Varint.MAX_BYTES + itemLength + keyLength + valueLength);
 
 		int recordStart = buffer.position();
 		Varint.writeUnsigned(buffer, itemLength + keyLength + valueLength);
@@ -88,6 +107,49 @@ public class TableFile implements KvinRecordStore {
 		previousPropertyId = record.propertyId();
 
 		addRange(icp, record.propertyId(), recordStart);
+	}
+
+	/**
+	 * Grows the mapping of the file if fewer than the given number of bytes are left.
+	 */
+	private void ensureCapacity(int required) throws IOException {
+		if (buffer.remaining() < required) {
+			int position = buffer.position();
+			long capacity = buffer.capacity();
+			while (capacity - position < required) {
+				capacity *= 2;
+			}
+			buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, capacity);
+			// a new mapping starts at position 0
+			buffer.position(position);
+		}
+	}
+
+	private void writeTombstone(int kind, long contextId, long itemId, long propertyField, long end, long begin) {
+		int length = Varint.calcLengthUnsigned(kind) + Varint.calcLengthUnsigned(contextId);
+		if (kind != CONTEXT_TOMBSTONE) {
+			length += Varint.calcLengthUnsigned(itemId);
+		}
+		if (kind == RANGE_TOMBSTONE) {
+			length += Varint.calcLengthUnsigned(propertyField) + 2 * Long.BYTES;
+		}
+		try {
+			ensureCapacity(Varint.MAX_BYTES + length);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+		Varint.writeUnsigned(buffer, length);
+		Varint.writeUnsigned(buffer, kind);
+		Varint.writeUnsigned(buffer, contextId);
+		if (kind != CONTEXT_TOMBSTONE) {
+			Varint.writeUnsigned(buffer, itemId);
+		}
+		if (kind == RANGE_TOMBSTONE) {
+			Varint.writeUnsigned(buffer, propertyField);
+			buffer.putLong(end);
+			buffer.putLong(begin);
+		}
+		// tombstones do not change the IDs that the next value record is compressed against
 	}
 
 	@Override
@@ -141,8 +203,61 @@ public class TableFile implements KvinRecordStore {
 	}
 
 	@Override
-	public long delete(long itemId, Long propertyId, Long contextId, long end, long begin) {
-		var key = new ItemWithContext(itemId, contextOrDefault(contextId));
+	public synchronized long delete(long itemId, Long propertyId, Long contextId, long end, long begin) {
+		long ctx = contextOrDefault(contextId);
+		Long property = propertyId == null || propertyId == -1 ? null : propertyId;
+		if (!items.containsKey(new ItemWithContext(itemId, ctx))) {
+			return 0;
+		}
+		writeTombstone(RANGE_TOMBSTONE, ctx, itemId, property == null ? 0 : property + 1, end, begin);
+		return removeRange(itemId, property, ctx, end, begin);
+	}
+
+	@Override
+	public synchronized boolean delete(long itemId, Long contextId) {
+		long ctx = contextOrDefault(contextId);
+		if (!items.containsKey(new ItemWithContext(itemId, ctx))) {
+			return false;
+		}
+		writeTombstone(ITEM_TOMBSTONE, ctx, itemId, 0, 0, 0);
+		return items.remove(new ItemWithContext(itemId, ctx)) != null;
+	}
+
+	/**
+	 * Deletes all records of the context: appends a tombstone and removes the context's range of items from the index.
+	 */
+	@Override
+	public synchronized long delete(Long contextId) {
+		long ctx = contextOrDefault(contextId);
+		if (contextRange(ctx).isEmpty()) {
+			return 0;
+		}
+		writeTombstone(CONTEXT_TOMBSTONE, ctx, 0, 0, 0, 0);
+		return removeContext(ctx);
+	}
+
+	private NavigableMap<ItemWithContext, List<ItemData>> contextRange(long contextId) {
+		return items.subMap(new ItemWithContext(Long.MIN_VALUE, contextId), true,
+				new ItemWithContext(Long.MAX_VALUE, contextId), true);
+	}
+
+	private long removeContext(long contextId) {
+		long deleted = 0;
+		for (var entry : contextRange(contextId).entrySet()) {
+			List<ItemData> itemDataList = entry.getValue();
+			synchronized (itemDataList) {
+				if (items.remove(entry.getKey(), itemDataList)) {
+					for (ItemData itemData : itemDataList) {
+						deleted += size(itemData);
+					}
+				}
+			}
+		}
+		return deleted;
+	}
+
+	private long removeRange(long itemId, Long propertyId, long contextId, long end, long begin) {
+		var key = new ItemWithContext(itemId, contextId);
 		var itemDataList = items.get(key);
 		if (itemDataList == null || itemDataList.isEmpty()) {
 			return 0;
@@ -173,31 +288,39 @@ public class TableFile implements KvinRecordStore {
 		return deleted;
 	}
 
-	@Override
-	public boolean delete(long itemId, Long contextId) {
-		return items.remove(new ItemWithContext(itemId, contextOrDefault(contextId))) != null;
-	}
-
 	/**
-	 * Deletes all records of the context by removing its range of items from the index.
+	 * Applies a tombstone while the file is read.
+	 *
+	 * @return <code>false</code> if the tombstone is incomplete or has an unknown kind
 	 */
-	@Override
-	public long delete(Long contextId) {
-		long ctx = contextOrDefault(contextId);
-		var range = items.subMap(new ItemWithContext(Long.MIN_VALUE, ctx), true,
-				new ItemWithContext(Long.MAX_VALUE, ctx), true);
-		long deleted = 0;
-		for (var entry : range.entrySet()) {
-			List<ItemData> itemDataList = entry.getValue();
-			synchronized (itemDataList) {
-				if (items.remove(entry.getKey(), itemDataList)) {
-					for (ItemData itemData : itemDataList) {
-						deleted += size(itemData);
-					}
-				}
-			}
+	private boolean applyTombstone(ByteBuffer bb, int kind, int payloadEnd) {
+		if (kind > RANGE_TOMBSTONE) {
+			return false;
 		}
-		return deleted;
+		long contextId = Varint.readUnsigned(bb);
+		if (kind == CONTEXT_TOMBSTONE) {
+			if (bb.position() > payloadEnd) {
+				return false;
+			}
+			removeContext(contextId);
+			return true;
+		}
+		long itemId = Varint.readUnsigned(bb);
+		if (kind == ITEM_TOMBSTONE) {
+			if (bb.position() > payloadEnd) {
+				return false;
+			}
+			items.remove(new ItemWithContext(itemId, contextId));
+			return true;
+		}
+		long propertyField = Varint.readUnsigned(bb);
+		if (bb.position() + 2 * Long.BYTES > payloadEnd) {
+			return false;
+		}
+		long end = bb.getLong();
+		long begin = bb.getLong();
+		removeRange(itemId, propertyField == 0 ? null : propertyField - 1, contextId, end, begin);
+		return true;
 	}
 
 	@Override
@@ -461,6 +584,14 @@ public class TableFile implements KvinRecordStore {
 			}
 			try {
 				long sharedPrefix = Varint.readUnsigned(bb);
+				if (sharedPrefix > 3) {
+					if (!applyTombstone(bb, (int) Math.min(sharedPrefix, Integer.MAX_VALUE), payloadEnd)) {
+						bb.position(recordStart);
+						break;
+					}
+					bb.position(payloadEnd);
+					continue;
+				}
 				long itemId = sharedPrefix < 1 ? Varint.readUnsigned(bb) : previousItemId;
 				long contextId = sharedPrefix < 2 ? Varint.readUnsigned(bb) : previousContextId;
 				long propertyId = sharedPrefix < 3 ? Varint.readUnsigned(bb) : previousPropertyId;

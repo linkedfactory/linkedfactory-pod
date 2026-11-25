@@ -15,6 +15,7 @@ import java.util.List;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class TableFileTest {
@@ -116,6 +117,108 @@ public class TableFileTest {
 			assertEquals(1, records.size());
 			assertEquals(2000L, records.get(0).time());
 			assertTrue(tableFile.properties(1L, 2L).toList().contains(3L));
+		}
+	}
+
+	private static byte[] bytes(String value) {
+		return value.getBytes(StandardCharsets.UTF_8);
+	}
+
+	private static List<Long> times(TableFile tableFile, long item, Long property, long context) {
+		return tableFile.fetch(item, property, context, 100L).toList().stream().map(KvinRecord::time).toList();
+	}
+
+	@Test
+	public void shouldKeepContextDeleteAfterReopening() throws IOException {
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			tableFile.put(
+					new KvinRecord(2L, 1L, 3L, 1000L, 0, bytes("deleted")),
+					new KvinRecord(2L, 4L, 3L, 1000L, 0, bytes("deleted")),
+					new KvinRecord(5L, 1L, 3L, 1000L, 0, bytes("kept")));
+			assertEquals(2, tableFile.delete(2L));
+			// written after the delete, so the tombstone does not apply to it
+			tableFile.put(new KvinRecord(2L, 1L, 3L, 2000L, 0, bytes("re-added")));
+		}
+
+		try (TableFile reopened = new TableFile(tablePath)) {
+			assertEquals(List.of(2000L), times(reopened, 1L, 3L, 2L));
+			assertEquals(List.of(), times(reopened, 4L, 3L, 2L));
+			assertEquals(List.of(1000L), times(reopened, 1L, 3L, 5L));
+			assertArrayEquals(bytes("re-added"), (byte[]) reopened.fetch(1L, 3L, 2L, 1L).next().value());
+			// appending after reopening continues behind the existing entries
+			reopened.put(new KvinRecord(5L, 1L, 3L, 3000L, 0, bytes("appended")));
+		}
+
+		try (TableFile reopened = new TableFile(tablePath)) {
+			assertEquals(List.of(3000L, 1000L), times(reopened, 1L, 3L, 5L));
+			assertEquals(List.of(2000L), times(reopened, 1L, 3L, 2L));
+		}
+	}
+
+	@Test
+	public void shouldKeepItemAndRangeDeletesAfterReopening() throws IOException {
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			tableFile.put(
+					new KvinRecord(2L, 1L, 3L, 1000L, 0, bytes("a")),
+					new KvinRecord(2L, 1L, 3L, 1001L, 0, bytes("b")),
+					new KvinRecord(2L, 1L, 3L, 1002L, 0, bytes("c")),
+					new KvinRecord(2L, 1L, 4L, 1001L, 0, bytes("d")),
+					new KvinRecord(2L, 6L, 3L, 1000L, 0, bytes("e")),
+					new KvinRecord(2L, 7L, 3L, 1000L, 0, bytes("f")),
+					new KvinRecord(2L, 7L, 3L, 1500L, 0, bytes("g")));
+			// one property, time range
+			assertEquals(1, tableFile.delete(1L, 3L, 2L, 1001L, 1001L));
+			// all properties, unbounded begin
+			assertEquals(1, tableFile.delete(7L, null, 2L, 1200L, Long.MIN_VALUE));
+			assertTrue(tableFile.delete(6L, 2L));
+			assertFalse(tableFile.delete(6L, 2L));
+			assertEquals(0, tableFile.delete(8L, null, 2L, Long.MAX_VALUE, Long.MIN_VALUE));
+		}
+
+		try (TableFile reopened = new TableFile(tablePath)) {
+			assertEquals(List.of(1002L, 1000L), times(reopened, 1L, 3L, 2L));
+			assertEquals(List.of(1001L), times(reopened, 1L, 4L, 2L));
+			assertEquals(List.of(), times(reopened, 6L, null, 2L));
+			assertEquals(List.of(1500L), times(reopened, 7L, null, 2L));
+		}
+	}
+
+	@Test
+	public void shouldReadCompressedIdsAcrossTombstones() throws IOException {
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			tableFile.put(new KvinRecord(2L, 1L, 3L, 1000L, 0, bytes("before")),
+					new KvinRecord(9L, 8L, 3L, 1000L, 0, bytes("other")));
+			assertEquals(1, tableFile.delete(2L));
+			// shares all IDs with the record before the tombstone
+			tableFile.put(new KvinRecord(9L, 8L, 3L, 1001L, 0, bytes("after")));
+		}
+
+		try (TableFile reopened = new TableFile(tablePath)) {
+			assertEquals(List.of(1001L, 1000L), times(reopened, 8L, 3L, 9L));
+			assertEquals(List.of(), times(reopened, 1L, 3L, 2L));
+		}
+	}
+
+	@Test
+	public void shouldKeepEntriesWhenTheMappingGrows() throws IOException {
+		long length = TableFile.LENGTH;
+		TableFile.LENGTH = 64;
+		try {
+			try (TableFile tableFile = new TableFile(tablePath)) {
+				for (int i = 0; i < 100; i++) {
+					tableFile.put(new KvinRecord(2L, 1L, 3L, i, 0, bytes("value-" + i)));
+				}
+				assertEquals(10, tableFile.delete(1L, 3L, 2L, 99L, 90L));
+				assertEquals(90, times(tableFile, 1L, 3L, 2L).size());
+			}
+			try (TableFile reopened = new TableFile(tablePath)) {
+				List<KvinRecord> records = reopened.fetch(1L, 3L, 2L, 1000L).toList();
+				assertEquals(90, records.size());
+				assertEquals(89L, records.get(0).time());
+				assertArrayEquals(bytes("value-0"), (byte[]) records.get(89).value());
+			}
+		} finally {
+			TableFile.LENGTH = length;
 		}
 	}
 }

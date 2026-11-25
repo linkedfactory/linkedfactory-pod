@@ -42,6 +42,20 @@ public class VarintTest {
 	}
 
 	@Test
+	public void testVarintAtPosition() {
+		ByteBuffer bb = ByteBuffer.allocate(3 + 9);
+		// 3000 uses the 3-byte form with different second and third bytes
+		long[] positional = {0, 240, 241, 2287, 2288, 3000, 67823, 67824, 16777215, 72057594037927935L + 1};
+		for (long value : positional) {
+			bb.clear();
+			bb.put(new byte[]{7, 7, 7});
+			Varint.writeUnsigned(bb, value);
+			assertEquals("Positional decoding of " + value, value, Varint.readUnsigned(bb, 3));
+			assertEquals(Varint.calcLengthUnsigned(value), Varint.firstToLength(bb.get(3)));
+		}
+	}
+
+	@Test
 	public void testVarintList() {
 		ByteBuffer bb = ByteBuffer.allocate(2 + 4 * Long.BYTES);
 		for (int i = 0; i < values.length - 4; i++) {

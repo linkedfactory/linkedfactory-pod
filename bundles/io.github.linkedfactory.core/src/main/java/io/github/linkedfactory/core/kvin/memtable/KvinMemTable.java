@@ -398,8 +398,8 @@ public class KvinMemTable implements Kvin {
 	}
 
 	/**
-	 * Deletes the values of the context in the current table file. Like the other
-	 * deletes of {@link TableFile}, this only changes the in-memory index.
+	 * Deletes the values of the context in the current table file. The table file records
+	 * the delete as a tombstone, so it also applies after the file is opened again.
 	 */
 	@Override
 	public long delete(URI context) {

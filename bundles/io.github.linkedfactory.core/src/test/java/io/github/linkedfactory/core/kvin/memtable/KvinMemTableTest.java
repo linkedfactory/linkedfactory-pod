@@ -79,4 +79,19 @@ public class KvinMemTableTest {
 	public void deletesNothingBeforeTheFirstWrite() {
 		assertEquals(0, store.delete(contextA));
 	}
+
+	@Test
+	public void keepsContextDeleteAfterReopening() throws IOException {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1),
+				new KvinTuple(contextB, item, property, 1, 0, 2));
+		assertEquals(1, store.delete(contextA));
+		store.close();
+
+		store = new KvinMemTable(directory);
+		// the table file is opened by the first write
+		store.put(new KvinTuple(contextB, other, property, 2, 0, 3));
+		assertEquals(0, count(item, contextA));
+		assertEquals(1, count(item, contextB));
+		assertEquals(1, count(other, contextB));
+	}
 }
