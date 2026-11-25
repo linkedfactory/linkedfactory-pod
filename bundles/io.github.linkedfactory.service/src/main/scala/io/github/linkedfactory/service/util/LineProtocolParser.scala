@@ -57,9 +57,9 @@ object LineProtocolParser extends Loggable {
 
   def mkItemData(property: String, item: String, context: URI, value: String, time: String, currentTime: Long = System.currentTimeMillis): KvinTuple = {
     new KvinTuple(
+      context,
       URIs.createURI(item.trim),
       URIs.createURI(property.trim),
-      context,
       // Note: line protocol timestamp defaults to nanosecond precision
       if (time == null || time.trim.isEmpty) currentTime else time.trim.toLong / 1000 / 1000,
       value.trim match {

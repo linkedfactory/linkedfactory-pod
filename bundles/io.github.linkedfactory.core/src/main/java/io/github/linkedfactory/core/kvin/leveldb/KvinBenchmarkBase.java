@@ -55,7 +55,7 @@ public abstract class KvinBenchmarkBase {
 				URI ctx = URIs.createURI("ctx:" + nrs[rand.nextInt(nrs.length)]);
 
 				Object value = randomNr % 2 == 0 ? (Object) rand.nextGaussian() : (Object) rand.nextLong(100000);
-				batch.add(new KvinTuple(uri, valueProperty, ctx, currentTime, value));
+				batch.add(new KvinTuple(ctx, uri, valueProperty, currentTime, value));
 
 				// insert data via batch
 				if (i % 100000 == 0 || i == writeValues) {

@@ -56,7 +56,7 @@ public class IcebergRecordStoreTest {
 				uri, object, array, Records.encodeRecord(object), ByteBuffer.wrap(Records.encodeRecord(uri)));
 		List<KvinRecord> input = new ArrayList<>();
 		for (int i = 0; i < values.size(); i++) {
-			input.add(new KvinRecord(7, 0, 9, -i, i, values.get(i)));
+			input.add(new KvinRecord(0, 7, 9, -i, i, values.get(i)));
 		}
 		store.put(input);
 		store.close();
@@ -85,14 +85,14 @@ public class IcebergRecordStoreTest {
 
 	@Test
 	public void wildcardPropertiesLimitsAggregationAndDeletesUseNumericKeys() {
-		store.put(new KvinRecord(1, 0, 2, 29, 0, 4),
-				new KvinRecord(1, 0, 2, 21, 0, 2),
-				new KvinRecord(1, 0, 2, 19, 0, 99),
-				new KvinRecord(1, 0, 3, 29, 0, 8),
-				new KvinRecord(1, 0, 3, 21, 0, 2),
-				new KvinRecord(1, 4, 2, 30, 0, "other context"),
-				new KvinRecord(2, 0, 2, -1, 0, "other item"));
-		store.put(new KvinRecord(1, 0, 2, 29, 0, 4));
+		store.put(new KvinRecord(0, 1, 2, 29, 0, 4),
+				new KvinRecord(0, 1, 2, 21, 0, 2),
+				new KvinRecord(0, 1, 2, 19, 0, 99),
+				new KvinRecord(0, 1, 3, 29, 0, 8),
+				new KvinRecord(0, 1, 3, 21, 0, 2),
+				new KvinRecord(4, 1, 2, 30, 0, "other context"),
+				new KvinRecord(0, 2, 2, -1, 0, "other item"));
+		store.put(new KvinRecord(0, 1, 2, 29, 0, 4));
 		try (var properties = store.properties(1, null)) {
 			assertEquals(List.of(2L, 3L), properties.toList());
 		}
@@ -133,7 +133,7 @@ public class IcebergRecordStoreTest {
 		URI property = URIs.createURI("urn:standalone:property");
 		try (var ids = new IcebergIdStore(directory.toString())) {
 			try (var facade = new KvinIceberg(store, ids)) {
-				facade.put(new KvinTuple(item, property, null, -1, 0, "value"));
+				facade.put(new KvinTuple(null, item, property, -1, 0, "value"));
 				try (var rows = facade.fetch(item, property, null, 1)) {
 					assertEquals(-1, rows.next().time);
 					assertFalse(rows.hasNext());
@@ -143,7 +143,7 @@ public class IcebergRecordStoreTest {
 				assertFalse(facade.delete(item, null));
 			}
 			assertTrue(ids.getId(item, IdKind.ITEM, false) > 0);
-			store.put(new KvinRecord(42, 0, 43, -2, 0, 44));
+			store.put(new KvinRecord(0, 42, 43, -2, 0, 44));
 			try (var rows = store.fetch(42, 43L, null, 1)) {
 				assertEquals(44, rows.next().value());
 			}
@@ -169,7 +169,7 @@ public class IcebergRecordStoreTest {
 				return null;
 			}).when(records).put(any(Iterable.class));
 			try (var facade = new KvinIceberg(records, ids)) {
-				facade.put(new KvinTuple(URIs.createURI("urn:item"), URIs.createURI("urn:property"), null, 1, 0, 1));
+				facade.put(new KvinTuple(null, URIs.createURI("urn:item"), URIs.createURI("urn:property"), 1, 0, 1));
 			}
 			verify(records, never()).close();
 		}
@@ -184,7 +184,7 @@ public class IcebergRecordStoreTest {
 			return null;
 		}).when(genericRecords).put(any(Iterable.class));
 		try (var facade = new KvinIceberg(genericRecords, genericIds)) {
-			facade.put(new KvinTuple(URIs.createURI("urn:item"), URIs.createURI("urn:property"), null, 1, 0, 1));
+			facade.put(new KvinTuple(null, URIs.createURI("urn:item"), URIs.createURI("urn:property"), 1, 0, 1));
 			assertThrows(UnsupportedOperationException.class, () -> facade.createBranch("unsupported"));
 		}
 		verify(genericRecords, never()).close();

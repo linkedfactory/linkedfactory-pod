@@ -58,8 +58,8 @@ public class AggregatingIteratorTest {
 
 	@Test
 	public void preservesFirstTupleMetadataAndContextSemantics() {
-		KvinTuple first = new KvinTuple(ITEM, PROPERTY, CONTEXT, 29, 42, 7);
-		KvinTuple second = new KvinTuple(ITEM, PROPERTY, OTHER_CONTEXT, 21, 99, 3);
+		KvinTuple first = new KvinTuple(CONTEXT, ITEM, PROPERTY, 29, 42, 7);
+		KvinTuple second = new KvinTuple(OTHER_CONTEXT, ITEM, PROPERTY, 21, 99, 3);
 		KvinTuple result = iterator(List.of(first, second), 10, "sum", 0).next();
 		assertSame(first.item, result.item);
 		assertSame(first.property, result.property);
@@ -87,8 +87,8 @@ public class AggregatingIteratorTest {
 	@Test
 	public void separatesItemAndPropertySwitchesEvenInSameInterval() {
 		List<KvinTuple> values = List.of(tuple(29, 1),
-				new KvinTuple(OTHER_ITEM, PROPERTY, CONTEXT, 28, 2),
-				new KvinTuple(OTHER_ITEM, OTHER_PROPERTY, CONTEXT, 27, 3));
+				new KvinTuple(CONTEXT, OTHER_ITEM, PROPERTY, 28, 2),
+				new KvinTuple(CONTEXT, OTHER_ITEM, OTHER_PROPERTY, 27, 3));
 		List<KvinTuple> results = iterator(values, 10, "sum", 0).toList();
 		assertEquals(3, results.size());
 		for (int i = 0; i < results.size(); i++) {
@@ -102,14 +102,14 @@ public class AggregatingIteratorTest {
 	@Test
 	public void equalUrisDoNotSplitSeries() {
 		List<KvinTuple> values = List.of(tuple(29, 1),
-				new KvinTuple(URIs.createURI(ITEM.toString()), URIs.createURI(PROPERTY.toString()), CONTEXT, 21, 2));
+				new KvinTuple(CONTEXT, URIs.createURI(ITEM.toString()), URIs.createURI(PROPERTY.toString()), 21, 2));
 		assertAggregate(values, "sum", ValueUtils.getInstance().add(1, 2));
 	}
 
 	@Test
 	public void zeroIntervalAggregatesWholeSeries() {
 		List<KvinTuple> results = iterator(List.of(tuple(29, 1), tuple(0, 2),
-				new KvinTuple(OTHER_ITEM, PROPERTY, CONTEXT, 17, 3)), 0, "sum", 0).toList();
+				new KvinTuple(CONTEXT, OTHER_ITEM, PROPERTY, 17, 3)), 0, "sum", 0).toList();
 		assertEquals(2, results.size());
 		assertEquals(0, results.get(0).time);
 		assertEquals(0, results.get(1).time);
@@ -119,9 +119,9 @@ public class AggregatingIteratorTest {
 	@Test
 	public void aggregateLimitResetsAtSeriesBoundaryNotBeforePreviousResult() {
 		List<KvinTuple> values = List.of(tuple(39, 1), tuple(29, 2), tuple(28, 3), tuple(19, 4),
-				new KvinTuple(OTHER_ITEM, PROPERTY, CONTEXT, 39, 5),
-				new KvinTuple(OTHER_ITEM, PROPERTY, CONTEXT, 29, 6),
-				new KvinTuple(OTHER_ITEM, OTHER_PROPERTY, CONTEXT, 29, 7));
+				new KvinTuple(CONTEXT, OTHER_ITEM, PROPERTY, 39, 5),
+				new KvinTuple(CONTEXT, OTHER_ITEM, PROPERTY, 29, 6),
+				new KvinTuple(CONTEXT, OTHER_ITEM, OTHER_PROPERTY, 29, 7));
 		List<KvinTuple> results = iterator(values, 10, "sum", 2).toList();
 		assertEquals(5, results.size());
 		assertEquals(List.of(30L, 20L, 30L, 20L, 20L),
@@ -133,7 +133,7 @@ public class AggregatingIteratorTest {
 	@Test
 	public void skipsLimitedSeriesAndStillIncludesFinalSeriesLookahead() {
 		List<KvinTuple> values = List.of(tuple(39, 1), tuple(29, 2), tuple(19, 3),
-				new KvinTuple(OTHER_ITEM, PROPERTY, CONTEXT, 19, 4));
+				new KvinTuple(CONTEXT, OTHER_ITEM, PROPERTY, 19, 4));
 		List<KvinTuple> results = iterator(values, 10, "first", 1).toList();
 		assertEquals(2, results.size());
 		assertEquals(1, results.get(0).value);
@@ -230,7 +230,7 @@ public class AggregatingIteratorTest {
 
 			@Override
 			protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
-				return new KvinTuple(item, property, context, time, seqNr, value);
+				return new KvinTuple(context, item, property, time, seqNr, value);
 			}
 		}
 		List<KvinTuple> results = new CustomAggregation() {}.toList();
@@ -253,7 +253,7 @@ public class AggregatingIteratorTest {
 
 			@Override
 			protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
-				return new KvinTuple(item, property, context, time, seqNr, value);
+				return new KvinTuple(context, item, property, time, seqNr, value);
 			}
 		};
 		List<KvinTuple> results = iterator.toList();
@@ -269,7 +269,7 @@ public class AggregatingIteratorTest {
 	}
 
 	private static KvinTuple tuple(long time, Object value) {
-		return new KvinTuple(ITEM, PROPERTY, CONTEXT, time, value);
+		return new KvinTuple(CONTEXT, ITEM, PROPERTY, time, value);
 	}
 
 	private static AggregatingIterator<KvinTuple> iterator(List<KvinTuple> values, long interval, String op, long limit) {
@@ -280,7 +280,7 @@ public class AggregatingIteratorTest {
 		return new AggregatingIterator<>(source, interval, op, limit) {
 			@Override
 			protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
-				return new KvinTuple(item, property, context, time, seqNr, value);
+				return new KvinTuple(context, item, property, time, seqNr, value);
 			}
 		};
 	}

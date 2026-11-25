@@ -28,62 +28,61 @@ public class KvinTuple {
 
 	public static final int SEQ_MAX_VALUE = 1 << (2 * 8) - 1;
 
+	public final URI context;
 	public final URI item;
 	public final URI property;
 	public final long time;
 	public final int seqNr;
 	public final Object value;
-	public final URI context;
 
 	/**
 	 * Creates a KVIN tuple.
 	 *
+	 * @param context  The context URI.
 	 * @param item     The item URI.
 	 * @param property The property URI.
-	 * @param context  The context URI.
 	 * @param time     The associated time.
 	 * @param value    The value at the given time.
 	 */
-	public KvinTuple(URI item, URI property, URI context, long time, Object value) {
-		this(item, property, context, time, 0, value);
+	public KvinTuple(URI context, URI item, URI property, long time, Object value) {
+		this(context, item, property, time, 0, value);
 	}
 
 	/**
 	 * Creates a KVIN tuple.
 	 *
-	 * @param item       The item URI.
-	 * @param property   The property URI.
-	 * @param context    The context URI.
-	 * @param time       The associated time.
-	 * @param seqNr The sequence number.
-	 * @param value      The value at the given time.
+	 * @param context  The context URI.
+	 * @param item     The item URI.
+	 * @param property The property URI.
+	 * @param time     The associated time.
+	 * @param seqNr    The sequence number.
+	 * @param value    The value at the given time.
 	 */
-	public KvinTuple(URI item, URI property, URI context, long time, int seqNr, Object value) {
+	public KvinTuple(URI context, URI item, URI property, long time, int seqNr, Object value) {
 		if (time > TIME_MAX_VALUE) {
 			throw new IllegalArgumentException(
 					"Maximum range of time attribute exceeded: " + time + " > " + TIME_MAX_VALUE);
 		}
 
+		this.context = context;
 		this.item = item;
 		this.property = property;
 		this.time = time;
 		this.seqNr = seqNr;
 		this.value = value;
-		this.context = context;
 	}
 
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) return true;
 		if (!(o instanceof KvinTuple kvinTuple)) return false;
-		return time == kvinTuple.time && seqNr == kvinTuple.seqNr && item.equals(kvinTuple.item) &&
-				property.equals(kvinTuple.property) && value.equals(kvinTuple.value) &&
-				context.equals(kvinTuple.context);
+		return time == kvinTuple.time && seqNr == kvinTuple.seqNr && context.equals(kvinTuple.context) &&
+				item.equals(kvinTuple.item) && property.equals(kvinTuple.property) && value.equals(kvinTuple.value);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(item, property, time, seqNr, value, context);
+		return Objects.hash(context, item, property, time, seqNr, value);
 	}
 
 	@Override
@@ -91,7 +90,7 @@ public class KvinTuple {
 		StringBuilder sb = new StringBuilder();
 		sb.append(getClass().getSimpleName());
 		Formatter f = new Formatter(sb);
-		f.format("(item=%s, property=%s, context=%s, time=%s, seqNr=%s, value=%s", item, property, context, time,
+		f.format("(context=%s, item=%s, property=%s, time=%s, seqNr=%s, value=%s", context, item, property, time,
 				seqNr, value);
 		f.close();
 		return sb.toString();

@@ -36,7 +36,7 @@ public class KvinRecordConverter extends RecordMaterializer<KvinRecord> {
 
 		@Override
 		public void end() {
-			record = new KvinRecord(itemId, contextId, propertyId, time, seqNr, recordValue);
+			record = new KvinRecord(contextId, itemId, propertyId, time, seqNr, recordValue);
 		}
 	};
 

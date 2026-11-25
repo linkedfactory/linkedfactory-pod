@@ -340,9 +340,9 @@ public class KvinThemeBenchmark {
 		for (int piece = 0; piece < workPieces; piece++) {
 			long start = START_TIME + piece * PROCESS_START_INTERVAL;
 			URI item = URIs.createURI(ns + "workPiece" + piece);
-			tuples.add(new KvinTuple(line, workPiece, ctx, start, 0, item));
+			tuples.add(new KvinTuple(ctx, line, workPiece, start, 0, item));
 			for (int s = 0; s < sections.length && start + s * PROCESS_SECTION_DURATION <= end; s++) {
-				tuples.add(new KvinTuple(item, section, ctx, start + s * PROCESS_SECTION_DURATION, 0, sections[s]));
+				tuples.add(new KvinTuple(ctx, item, section, start + s * PROCESS_SECTION_DURATION, 0, sections[s]));
 			}
 			for (int p = 0; p < parameters.size(); p++) {
 				ProcessParameter parameter = parameters.get(p);
@@ -355,7 +355,7 @@ public class KvinThemeBenchmark {
 					case 'b' -> random.nextDouble() < parameter.base();
 					default -> "T-" + (100 + piece / 250);
 				};
-				tuples.add(new KvinTuple(item, properties[p], ctx, start + (p + 1) * 1000L, 0, v));
+				tuples.add(new KvinTuple(ctx, item, properties[p], start + (p + 1) * 1000L, 0, v));
 			}
 		}
 		return tuples;
@@ -385,8 +385,8 @@ public class KvinThemeBenchmark {
 					double progress = s / (double) (MACHINE_SAMPLES - 1);
 					float angle = round(endAngle * progress + 0.02 * random.nextGaussian(), 0.01);
 					float force = round(maxForce * progress * progress + 5 * random.nextGaussian(), 1);
-					tuples.add(new KvinTuple(item, angles[c], ctx, time, s, angle));
-					tuples.add(new KvinTuple(item, forces[c], ctx, time, s, force));
+					tuples.add(new KvinTuple(ctx, item, angles[c], time, s, angle));
+					tuples.add(new KvinTuple(ctx, item, forces[c], time, s, force));
 				}
 			}
 		}
@@ -429,12 +429,12 @@ public class KvinThemeBenchmark {
 				}
 				double kw = running[i] ? nominalPower[i] * (1 + 0.03 * random.nextGaussian()) : 0;
 				energyWh[i] += kw * SENSOR_INTERVAL / 3_600.0;
-				batch.add(new KvinTuple(sensors[i], temperature, ctx, time, 0,
+				batch.add(new KvinTuple(ctx, sensors[i], temperature, time, 0,
 						round(baseTemperature[i] + 2 * daily + (running[i] ? 1.5 : 0) + 0.05 * random.nextGaussian(), 0.1)));
-				batch.add(new KvinTuple(sensors[i], pressure, ctx, time, 0,
+				batch.add(new KvinTuple(ctx, sensors[i], pressure, time, 0,
 						round(basePressure[i] + 0.03 * random.nextGaussian(), 0.01)));
-				batch.add(new KvinTuple(sensors[i], power, ctx, time, 0, round(kw, 0.1)));
-				batch.add(new KvinTuple(sensors[i], energy, ctx, time, 0, (long) energyWh[i]));
+				batch.add(new KvinTuple(ctx, sensors[i], power, time, 0, round(kw, 0.1)));
+				batch.add(new KvinTuple(ctx, sensors[i], energy, time, 0, (long) energyWh[i]));
 			}
 			if ((sample + 1) % SENSOR_SAMPLES_PER_PUT == 0) {
 				batches.add(batch);

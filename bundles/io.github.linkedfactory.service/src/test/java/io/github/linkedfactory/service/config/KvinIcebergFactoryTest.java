@@ -38,7 +38,7 @@ public class KvinIcebergFactoryTest {
 		var item = URIs.createURI("urn:partition:item");
 		var property = URIs.createURI("urn:partition:property");
 		try (var store = factory(SPEC).create()) {
-			store.put(new KvinTuple(item, property, null, 1, 42));
+			store.put(new KvinTuple(null, item, property, 1, 42));
 		}
 		try (var store = factory(null).create()) {
 			try (var rows = store.fetch(item, property, null, 0)) {

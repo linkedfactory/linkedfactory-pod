@@ -93,7 +93,7 @@ public class JsonFormatParserTest {
 
 		List<KvinTuple> tuples = parse(root, 1619424246100L);
 		Record expectedValue = new Record(URIs.createURI("msg"), "Error 1").append(new Record(URIs.createURI("nr"), 1).append(new Record(URIs.createURI("test_prop"), new Record(URIs.createURI("msg"), "test")).append(new Record(URIs.createURI("id_prop"), URIs.createURI("http://example.org/properties/test3")))));
-		List<KvinTuple> expected = List.of(new KvinTuple(URIs.createURI("http://example.root/item"), URIs.createURI("http://example.root/nested"), Kvin.DEFAULT_CONTEXT, 1619424246100L, 0, expectedValue));
+		List<KvinTuple> expected = List.of(new KvinTuple(Kvin.DEFAULT_CONTEXT, URIs.createURI("http://example.root/item"), URIs.createURI("http://example.root/nested"), 1619424246100L, 0, expectedValue));
 
 		assertEquals(expected, tuples);
 	}

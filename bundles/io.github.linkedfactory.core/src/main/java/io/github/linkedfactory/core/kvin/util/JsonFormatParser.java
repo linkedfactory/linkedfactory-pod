@@ -221,7 +221,7 @@ public class JsonFormatParser {
 			throw new IOException(String.format("Invalid null value for item %s and property %s", currentItem, currentProperty));
 		}
 
-		return new KvinTuple(currentItem, currentProperty, context, time != null ? time.longValue() : currentTime, seqNr != null ? ((Number) seqNr).intValue() : 0, value);
+		return new KvinTuple(context, currentItem, currentProperty, time != null ? time.longValue() : currentTime, seqNr != null ? ((Number) seqNr).intValue() : 0, value);
 	}
 
 	protected Object parseJsonValue(JsonToken token, Deque<Map<String, String>> activeContexts) throws IOException {

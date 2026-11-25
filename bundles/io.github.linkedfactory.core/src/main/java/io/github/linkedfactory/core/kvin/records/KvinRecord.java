@@ -1,17 +1,21 @@
 package io.github.linkedfactory.core.kvin.records;
 
-public record KvinRecord(long itemId, long contextId, long propertyId, long time, int seqNr, Object value) implements Comparable<KvinRecord> {
+/**
+ * A KVIN value with numeric IDs. Records are ordered by context, item, and property,
+ * then by descending time and sequence number.
+ */
+public record KvinRecord(long contextId, long itemId, long propertyId, long time, int seqNr, Object value) implements Comparable<KvinRecord> {
 	public KvinRecord() {
 		this(-1, -1, -1, 0, 0, null);
 	}
 
 	@Override
 	public int compareTo(KvinRecord o) {
-		long diffL = itemId - o.itemId;
+		long diffL = contextId - o.contextId;
 		if (diffL != 0) {
 			return diffL > 0 ? 1 : -1;
 		}
-		diffL = contextId - o.contextId;
+		diffL = itemId - o.itemId;
 		if (diffL != 0) {
 			return diffL > 0 ? 1 : -1;
 		}

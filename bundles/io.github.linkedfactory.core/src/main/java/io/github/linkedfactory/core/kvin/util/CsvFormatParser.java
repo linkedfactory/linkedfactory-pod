@@ -199,8 +199,8 @@ public class CsvFormatParser {
 							if (itemProperty != null && column < line.length) {
 								String valueStr = line[column].trim();
 								Object value = parseValue(valueStr);
-								tuple = new KvinTuple(itemProperty.getFirst(), itemProperty.getSecond(),
-										context, time, seqNr, value);
+								tuple = new KvinTuple(context, itemProperty.getFirst(),
+										itemProperty.getSecond(), time, seqNr, value);
 							}
 							column++;
 						}

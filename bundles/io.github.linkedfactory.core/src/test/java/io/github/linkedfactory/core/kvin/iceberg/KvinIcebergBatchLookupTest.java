@@ -84,12 +84,12 @@ public class KvinIcebergBatchLookupTest {
 		when(ids.getIds(items, IdKind.ITEM, false)).thenReturn(Map.of(item, 1001L, otherItem, 1002L));
 		when(ids.getIds(properties, IdKind.PROPERTY, false)).thenReturn(Map.of(first, 2001L, second, 2002L));
 		List<KvinRecord> input = List.of(
-				new KvinRecord(1001, 1, 2001, 6, 0, 0),
-				new KvinRecord(1001, 1, 2001, 5, 1, 1),
-				new KvinRecord(1002, 1, 2001, 4, 2, 2),
-				new KvinRecord(1002, 1, 2002, 3, 3, 3),
-				new KvinRecord(1001, 1, 2002, 2, 4, 4),
-				new KvinRecord(1001, 1, 2001, 1, 5, 5));
+				new KvinRecord(1, 1001, 2001, 6, 0, 0),
+				new KvinRecord(1, 1001, 2001, 5, 1, 1),
+				new KvinRecord(1, 1002, 2001, 4, 2, 2),
+				new KvinRecord(1, 1002, 2002, 3, 3, 3),
+				new KvinRecord(1, 1001, 2002, 2, 4, 4),
+				new KvinRecord(1, 1001, 2001, 1, 5, 5));
 		when(records.fetch(anyList(), anyList(), eq(1L), eq(6L), eq(0L), eq(0L), eq(0L), isNull()))
 				.thenReturn(WrappedIterator.create(input.iterator()));
 		try (var values = store.fetch(items, properties, null, 6, 0, 0, 0, null)) {

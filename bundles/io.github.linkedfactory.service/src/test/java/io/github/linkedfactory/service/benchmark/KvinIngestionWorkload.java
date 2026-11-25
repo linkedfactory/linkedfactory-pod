@@ -119,7 +119,7 @@ public final class KvinIngestionWorkload {
 			for (int channel = 0; channel < CHANNEL_COUNT; channel++) {
 				long time = startTime + (row / SEQUENCES_PER_TIMESTAMP) * TIMESTAMP_STEP;
 				int seqNr = row % SEQUENCES_PER_TIMESTAMP + 1;
-				result.add(new KvinTuple(items.get(channel), property, CONTEXT, time, seqNr, value(channel, row)));
+				result.add(new KvinTuple(CONTEXT, items.get(channel), property, time, seqNr, value(channel, row)));
 			}
 		}
 		return List.copyOf(result);
@@ -128,7 +128,7 @@ public final class KvinIngestionWorkload {
 	private List<KvinTuple> createPreseedTuples() {
 		List<KvinTuple> result = new ArrayList<>(CHANNEL_COUNT);
 		for (int channel = 0; channel < CHANNEL_COUNT; channel++) {
-			result.add(new KvinTuple(items.get(channel), property, CONTEXT, startTime - TIMESTAMP_STEP, 0,
+			result.add(new KvinTuple(CONTEXT, items.get(channel), property, startTime - TIMESTAMP_STEP, 0,
 					value(channel, -1)));
 		}
 		return List.copyOf(result);

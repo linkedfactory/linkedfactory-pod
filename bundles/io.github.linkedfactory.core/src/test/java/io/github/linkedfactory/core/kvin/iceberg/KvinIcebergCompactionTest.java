@@ -40,8 +40,8 @@ import static org.mockito.Mockito.*;
 
 public class KvinIcebergCompactionTest {
 	private static final Comparator<org.apache.iceberg.data.Record> ORDER = Comparator
-			.comparingLong((org.apache.iceberg.data.Record row) -> (Long) row.get(0))
-			.thenComparingLong(row -> (Long) row.get(1)).thenComparingLong(row -> (Long) row.get(2))
+			.comparingLong((org.apache.iceberg.data.Record row) -> (Long) row.get(1))
+			.thenComparingLong(row -> (Long) row.get(0)).thenComparingLong(row -> (Long) row.get(2))
 			.thenComparing((a, b) -> Long.compare((Long) b.get(3), (Long) a.get(3)))
 			.thenComparing((a, b) -> Integer.compare((Integer) b.get(4), (Integer) a.get(4)));
 	private Path directory;
@@ -156,7 +156,7 @@ public class KvinIcebergCompactionTest {
 				for (URI currentProperty : List.of(property, URIs.createURI("urn:compaction:other-property"))) {
 					for (int time = 0; time < 7; time++) {
 						for (int sequence = 0; sequence < 3; sequence++) {
-							KvinTuple tuple = new KvinTuple(currentItem, currentProperty, context, time, sequence, "value-" + time + "-" + sequence);
+							KvinTuple tuple = new KvinTuple(context, currentItem, currentProperty, time, sequence, "value-" + time + "-" + sequence);
 							batches.get(position++ % 3).add(tuple);
 							if (time == 4 && sequence == 1) {
 								batches.get(position++ % 3).add(tuple);
@@ -216,7 +216,7 @@ public class KvinIcebergCompactionTest {
 	@Test
 	public void defaultThresholdDoesNotCompactSmallNumberOfFiles() throws Exception {
 		for (int i = 0; i < 3; i++) {
-			store.put(new KvinTuple(item, property, null, i, 0, i));
+			store.put(new KvinTuple(null, item, property, i, 0, i));
 		}
 		assertEquals(3, files().size());
 	}
@@ -224,15 +224,15 @@ public class KvinIcebergCompactionTest {
 	@Test
 	public void activeIteratorKeepsItsSnapshotWhileCompactionReplacesFiles() throws Exception {
 		table().updateProperties().set("kvin.compaction.min-files", "3").commit();
-		store.put(new KvinTuple(item, property, null, 5, 0, "five"),
-				new KvinTuple(item, property, null, 1, 0, "one"));
-		store.put(new KvinTuple(item, property, null, 4, 0, "four"),
-				new KvinTuple(item, property, null, 2, 0, "two"));
+		store.put(new KvinTuple(null, item, property, 5, 0, "five"),
+				new KvinTuple(null, item, property, 1, 0, "one"));
+		store.put(new KvinTuple(null, item, property, 4, 0, "four"),
+				new KvinTuple(null, item, property, 2, 0, "two"));
 		List<DataFile> pinnedFiles = files();
 		try (IExtendedIterator<KvinTuple> pinned = store.fetch(item, property, null, 0)) {
 			assertEquals(5L, pinned.next().time);
-			store.put(new KvinTuple(item, property, null, 6, 0, "six"),
-					new KvinTuple(item, property, null, 3, 0, "three"));
+			store.put(new KvinTuple(null, item, property, 6, 0, "six"),
+					new KvinTuple(null, item, property, 3, 0, "three"));
 			assertEquals(1, files().size());
 			for (long expected : new long[]{4, 2, 1}) {
 				assertTrue(pinned.hasNext());
@@ -261,7 +261,7 @@ public class KvinIcebergCompactionTest {
 			for (int row = 0; row < 256; row++) {
 				byte[] value = new byte[512];
 				random.nextBytes(value);
-				batch.add(new KvinTuple(item, property, null, row * 4L + file, 0, value));
+				batch.add(new KvinTuple(null, item, property, row * 4L + file, 0, value));
 			}
 			store.put(batch);
 		}
@@ -270,7 +270,7 @@ public class KvinIcebergCompactionTest {
 		long targetSize = maxSize * 2 + 1024;
 		table().updateProperties().set("kvin.compaction.min-files", "4")
 				.set(TableProperties.WRITE_TARGET_FILE_SIZE_BYTES, Long.toString(targetSize)).commit();
-		store.put(new KvinTuple(item, property, null, 1024, 0, new byte[]{1, 2, 3}));
+		store.put(new KvinTuple(null, item, property, 1024, 0, new byte[]{1, 2, 3}));
 		List<DataFile> outputs = files();
 		assertTrue("Target size must roll output files", outputs.size() > 1);
 		assertTrue("Compaction must reduce file fanout", outputs.size() < 5);
@@ -300,7 +300,7 @@ public class KvinIcebergCompactionTest {
 			}
 		}
 		assertFalse(largeFiles.isEmpty());
-		store.put(new KvinTuple(item, property, null, 1025, 0, "tail"));
+		store.put(new KvinTuple(null, item, property, 1025, 0, "tail"));
 		Set<String> remainingFiles = new HashSet<>();
 		for (DataFile file : files()) {
 			remainingFiles.add(file.location());
@@ -313,7 +313,7 @@ public class KvinIcebergCompactionTest {
 		// the default keeps a large write in one sorted file
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int time = 0; time < 20_000; time++) {
-			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+			tuples.add(new KvinTuple(null, item, property, time, 0, (long) time));
 		}
 		store.put(tuples);
 		assertEquals(1, files().size());
@@ -321,7 +321,7 @@ public class KvinIcebergCompactionTest {
 		table().updateProperties().set(IcebergRecordStore.WRITE_BATCH_RECORDS, "100").commit();
 		List<KvinTuple> more = new ArrayList<>();
 		for (int time = 20_000; time < 20_250; time++) {
-			more.add(new KvinTuple(item, property, null, time, 0, (long) time));
+			more.add(new KvinTuple(null, item, property, time, 0, (long) time));
 		}
 		store.put(more);
 		// 250 records in batches of 100
@@ -334,16 +334,16 @@ public class KvinIcebergCompactionTest {
 
 	@Test
 	public void invalidWriteBatchSizeIsRejectedBeforeWriting() throws Exception {
-		store.put(new KvinTuple(item, property, null, 1, 0, "committed"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "committed"));
 		table().updateProperties().set(IcebergRecordStore.WRITE_BATCH_RECORDS, "0").commit();
-		assertThrows(IllegalArgumentException.class, () -> store.put(new KvinTuple(item, property, null, 2, 0, "rejected")));
+		assertThrows(IllegalArgumentException.class, () -> store.put(new KvinTuple(null, item, property, 2, 0, "rejected")));
 		assertEquals(1, files().size());
 	}
 
 	@Test
 	public void compactionFailureDoesNotRollBackCommittedAppend() throws Exception {
 		table().updateProperties().set("kvin.compaction.min-files", "invalid").commit();
-		assertThrows(NumberFormatException.class, () -> store.put(new KvinTuple(item, property, null, 1, 0, "committed")));
+		assertThrows(NumberFormatException.class, () -> store.put(new KvinTuple(null, item, property, 1, 0, "committed")));
 		assertEquals(1, files().size());
 		store.close();
 		store = new KvinIceberg(directory.toString());
@@ -356,9 +356,9 @@ public class KvinIcebergCompactionTest {
 	@Test
 	public void concurrentDeleteConflictsAndCleansOnlyUncommittedCompactionFiles() throws Exception {
 		table().updateProperties().set("kvin.compaction.min-files", "3").commit();
-		store.put(new KvinTuple(item, property, null, 1, 0, "deleted"),
-				new KvinTuple(item, property, null, 2, 0, "retained"));
-		store.put(new KvinTuple(item, property, null, 3, 0, "retained"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "deleted"),
+				new KvinTuple(null, item, property, 2, 0, "retained"));
+		store.put(new KvinTuple(null, item, property, 3, 0, "retained"));
 		Table table = spyStoreTable();
 		RewriteFiles rewrite = spy(table.newRewrite());
 		doReturn(rewrite).when(table).newRewrite();
@@ -374,7 +374,7 @@ public class KvinIcebergCompactionTest {
 			return invocation.callRealMethod();
 		}).when(rewrite).commit();
 		assertThrows(ValidationException.class,
-				() -> store.put(new KvinTuple(item, property, null, 4, 0, "appended")));
+				() -> store.put(new KvinTuple(null, item, property, 4, 0, "appended")));
 		assertFalse(outputs.isEmpty());
 		for (DataFile output : outputs) {
 			assertFalse("Only failed rewrite outputs are removed", Files.exists(Path.of(output.location())));
@@ -390,7 +390,7 @@ public class KvinIcebergCompactionTest {
 	@Test
 	public void uncertainCompactionCommitNeverRemovesPotentiallyCommittedFiles() throws Exception {
 		table().updateProperties().set("kvin.compaction.min-files", "2").commit();
-		store.put(new KvinTuple(item, property, null, 1, 0, "first"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "first"));
 		Table table = spyStoreTable();
 		RewriteFiles rewrite = spy(table.newRewrite());
 		doReturn(rewrite).when(table).newRewrite();
@@ -399,7 +399,7 @@ public class KvinIcebergCompactionTest {
 			throw new CommitStateUnknownException(new IllegalStateException("Lost commit response"));
 		}).when(rewrite).commit();
 		assertThrows(CommitStateUnknownException.class,
-				() -> store.put(new KvinTuple(item, property, null, 2, 0, "second")));
+				() -> store.put(new KvinTuple(null, item, property, 2, 0, "second")));
 		assertEquals(1, files().size());
 		assertEquals(2, allRows().size());
 		store.close();

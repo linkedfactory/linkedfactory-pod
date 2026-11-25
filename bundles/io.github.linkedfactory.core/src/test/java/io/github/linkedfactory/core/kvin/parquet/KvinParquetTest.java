@@ -245,7 +245,7 @@ public class KvinParquetTest {
 
 		var record = new Record(URIs.createURI("property:p1"), true)
 				.append(new Record(URIs.createURI("property:p2"), "value2"));
-		kvinParquet.put(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, startTime, record));
+		kvinParquet.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, startTime, record));
 
 		IExtendedIterator<KvinTuple> tuples = kvinParquet.fetch(item, property, Kvin.DEFAULT_CONTEXT, 1);
 		List<KvinTuple> list = tuples.toList();

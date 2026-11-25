@@ -196,10 +196,13 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 		return midpoint >= rangeStart && midpoint < rangeEnd;
 	}
 
-	void skipThrough(long item, long context, long property) {
+	/**
+	 * Skips all rows up to and including the series of the given context, item, and property.
+	 */
+	void skipThrough(long context, long item, long property) {
 		completed = true;
-		completedItem = item;
 		completedContext = context;
+		completedItem = item;
 		completedProperty = property;
 		groupFilterDirty = true;
 	}
@@ -215,10 +218,10 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 			pages = null;
 		}
 		if (groupFilterDirty) {
-			Expression after = Expressions.or(Expressions.greaterThan("itemId", completedItem),
-					Expressions.and(Expressions.equal("itemId", completedItem),
-							Expressions.or(Expressions.greaterThan("contextId", completedContext),
-									Expressions.and(Expressions.equal("contextId", completedContext),
+			Expression after = Expressions.or(Expressions.greaterThan("contextId", completedContext),
+					Expressions.and(Expressions.equal("contextId", completedContext),
+							Expressions.or(Expressions.greaterThan("itemId", completedItem),
+									Expressions.and(Expressions.equal("itemId", completedItem),
 											Expressions.greaterThan("propertyId", completedProperty)))));
 			groupFilter = new ParquetMetricsRowGroupFilter(schema, Expressions.and(filter, after));
 			groupFilterDirty = false;
@@ -259,13 +262,13 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 		return false;
 	}
 
-	private boolean isCompleted(long item, long context, long property) {
+	private boolean isCompleted(long context, long item, long property) {
 		if (!completed) {
 			return false;
 		}
-		int order = Long.compare(item, completedItem);
+		int order = Long.compare(context, completedContext);
 		if (order == 0) {
-			order = Long.compare(context, completedContext);
+			order = Long.compare(item, completedItem);
 		}
 		if (order == 0) {
 			order = Long.compare(property, completedProperty);
@@ -294,7 +297,7 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 				columns[3].consume();
 				int seqNr = columns[4].getInteger();
 				columns[4].consume();
-				boolean keep = !isCompleted(itemId, contextId, propertyId)
+				boolean keep = !isCompleted(contextId, itemId, propertyId)
 						&& keyFilter.matches(itemId, contextId, propertyId, time, seqNr);
 				Object value = null;
 				for (int i = FIRST_VALUE_COLUMN; i < columns.length; i++) {
@@ -323,7 +326,7 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 					column.consume();
 				}
 				if (keep) {
-					next = new KvinRow(itemId, contextId, propertyId, time, seqNr, value);
+					next = new KvinRow(contextId, itemId, propertyId, time, seqNr, value);
 					return true;
 				}
 			}

@@ -77,7 +77,7 @@ public class KvinIcebergPointQueryBenchmark {
 				for (int p = 0; p < PROPERTIES; p++) {
 					for (int v = 0; v < VALUES_PER_WINDOW; v++) {
 						long time = START + (long) (w * VALUES_PER_WINDOW + v) * STEP;
-						batch.add(new KvinTuple(items[i], properties[p], Kvin.DEFAULT_CONTEXT, time, 0, (double) time));
+						batch.add(new KvinTuple(Kvin.DEFAULT_CONTEXT, items[i], properties[p], time, 0, (double) time));
 					}
 				}
 			}

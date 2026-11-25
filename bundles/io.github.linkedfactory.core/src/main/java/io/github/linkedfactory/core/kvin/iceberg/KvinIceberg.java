@@ -107,7 +107,7 @@ public class KvinIceberg implements Kvin {
 					Map<URI, Long> contexts = idStore.getIds(input.stream().map(t -> context(t.context)).distinct().toList(), IdKind.CONTEXT, true);
 					Map<URI, Long> properties = idStore.getIds(input.stream().map(t -> t.property).distinct().toList(), IdKind.PROPERTY, true);
 					idStore.flush();
-					batch = input.stream().map(t -> new KvinRecord(items.get(t.item), contexts.get(context(t.context)),
+					batch = input.stream().map(t -> new KvinRecord(contexts.get(context(t.context)), items.get(t.item),
 							properties.get(t.property), t.time, t.seqNr, t.value)).iterator();
 				}
 				return batch.hasNext();
@@ -214,7 +214,7 @@ public class KvinIceberg implements Kvin {
 						lastItemUri = itemUris.get(row.itemId());
 						lastItemId = row.itemId();
 					}
-					next = new KvinTuple(lastItemUri, lastPropertyUri, requestedContext,
+					next = new KvinTuple(requestedContext, lastItemUri, lastPropertyUri,
 							row.time(), row.seqNr(), row.value());
 					return true;
 				} catch (RuntimeException e) {

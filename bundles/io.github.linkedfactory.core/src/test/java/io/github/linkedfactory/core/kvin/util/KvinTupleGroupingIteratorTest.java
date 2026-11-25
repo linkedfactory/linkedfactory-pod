@@ -55,10 +55,10 @@ public class KvinTupleGroupingIteratorTest {
 
 	@Test
 	public void distinguishesPropertyAndContextInSeriesIdentity() {
-		KvinTuple first = new KvinTuple(ITEM_A, PROPERTY, CONTEXT, 1, 1, "first");
-		KvinTuple otherProperty = new KvinTuple(ITEM_A, PROPERTY_B, CONTEXT, 2, 1, "property");
-		KvinTuple otherContext = new KvinTuple(ITEM_A, PROPERTY, CONTEXT_B, 3, 1, "context");
-		KvinTuple second = new KvinTuple(ITEM_A, PROPERTY, CONTEXT, 4, 2, "second");
+		KvinTuple first = new KvinTuple(CONTEXT, ITEM_A, PROPERTY, 1, 1, "first");
+		KvinTuple otherProperty = new KvinTuple(CONTEXT, ITEM_A, PROPERTY_B, 2, 1, "property");
+		KvinTuple otherContext = new KvinTuple(CONTEXT_B, ITEM_A, PROPERTY, 3, 1, "context");
+		KvinTuple second = new KvinTuple(CONTEXT, ITEM_A, PROPERTY, 4, 2, "second");
 
 		IExtendedIterator<KvinTuple> grouped = new KvinTupleGroupingIterator(
 				WrappedIterator.create(List.of(first, otherProperty, otherContext, second).iterator()), 4);
@@ -101,7 +101,7 @@ public class KvinTupleGroupingIteratorTest {
 	}
 
 	private static KvinTuple tuple(URI item, long time, int seqNr) {
-		return new KvinTuple(item, PROPERTY, CONTEXT, time, seqNr, time);
+		return new KvinTuple(CONTEXT, item, PROPERTY, time, seqNr, time);
 	}
 
 	private static final class TrackingIterator extends NiceIterator<KvinTuple> {

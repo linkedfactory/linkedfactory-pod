@@ -127,8 +127,8 @@ public class KvinConnection extends NotifyingSailConnectionWrapper {
 		if (value == null) {
 			value = convertValue(rdfValue);
 		}
-		return new KvinTuple(convertIri(item).getURI(), convertIri(predicate).getURI(),
-				context != null && context.isIRI() ? convertIri((IRI) context).getURI() : Kvin.DEFAULT_CONTEXT,
+		return new KvinTuple(context != null && context.isIRI() ? convertIri((IRI) context).getURI() : Kvin.DEFAULT_CONTEXT, convertIri(item).getURI(),
+				convertIri(predicate).getURI(),
 				time < 0 ? currentTime : time, seqNr, value);
 	}
 

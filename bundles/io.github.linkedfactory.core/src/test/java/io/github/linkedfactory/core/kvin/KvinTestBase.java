@@ -75,7 +75,7 @@ public abstract class KvinTestBase {
 
 			int time = Math.abs(rand.nextInt());
 			int value = rand.nextInt();
-			store.put(new KvinTuple(uri, valueProperty, null, time, value));
+			store.put(new KvinTuple(null, uri, valueProperty, time, value));
 		}
 		rand = new Random(seed);
 		for (int i = 0; i <= count; i++) {
@@ -106,7 +106,7 @@ public abstract class KvinTestBase {
 			for (int i = 1; i <= values; i++) {
 				int time = Math.abs(rand.nextInt());
 				int value = rand.nextInt();
-				KvinTuple tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, value);
+				KvinTuple tuple = new KvinTuple(Kvin.DEFAULT_CONTEXT, uri, valueProperty, time, value);
 				store.put(tuple);
 				result.add(tuple);
 			}
@@ -124,7 +124,7 @@ public abstract class KvinTestBase {
 				for (int i = 1; i <= 10; i++) {
 					int time = Math.abs(rand.nextInt());
 					int value = rand.nextInt();
-					store.put(new KvinTuple(uri, pUri, null, time, value));
+					store.put(new KvinTuple(null, uri, pUri, time, value));
 				}
 			}
 		}
@@ -182,7 +182,7 @@ public abstract class KvinTestBase {
 			for (int i = 0; i < points; i++) {
 				long time = startTime - i * pointDistance;
 				int value = rand.nextInt();
-				store.put(new KvinTuple(uri, valueProperty, null, time, value));
+				store.put(new KvinTuple(null, uri, valueProperty, time, value));
 			}
 		}
 

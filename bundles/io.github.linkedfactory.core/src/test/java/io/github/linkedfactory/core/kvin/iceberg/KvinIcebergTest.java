@@ -123,9 +123,9 @@ public class KvinIcebergTest {
 
 	@Test
 	public void singleSeriesLimitOpensOnlyNewestFile() throws Exception {
-		store.put(new KvinTuple(item, property, null, 3, 0, "new"),
-				new KvinTuple(item, property, null, 1, 0, "old"));
-		store.put(new KvinTuple(item, property, null, 2, 0, "middle"));
+		store.put(new KvinTuple(null, item, property, 3, 0, "new"),
+				new KvinTuple(null, item, property, 1, 0, "old"));
+		store.put(new KvinTuple(null, item, property, 2, 0, "middle"));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 1)) {
 			PriorityQueue<?> cursors = cursors(values);
 			assertEquals(0, recordField(values, "opened"));
@@ -142,11 +142,11 @@ public class KvinIcebergTest {
 	@Test
 	public void lazilyOpenedFilesMergeInOrder() {
 		URI secondProperty = URIs.createURI("urn:test:second");
-		store.put(new KvinTuple(item, property, null, 5, 0, 5), new KvinTuple(item, property, null, 1, 0, 1),
-				new KvinTuple(other, property, null, 9, 0, 9));
-		store.put(new KvinTuple(item, property, null, 4, 0, 4), new KvinTuple(item, property, null, 2, 0, 2),
-				new KvinTuple(item, secondProperty, null, 7, 0, 7));
-		store.put(new KvinTuple(item, property, null, 3, 0, 3), new KvinTuple(item, secondProperty, null, 6, 0, 6));
+		store.put(new KvinTuple(null, item, property, 5, 0, 5), new KvinTuple(null, item, property, 1, 0, 1),
+				new KvinTuple(null, other, property, 9, 0, 9));
+		store.put(new KvinTuple(null, item, property, 4, 0, 4), new KvinTuple(null, item, property, 2, 0, 2),
+				new KvinTuple(null, item, secondProperty, 7, 0, 7));
+		store.put(new KvinTuple(null, item, property, 3, 0, 3), new KvinTuple(null, item, secondProperty, 6, 0, 6));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 			assertEquals(List.of(5L, 4L, 3L, 2L, 1L), values.toList().stream().map(tuple -> tuple.time).toList());
 		}
@@ -162,9 +162,9 @@ public class KvinIcebergTest {
 
 	@Test
 	public void deferredReadFailureClosesAllReaders() throws Exception {
-		store.put(new KvinTuple(item, property, null, 3, 0, 3),
-				new KvinTuple(item, property, null, 1, 0, 1));
-		store.put(new KvinTuple(item, property, null, 2, 0, 2));
+		store.put(new KvinTuple(null, item, property, 3, 0, 3),
+				new KvinTuple(null, item, property, 1, 0, 1));
+		store.put(new KvinTuple(null, item, property, 2, 0, 2));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 			PriorityQueue<?> cursors = cursors(values);
 			assertEquals(3L, values.next().time);
@@ -191,18 +191,18 @@ public class KvinIcebergTest {
 		URI secondProperty = URIs.createURI("urn:test:second");
 		for (int round = 0; round < 2; round++) {
 			store.put(
-					new KvinTuple(item, property, null, 3, 0, 3),
-					new KvinTuple(item, property, null, 2, 0, 2),
-					new KvinTuple(item, property, null, 1, 0, 1),
-					new KvinTuple(item, secondProperty, null, 3, 0, 3),
-					new KvinTuple(item, secondProperty, null, 2, 0, 2),
-					new KvinTuple(item, secondProperty, null, 1, 0, 1),
-					new KvinTuple(other, property, null, 3, 0, 3),
-					new KvinTuple(other, property, null, 2, 0, 2),
-					new KvinTuple(other, property, null, 1, 0, 1),
-					new KvinTuple(other, secondProperty, null, 3, 0, 3),
-					new KvinTuple(other, secondProperty, null, 2, 0, 2),
-					new KvinTuple(other, secondProperty, null, 1, 0, 1));
+					new KvinTuple(null, item, property, 3, 0, 3),
+					new KvinTuple(null, item, property, 2, 0, 2),
+					new KvinTuple(null, item, property, 1, 0, 1),
+					new KvinTuple(null, item, secondProperty, 3, 0, 3),
+					new KvinTuple(null, item, secondProperty, 2, 0, 2),
+					new KvinTuple(null, item, secondProperty, 1, 0, 1),
+					new KvinTuple(null, other, property, 3, 0, 3),
+					new KvinTuple(null, other, property, 2, 0, 2),
+					new KvinTuple(null, other, property, 1, 0, 1),
+					new KvinTuple(null, other, secondProperty, 3, 0, 3),
+					new KvinTuple(null, other, secondProperty, 2, 0, 2),
+					new KvinTuple(null, other, secondProperty, 1, 0, 1));
 		}
 		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
 				List.of(property, secondProperty), null, 3, 1, 2, 0, null)) {
@@ -227,8 +227,8 @@ public class KvinIcebergTest {
 	public void batchesColdUriLookupsAndReusesCaches() throws Exception {
 		URI secondProperty = URIs.createURI("urn:test:second");
 		URI missing = URIs.createURI("urn:test:missing");
-		store.put(new KvinTuple(item, property, null, 1, 0, 1),
-				new KvinTuple(other, secondProperty, null, 2, 0, 2));
+		store.put(new KvinTuple(null, item, property, 1, 0, 1),
+				new KvinTuple(null, other, secondProperty, 2, 0, 2));
 		store.close();
 		store = new KvinIceberg(directory.toString());
 		Table items = spyIdTable(0);
@@ -253,8 +253,8 @@ public class KvinIcebergTest {
 	@Test
 	public void batchesColdReversePropertyLookupsFromBufferedRecords() throws Exception {
 		URI secondProperty = URIs.createURI("urn:test:second");
-		store.put(new KvinTuple(item, property, null, 1, 0, 1),
-				new KvinTuple(item, secondProperty, null, 2, 0, 2));
+		store.put(new KvinTuple(null, item, property, 1, 0, 1),
+				new KvinTuple(null, item, secondProperty, 2, 0, 2));
 		store.close();
 		store = new KvinIceberg(directory.toString());
 		Table properties = spyIdTable(2);
@@ -270,13 +270,13 @@ public class KvinIcebergTest {
 	@Test
 	public void missingMappingsBecomeVisibleAfterAnotherInstanceWrites() {
 		URI newProperty = URIs.createURI("urn:test:new-property");
-		store.put(new KvinTuple(item, property, null, 1, 0, 1));
+		store.put(new KvinTuple(null, item, property, 1, 0, 1));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
 				List.of(newProperty), null, 2, 0, 0, 0, null)) {
 			assertFalse(values.hasNext());
 		}
 		try (KvinIceberg second = new KvinIceberg(directory.toString())) {
-			second.put(new KvinTuple(other, newProperty, null, 2, 0, 2));
+			second.put(new KvinTuple(null, other, newProperty, 2, 0, 2));
 		}
 		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
 				List.of(newProperty), null, 2, 0, 0, 0, null)) {
@@ -291,9 +291,9 @@ public class KvinIcebergTest {
 	@Test
 	public void insufficientAndWildcardSeriesStillReturnAllAvailableSeries() {
 		URI secondProperty = URIs.createURI("urn:test:second");
-		store.put(new KvinTuple(item, property, null, 2, 0, 2),
-				new KvinTuple(item, property, null, 1, 0, 1),
-				new KvinTuple(other, secondProperty, null, 1, 0, 1));
+		store.put(new KvinTuple(null, item, property, 2, 0, 2),
+				new KvinTuple(null, item, property, 1, 0, 1),
+				new KvinTuple(null, other, secondProperty, 1, 0, 1));
 		for (List<URI> properties : List.of(List.<URI>of(), List.of(property, secondProperty))) {
 			try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item, other),
 					properties, null, 2, 1, 2, 0, null)) {
@@ -305,7 +305,7 @@ public class KvinIcebergTest {
 
 	@Test
 	public void batchedLookupsRejectConflictingMappings() throws Exception {
-		store.put(new KvinTuple(item, property, null, 1, 0, 1));
+		store.put(new KvinTuple(null, item, property, 1, 0, 1));
 		Object items = idTable(0);
 		var append = items.getClass().getDeclaredMethod("append", Map.class);
 		append.setAccessible(true);
@@ -319,7 +319,7 @@ public class KvinIcebergTest {
 
 	@Test
 	public void batchedReverseLookupsRejectConflictingMappings() throws Exception {
-		store.put(new KvinTuple(item, property, null, 1, 0, 1));
+		store.put(new KvinTuple(null, item, property, 1, 0, 1));
 		Object properties = idTable(2);
 		var append = properties.getClass().getDeclaredMethod("append", Map.class);
 		append.setAccessible(true);
@@ -335,12 +335,12 @@ public class KvinIcebergTest {
 	@Test
 	public void aggregationLimitsApplyToCompleteIntervalsAcrossSeries() {
 		URI secondProperty = URIs.createURI("urn:test:second");
-		store.put(new KvinTuple(item, property, null, 29, 0, 4),
-				new KvinTuple(item, property, null, 21, 0, 2),
-				new KvinTuple(item, property, null, 19, 0, 99),
-				new KvinTuple(item, secondProperty, null, 29, 0, 8),
-				new KvinTuple(item, secondProperty, null, 21, 0, 2));
-		store.put(new KvinTuple(item, property, null, 29, 0, 4));
+		store.put(new KvinTuple(null, item, property, 29, 0, 4),
+				new KvinTuple(null, item, property, 21, 0, 2),
+				new KvinTuple(null, item, property, 19, 0, 99),
+				new KvinTuple(null, item, secondProperty, 29, 0, 8),
+				new KvinTuple(null, item, secondProperty, 21, 0, 2));
+		store.put(new KvinTuple(null, item, property, 29, 0, 4));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(List.of(item),
 				List.of(property, secondProperty), null, 29, 0, 1, 10, "sum")) {
 			List<KvinTuple> result = values.toList();
@@ -357,9 +357,9 @@ public class KvinIcebergTest {
 	@Test
 	public void deletesContexts() {
 		URI context = URIs.createURI("urn:test:context");
-		store.put(new KvinTuple(item, property, context, 1, 0, 1),
-				new KvinTuple(other, property, context, 2, 0, 2),
-				new KvinTuple(item, property, null, 3, 0, 3));
+		store.put(new KvinTuple(context, item, property, 1, 0, 1),
+				new KvinTuple(context, other, property, 2, 0, 2),
+				new KvinTuple(null, item, property, 3, 0, 3));
 
 		assertEquals(2, store.delete(context));
 		assertEquals(List.of(), store.fetch(item, property, context, 0).toList());
@@ -370,7 +370,7 @@ public class KvinIcebergTest {
 		assertEquals(0, store.delete(context));
 		assertEquals(0, store.delete(URIs.createURI("urn:test:unknown")));
 
-		store.put(new KvinTuple(other, property, context, 4, 0, 4));
+		store.put(new KvinTuple(context, other, property, 4, 0, 4));
 		assertEquals(List.of(4), store.fetch(other, property, context, 0).toList().stream().map(t -> t.value).toList());
 
 		assertEquals(1, store.delete((URI) null));
@@ -380,9 +380,9 @@ public class KvinIcebergTest {
 
 	@Test
 	public void deferredReadersKeepTheirSnapshotAcrossDeletes() {
-		store.put(new KvinTuple(item, property, null, 3, 0, 3),
-				new KvinTuple(item, property, null, 2, 0, 2),
-				new KvinTuple(item, property, null, 1, 0, 1));
+		store.put(new KvinTuple(null, item, property, 3, 0, 3),
+				new KvinTuple(null, item, property, 2, 0, 2),
+				new KvinTuple(null, item, property, 1, 0, 1));
 		try (IExtendedIterator<KvinTuple> snapshot = store.fetch(item, property, null, 0)) {
 			assertEquals(1, store.delete(item, property, null, 2, 2));
 			assertEquals(List.of(3, 2, 1), snapshot.toList().stream().map(tuple -> tuple.value).toList());
@@ -397,7 +397,7 @@ public class KvinIcebergTest {
 
 	@Test
 	public void cachesManifestsForAllTablesOnCreationAndReopening() throws Exception {
-		store.put(new KvinTuple(item, property, null, 1, 0, "value"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "value"));
 		for (int round = 0; round < 2; round++) {
 			List<Table> tables = storeTables();
 			for (Table table : tables) {
@@ -428,14 +428,14 @@ public class KvinIcebergTest {
 
 	@Test
 	public void cachedManifestsDoNotHideWritesFromOtherInstances() {
-		store.put(new KvinTuple(item, property, null, 1, 0, "old"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "old"));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 			assertEquals(List.of("old"), values.toList().stream().map(tuple -> tuple.value).toList());
 		}
 		try (KvinIceberg second = new KvinIceberg(directory.toString())) {
 			second.put(
-					new KvinTuple(item, property, null, 2, 0, "new"),
-					new KvinTuple(other, property, null, 3, 0, "other"));
+					new KvinTuple(null, item, property, 2, 0, "new"),
+					new KvinTuple(null, other, property, 3, 0, "other"));
 			try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 				assertEquals(List.of("new", "old"), values.toList().stream().map(tuple -> tuple.value).toList());
 			}
@@ -447,7 +447,7 @@ public class KvinIcebergTest {
 
 	private void assertValueSortOrder(Table table) {
 		SortOrder expected = SortOrder.builderFor(table.schema())
-				.asc("itemId").asc("contextId").asc("propertyId").desc("time").desc("seqNr").build();
+				.asc("contextId").asc("itemId").asc("propertyId").desc("time").desc("seqNr").build();
 		assertTrue(table.sortOrder().sameOrder(expected));
 		assertTrue(table.sortOrder().orderId() > 0);
 	}
@@ -455,7 +455,7 @@ public class KvinIcebergTest {
 	@Test
 	public void recordsSortOrderInTableAndFileMetadata() throws Exception {
 		assertValueSortOrder(valueTable());
-		store.put(new KvinTuple(item, property, null, 1, 0, "value"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "value"));
 		store.close();
 		store = new KvinIceberg(directory.toString());
 		Table table = valueTable();
@@ -480,8 +480,30 @@ public class KvinIcebergTest {
 	}
 
 	@Test
+	public void switchesItemFirstSortOrderToContextFirst() throws Exception {
+		URI context = URIs.createURI("urn:test:context");
+		store.put(new KvinTuple(context, item, property, 1, 0, 1), new KvinTuple(null, item, property, 1, 0, 2),
+				new KvinTuple(context, other, property, 2, 0, 3));
+		store.close();
+		Table table = valueTable();
+		table.replaceSortOrder().asc("itemId").asc("contextId").asc("propertyId").desc("time").desc("seqNr").commit();
+
+		// the order is replaced silently when the store is opened
+		store = new KvinIceberg(directory.toString());
+		table.refresh();
+		assertValueSortOrder(table);
+
+		store.put(new KvinTuple(context, item, property, 3, 0, 4), new KvinTuple(null, other, property, 4, 0, 5));
+		assertEquals(List.of(4, 1), store.fetch(item, property, context, 0).toList().stream().map(t -> t.value).toList());
+		assertEquals(List.of(4), store.fetch(item, property, context, 1).toList().stream().map(t -> t.value).toList());
+		assertEquals(List.of(3), store.fetch(other, property, context, 0).toList().stream().map(t -> t.value).toList());
+		assertEquals(List.of(2), store.fetch(item, property, null, 0).toList().stream().map(t -> t.value).toList());
+		assertEquals(List.of(5), store.fetch(other, property, null, 0).toList().stream().map(t -> t.value).toList());
+	}
+
+	@Test
 	public void upgradesExistingSortOrderWithoutRewritingFiles() throws Exception {
-		store.put(new KvinTuple(item, property, null, 1, 0, "old"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "old"));
 		store.close();
 		Table table = valueTable();
 		long snapshotId = table.currentSnapshot().snapshotId();
@@ -508,7 +530,7 @@ public class KvinIcebergTest {
 			}
 			assertEquals(oldPaths.size(), count);
 		}
-		store.put(new KvinTuple(item, property, null, 2, 0, "new"));
+		store.put(new KvinTuple(null, item, property, 2, 0, "new"));
 		table.refresh();
 		try (var files = table.newScan().planFiles()) {
 			for (var task : files) {
@@ -525,13 +547,13 @@ public class KvinIcebergTest {
 	@Test
 	public void mergesSequenceNumbersDescendingAcrossFilesAndDeduplicates() {
 		store.put(
-				new KvinTuple(item, property, null, 100, 1, "one"),
-				new KvinTuple(item, property, null, 100, 3, "three"),
-				new KvinTuple(item, property, null, 90, 5, "older"));
+				new KvinTuple(null, item, property, 100, 1, "one"),
+				new KvinTuple(null, item, property, 100, 3, "three"),
+				new KvinTuple(null, item, property, 90, 5, "older"));
 		store.put(
-				new KvinTuple(item, property, null, 100, 2, "two"),
-				new KvinTuple(item, property, null, 100, 3, "three"),
-				new KvinTuple(item, property, null, 100, 0, "zero"));
+				new KvinTuple(null, item, property, 100, 2, "two"),
+				new KvinTuple(null, item, property, 100, 3, "three"),
+				new KvinTuple(null, item, property, 100, 0, "zero"));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 			List<KvinTuple> tuples = values.toList();
 			assertEquals(List.of(3, 2, 1, 0, 5), tuples.stream().map(tuple -> tuple.seqNr).toList());
@@ -546,12 +568,12 @@ public class KvinIcebergTest {
 	public void typedValuesAndSnapshotReadsSurviveReopening() {
 		Record object = new Record(URIs.createURI("urn:test:field"), true);
 		store.put(
-				new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 100, 0, 10),
-				new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 200, 0, 20L),
-				new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 300, 0, "hello"),
-				new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 400, 0, object),
-				new KvinTuple(other, property, Kvin.DEFAULT_CONTEXT, 500, 0, 2.5));
-		store.put(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 200, 0, 20L));
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 100, 0, 10),
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 200, 0, 20L),
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 300, 0, "hello"),
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 400, 0, object),
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, other, property, 500, 0, 2.5));
+		store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 200, 0, 20L));
 
 		store.close();
 		store = new KvinIceberg(directory.toString());
@@ -603,10 +625,10 @@ public class KvinIcebergTest {
 		URI secondProperty = URIs.createURI("urn:test:second");
 		URI context = URIs.createURI("urn:test:context");
 		store.put(
-				new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 10, 0, true),
-				new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, 20, 0, false),
-				new KvinTuple(item, secondProperty, Kvin.DEFAULT_CONTEXT, 30, 0, 1.5f),
-				new KvinTuple(item, property, context, 40, 0, 7));
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 10, 0, true),
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 20, 0, false),
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, item, secondProperty, 30, 0, 1.5f),
+				new KvinTuple(context, item, property, 40, 0, 7));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, null, null, 1)) {
 			assertEquals(2, values.toList().size());
 		}
@@ -623,13 +645,13 @@ public class KvinIcebergTest {
 	@Test
 	public void readsOptionalValuesWithoutCarryingValuesBetweenRows() {
 		store.put(
-				new KvinTuple(item, property, null, 1, 0, 42),
-				new KvinTuple(item, property, null, 2, 1, null),
-				new KvinTuple(item, property, null, 2, 0, true),
-				new KvinTuple(item, property, null, 3, 0, 1.5f),
-				new KvinTuple(item, property, null, 4, 0, 2.5),
-				new KvinTuple(item, property, null, 5, 0, "text"),
-				new KvinTuple(item, property, null, 6, 123L));
+				new KvinTuple(null, item, property, 1, 0, 42),
+				new KvinTuple(null, item, property, 2, 1, null),
+				new KvinTuple(null, item, property, 2, 0, true),
+				new KvinTuple(null, item, property, 3, 0, 1.5f),
+				new KvinTuple(null, item, property, 4, 0, 2.5),
+				new KvinTuple(null, item, property, 5, 0, "text"),
+				new KvinTuple(null, item, property, 6, 123L));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 			List<KvinTuple> rows = values.toList();
 			assertEquals(7, rows.size());
@@ -651,11 +673,11 @@ public class KvinIcebergTest {
 		Record first = new Record(URIs.createURI("urn:test:field"), "first");
 		Record second = new Record(URIs.createURI("urn:test:field"), "second");
 		store.put(
-				new KvinTuple(item, property, null, 5, 0, first),
-				new KvinTuple(item, property, null, 4, 0, second),
-				new KvinTuple(item, property, null, 3, 0, null),
-				new KvinTuple(item, property, null, 2, 0, false),
-				new KvinTuple(item, property, null, 1, 0, 0));
+				new KvinTuple(null, item, property, 5, 0, first),
+				new KvinTuple(null, item, property, 4, 0, second),
+				new KvinTuple(null, item, property, 3, 0, null),
+				new KvinTuple(null, item, property, 2, 0, false),
+				new KvinTuple(null, item, property, 1, 0, 0));
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 0)) {
 			List<KvinTuple> rows = values.toList();
 			assertEquals(5, rows.size());
@@ -671,7 +693,7 @@ public class KvinIcebergTest {
 	public void mergesSortedBatchesWithBoundedWriteMemory() {
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int i = 0; i < 8193; i++) {
-			tuples.add(new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, i, 0, i));
+			tuples.add(new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, i, 0, i));
 		}
 		store.put(tuples);
 		try (IExtendedIterator<KvinTuple> values = store.fetch(item, property, null, 2)) {
@@ -684,9 +706,9 @@ public class KvinIcebergTest {
 	@Test
 	public void separateInstancesRefreshUriIds() {
 		try (KvinIceberg second = new KvinIceberg(directory.toString())) {
-			store.put(new KvinTuple(item, property, null, 1, 0, 1));
-			second.put(new KvinTuple(other, property, null, 2, 0, 2));
-			store.put(new KvinTuple(item, property, null, 3, 0, 3));
+			store.put(new KvinTuple(null, item, property, 1, 0, 1));
+			second.put(new KvinTuple(null, other, property, 2, 0, 2));
+			store.put(new KvinTuple(null, item, property, 3, 0, 3));
 			try (IExtendedIterator<KvinTuple> values = store.fetch(other, property, null, 0)) {
 				assertEquals(other, values.next().item);
 				assertFalse(values.hasNext());
@@ -700,7 +722,7 @@ public class KvinIcebergTest {
 	@Test
 	public void idMappingsAreIcebergTablesAndSurviveReopening() {
 		URI context = URIs.createURI("urn:test:context");
-		store.put(new KvinTuple(item, property, context, 1, 0, "value"));
+		store.put(new KvinTuple(context, item, property, 1, 0, "value"));
 		assertFalse(Files.exists(directory.toPath().resolve("iceberg-ids.properties")));
 		HadoopTables tables = new HadoopTables(new Configuration());
 		for (String name : List.of("items", "properties", "contexts")) {
@@ -719,7 +741,7 @@ public class KvinIcebergTest {
 
 	@Test
 	public void refusesExistingDataWithoutIdTables() throws Exception {
-		store.put(new KvinTuple(item, property, null, 1, 0, "value"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "value"));
 		store.close();
 		FileUtils.deleteDirectory(directory.toPath().resolve("iceberg-ids").toFile());
 		assertThrows(UncheckedIOException.class, () -> new KvinIceberg(directory.toString()));

@@ -127,7 +127,7 @@ public class TableFile implements KvinRecordStore {
 				}
 				int seqNr = readSeqNr(recordStart);
 				byte[] value = readValue(recordStart);
-				result.add(new KvinRecord(itemId, ctx, itemData.propertyId, time, seqNr, value));
+				result.add(new KvinRecord(ctx, itemId, itemData.propertyId, time, seqNr, value));
 				if (interval > 0) {
 					nextTimeThreshold = time - interval;
 				}

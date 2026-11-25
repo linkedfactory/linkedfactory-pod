@@ -322,8 +322,8 @@ public class KvinParquet implements Kvin {
 				}
 
 				KvinRecord record = new KvinRecord(
-					id[0],
 					id[1],
+					id[0],
 					id[2],
 					tuple.time,
 					tuple.seqNr,
@@ -795,7 +795,7 @@ public class KvinParquet implements Kvin {
 				internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
 					@Override
 					protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
-						return new KvinTuple(item, property, context, time, seqNr, value);
+						return new KvinTuple(context, item, property, time, seqNr, value);
 					}
 				};
 			}

@@ -66,7 +66,7 @@ public class KvinMemtableBenchmark {
 			var propertyUri = URIs.createURI("property:" + propertyId);
 			var contextUri = URIs.createURI("ctx:" + contextId);
 
-			batch.add(new KvinTuple(itemUri, propertyUri, contextUri, random.nextLong(KvinTuple.TIME_MAX_VALUE), random.nextDouble()));
+			batch.add(new KvinTuple(contextUri, itemUri, propertyUri, random.nextLong(KvinTuple.TIME_MAX_VALUE), random.nextDouble()));
 
 			if (batch.size() % 10000 == 0 || i == count) {
 				kvin.put(batch);

@@ -38,8 +38,8 @@ import static org.mockito.Mockito.*;
 
 public class IcebergPartitioningTest {
 	private static final Comparator<Record> ORDER = Comparator
-			.comparingLong((Record row) -> (Long) row.get(0))
-			.thenComparingLong(row -> (Long) row.get(1)).thenComparingLong(row -> (Long) row.get(2))
+			.comparingLong((Record row) -> (Long) row.get(1))
+			.thenComparingLong(row -> (Long) row.get(0)).thenComparingLong(row -> (Long) row.get(2))
 			.thenComparing((a, b) -> Long.compare((Long) b.get(3), (Long) a.get(3)))
 			.thenComparing((a, b) -> Integer.compare((Integer) b.get(4), (Integer) a.get(4)));
 
@@ -108,7 +108,7 @@ public class IcebergPartitioningTest {
 				for (long context : List.of(0L, 4L)) {
 					for (long property : List.of(2L, 3L)) {
 						for (long time : List.of(-11L, -1L, 0L, 9L, 10L, 19L, 20L)) {
-							input.add(new KvinRecord(item, context, property, time, 0, time));
+							input.add(new KvinRecord(context, item, property, time, 0, time));
 						}
 					}
 				}
@@ -135,7 +135,7 @@ public class IcebergPartitioningTest {
 			}
 		}
 		try (var store = new IcebergRecordStore(root().toString())) {
-			store.put(new KvinRecord(1, 0, 2, 21, 0, 21L));
+			store.put(new KvinRecord(0, 1, 2, 21, 0, 21L));
 			try (var rows = store.fetch(1, 2L, null, 1)) {
 				assertEquals(21, rows.next().time());
 			}
@@ -154,12 +154,12 @@ public class IcebergPartitioningTest {
 			for (long context : List.of(0L, 4L, 5L)) {
 				for (long item : List.of(1L, 2L)) {
 					for (long time = 0; time < 5; time++) {
-						input.add(new KvinRecord(item, context, 2, time, 0, time));
+						input.add(new KvinRecord(context, item, 2, time, 0, time));
 					}
 				}
 			}
 			store.put(input);
-			store.put(new KvinRecord(1, 4, 3, 0, 0, 0L));
+			store.put(new KvinRecord(4, 1, 3, 0, 0, 0L));
 			List<String> kept = files(Expressions.notEqual("contextId", 4L)).stream().map(DataFile::location).toList();
 			assertEquals(2, files(Expressions.equal("contextId", 4L)).size());
 
@@ -189,9 +189,9 @@ public class IcebergPartitioningTest {
 	@Test
 	public void contextDeleteRewritesFilesWithOtherContexts() throws Exception {
 		try (var store = new IcebergRecordStore(root().toString())) {
-			store.put(new KvinRecord(1, 0, 2, 0, 0, 0L), new KvinRecord(1, 4, 2, 0, 0, 1L),
-					new KvinRecord(2, 4, 2, 1, 0, 2L), new KvinRecord(2, 5, 2, 1, 0, 3L));
-			store.put(new KvinRecord(3, 4, 2, 0, 0, 4L));
+			store.put(new KvinRecord(0, 1, 2, 0, 0, 0L), new KvinRecord(4, 1, 2, 0, 0, 1L),
+					new KvinRecord(4, 2, 2, 1, 0, 2L), new KvinRecord(5, 2, 2, 1, 0, 3L));
+			store.put(new KvinRecord(4, 3, 2, 0, 0, 4L));
 			assertEquals(2, files().size());
 
 			assertEquals(3, store.delete(4L));
@@ -211,7 +211,7 @@ public class IcebergPartitioningTest {
 			}
 
 			// the context can be written again
-			store.put(new KvinRecord(1, 4, 2, 7, 0, 7L));
+			store.put(new KvinRecord(4, 1, 2, 7, 0, 7L));
 			try (var rows = store.fetch(1, 2L, 4L, 0)) {
 				assertEquals(List.of(7L), rows.toList().stream().map(r -> r.value()).toList());
 			}
@@ -223,13 +223,13 @@ public class IcebergPartitioningTest {
 		try (var store = new IcebergRecordStore(root().toString(), null,
 				schema -> PartitionSpec.builderFor(schema).identity("propertyId").build())) {
 			table().updateProperties().set("kvin.compaction.min-files", "3").commit();
-			store.put(new KvinRecord(1, 0, 2, 0, 0, 0), new KvinRecord(1, 0, 3, 0, 0, 0));
+			store.put(new KvinRecord(0, 1, 2, 0, 0, 0), new KvinRecord(0, 1, 3, 0, 0, 0));
 			assertEquals(2, files().size());
 			DataFile untouched = files(Expressions.equal("propertyId", 3L)).getFirst();
-			store.put(new KvinRecord(1, 0, 2, 1, 0, 1));
+			store.put(new KvinRecord(0, 1, 2, 1, 0, 1));
 			assertEquals("Threshold is not applied across partitions", 3, files().size());
 			List<DataFile> oldFiles = files();
-			store.put(new KvinRecord(1, 0, 2, 2, 0, 2));
+			store.put(new KvinRecord(0, 1, 2, 2, 0, 2));
 			assertEquals(2, files().size());
 			assertEquals(untouched.location(), files(Expressions.equal("propertyId", 3L)).getFirst().location());
 			for (DataFile file : oldFiles) {
@@ -254,10 +254,10 @@ public class IcebergPartitioningTest {
 	@Test
 	public void explicitEvolutionKeepsOldSpecsReadableAndRepartitionsDeleteOutputs() throws Exception {
 		try (var store = new IcebergRecordStore(root().toString())) {
-			store.put(new KvinRecord(1, 0, 2, 0, 0, 0), new KvinRecord(1, 0, 2, 1, 0, 1),
-					new KvinRecord(1, 0, 2, 11, 0, 11));
+			store.put(new KvinRecord(0, 1, 2, 0, 0, 0), new KvinRecord(0, 1, 2, 1, 0, 1),
+					new KvinRecord(0, 1, 2, 11, 0, 11));
 			table().updateSpec().addField("time_range", Expressions.truncate("time", 10)).commit();
-			store.put(new KvinRecord(1, 0, 2, 21, 0, 21));
+			store.put(new KvinRecord(0, 1, 2, 21, 0, 21));
 			assertEquals(2, files().size());
 			assertEquals(1, store.delete(1, 2L, null, 0, 0));
 			assertEquals(3, files().size());
@@ -281,9 +281,9 @@ public class IcebergPartitioningTest {
 			for (int time = 0; time < 3; time++) {
 				List<KvinRecord> batch = new ArrayList<>();
 				for (long property : List.of(2L, 3L)) {
-					batch.add(new KvinRecord(1, 0, property, time, 0, time));
+					batch.add(new KvinRecord(0, 1, property, time, 0, time));
 					if (time == 0) {
-						batch.add(new KvinRecord(1, 0, property, time, 0, time));
+						batch.add(new KvinRecord(0, 1, property, time, 0, time));
 					}
 				}
 				store.put(batch);
@@ -302,7 +302,7 @@ public class IcebergPartitioningTest {
 	public void uncertainDeleteCommitRetainsPotentiallyCommittedPartitionFiles() throws Exception {
 		try (var store = new IcebergRecordStore(root().toString(), null,
 				schema -> PartitionSpec.builderFor(schema).identity("contextId").build())) {
-			store.put(new KvinRecord(1, 0, 2, 1, 0, 1), new KvinRecord(1, 0, 2, 2, 0, 2));
+			store.put(new KvinRecord(0, 1, 2, 1, 0, 1), new KvinRecord(0, 1, 2, 2, 0, 2));
 			var field = IcebergRecordStore.class.getDeclaredField("table");
 			field.setAccessible(true);
 			Table storeTable = spy((Table) field.get(store));
@@ -329,7 +329,7 @@ public class IcebergPartitioningTest {
 			List<KvinRecord> input = new ArrayList<>();
 			// two batches, each split into both partitions
 			for (int time = 0; time < 8200; time++) {
-				input.add(new KvinRecord(1, time % 2, 2, time, 0, time));
+				input.add(new KvinRecord(time % 2, 1, 2, time, 0, time));
 			}
 			store.put(input);
 			assertEquals(4, files().size());
@@ -346,18 +346,18 @@ public class IcebergPartitioningTest {
 	public void compactionPreservesHistoricalSpecs() throws Exception {
 		try (var store = new IcebergRecordStore(root().toString())) {
 			for (int time = 0; time < 3; time++) {
-				store.put(new KvinRecord(1, 0, 2, time, 0, time));
+				store.put(new KvinRecord(0, 1, 2, time, 0, time));
 			}
 			int originalSpec = table().spec().specId();
 			Table evolved = table();
 			evolved.updateSpec().addField("contextId").commit();
 			evolved.updateProperties().set("kvin.compaction.min-files", "3").commit();
-			store.put(new KvinRecord(1, 0, 2, 3, 0, 3));
+			store.put(new KvinRecord(0, 1, 2, 3, 0, 3));
 			assertEquals(2, files().size());
 			assertEquals(1, files().stream().filter(file -> file.specId() == originalSpec).count());
-			store.put(new KvinRecord(1, 0, 2, 4, 0, 4));
+			store.put(new KvinRecord(0, 1, 2, 4, 0, 4));
 			assertEquals("Different spec IDs must not reach the threshold together", 3, files().size());
-			store.put(new KvinRecord(1, 0, 2, 5, 0, 5));
+			store.put(new KvinRecord(0, 1, 2, 5, 0, 5));
 			assertEquals(2, files().size());
 			assertValidFiles();
 			try (var rows = store.fetch(1, 2L, null, 0)) {
@@ -387,7 +387,7 @@ public class IcebergPartitioningTest {
 		var property = URIs.createURI("urn:partition:property");
 		try (var store = new KvinIceberg(root().toString(), null,
 				schema -> PartitionSpec.builderFor(schema).bucket("itemId", 8).truncate("time", 10).build())) {
-			store.put(new KvinTuple(item, property, null, 1, 1), new KvinTuple(item, property, null, 11, 11));
+			store.put(new KvinTuple(null, item, property, 1, 1), new KvinTuple(null, item, property, 11, 11));
 			assertEquals(2, files().size());
 			assertValidFiles();
 		}

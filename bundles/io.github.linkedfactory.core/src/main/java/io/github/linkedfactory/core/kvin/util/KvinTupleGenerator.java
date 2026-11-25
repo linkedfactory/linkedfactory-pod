@@ -111,7 +111,7 @@ public class KvinTupleGenerator {
 						}
 					}
 					Object value = generateRandomValue(propertyTypes[propertyNr - 1]);
-					next = new KvinTuple(item, property, Kvin.DEFAULT_CONTEXT, time, 0, value);
+					next = new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, time, 0, value);
 					time += timeDistancePerValue;
 				}
 				return true;

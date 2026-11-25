@@ -58,7 +58,7 @@ public class KvinIcebergReadOptimizationTest {
 		int count = 20_000;
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int time = 0; time < count; time++) {
-			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+			tuples.add(new KvinTuple(null, item, property, time, 0, (long) time));
 		}
 		store.put(tuples);
 		Table table = table();
@@ -109,11 +109,11 @@ public class KvinIcebergReadOptimizationTest {
 	@Test
 	public void propertiesUseMarkersWithoutDecodingValuesAndKeepIdOrder() {
 		URI context = URIs.createURI("urn:test:context");
-		store.put(new KvinTuple(item, property, null, 2, 0, new byte[]{(byte) 255}),
-				new KvinTuple(item, property, null, 1, 0, 1),
-				new KvinTuple(item, secondProperty, null, 1, 0, null),
-				new KvinTuple(item, URIs.createURI("urn:test:excluded"), context, 1, 0, 1));
-		store.put(new KvinTuple(item, property, null, 3, 0, 3));
+		store.put(new KvinTuple(null, item, property, 2, 0, new byte[]{(byte) 255}),
+				new KvinTuple(null, item, property, 1, 0, 1),
+				new KvinTuple(null, item, secondProperty, 1, 0, null),
+				new KvinTuple(context, item, URIs.createURI("urn:test:excluded"), 1, 0, 1));
+		store.put(new KvinTuple(null, item, property, 3, 0, 3));
 		store.close();
 		store = new KvinIceberg(directory.toString());
 		try (var properties = store.properties(item, null)) {
@@ -136,9 +136,9 @@ public class KvinIcebergReadOptimizationTest {
 	public void completedSeriesSkipValueDecodingWithinRowGroup() throws Exception {
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int time = 10; time > 0; time--) {
-			tuples.add(new KvinTuple(item, property, null, time, 0, "old"));
+			tuples.add(new KvinTuple(null, item, property, time, 0, "old"));
 		}
-		tuples.add(new KvinTuple(item, secondProperty, null, 1, 0, "next"));
+		tuples.add(new KvinTuple(null, item, secondProperty, 1, 0, "next"));
 		store.put(tuples);
 		Table table = table();
 		try (var tasks = table.newScan().planFiles();
@@ -149,7 +149,7 @@ public class KvinIcebergReadOptimizationTest {
 			field.setAccessible(true);
 			ColumnReader[] columns = (ColumnReader[]) field.get(reader);
 			columns[10] = spy(columns[10]);
-			reader.skipThrough(first.itemId(), first.contextId(), first.propertyId());
+			reader.skipThrough(first.contextId(), first.itemId(), first.propertyId());
 			assertEquals("next", reader.next().value());
 			assertFalse(reader.hasNext());
 			verify(columns[10], times(9)).skip();
@@ -168,9 +168,9 @@ public class KvinIcebergReadOptimizationTest {
 				.set("write.parquet.row-group-check-max-record-count", "100").commit();
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int time = 2000; time > 0; time--) {
-			tuples.add(new KvinTuple(item, property, null, time, 0, "value-" + time + "-".repeat(100)));
+			tuples.add(new KvinTuple(null, item, property, time, 0, "value-" + time + "-".repeat(100)));
 		}
-		tuples.add(new KvinTuple(item, secondProperty, null, 1, 0, "next"));
+		tuples.add(new KvinTuple(null, item, secondProperty, 1, 0, "next"));
 		// Reopen so the writer sees the updated table properties.
 		store.close();
 		store = new KvinIceberg(directory.toString());
@@ -184,7 +184,7 @@ public class KvinIcebergReadOptimizationTest {
 			field.setAccessible(true);
 			ParquetFileReader file = spy((ParquetFileReader) field.get(reader));
 			field.set(reader, file);
-			reader.skipThrough(first.itemId(), first.contextId(), first.propertyId());
+			reader.skipThrough(first.contextId(), first.itemId(), first.propertyId());
 			assertEquals("next", reader.next().value());
 			assertFalse(reader.hasNext());
 			long reads = mockingDetails(file).getInvocations().stream()
@@ -200,9 +200,9 @@ public class KvinIcebergReadOptimizationTest {
 		int count = 8000;
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int time = count; time > 0; time--) {
-			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+			tuples.add(new KvinTuple(null, item, property, time, 0, (long) time));
 		}
-		tuples.add(new KvinTuple(other, property, null, 1, 0, 1L));
+		tuples.add(new KvinTuple(null, other, property, 1, 0, 1L));
 		store.put(tuples);
 		long otherId = store.getIdStore().getId(other, io.github.linkedfactory.core.kvin.ids.IdKind.ITEM, false);
 		Table table = table();
@@ -251,10 +251,10 @@ public class KvinIcebergReadOptimizationTest {
 	public void allNullValueColumnsAreNotRead() throws Exception {
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int time = 100; time > 0; time--) {
-			tuples.add(new KvinTuple(item, property, null, time, 0, (float) time));
+			tuples.add(new KvinTuple(null, item, property, time, 0, (float) time));
 		}
 		store.put(tuples);
-		store.put(new KvinTuple(item, secondProperty, null, 1, 0, "text"));
+		store.put(new KvinTuple(null, item, secondProperty, 1, 0, "text"));
 		Table table = table();
 		var field = SeriesSkippingReader.class.getDeclaredField("columns");
 		field.setAccessible(true);
@@ -292,8 +292,8 @@ public class KvinIcebergReadOptimizationTest {
 	@Test
 	public void fetchesPlanFilesOncePerSnapshot() throws Exception {
 		URI other = URIs.createURI("urn:test:other");
-		store.put(new KvinTuple(item, property, null, 1, 0, 1L));
-		store.put(new KvinTuple(other, property, null, 1, 0, 2L));
+		store.put(new KvinTuple(null, item, property, 1, 0, 1L));
+		store.put(new KvinTuple(null, other, property, 1, 0, 2L));
 		var field = IcebergRecordStore.class.getDeclaredField("table");
 		field.setAccessible(true);
 		Table table = spy((Table) field.get(store.getRecordStore()));
@@ -311,7 +311,7 @@ public class KvinIcebergReadOptimizationTest {
 		verify(table, times(1)).newScan();
 
 		// a write creates a new snapshot, which is planned again
-		store.put(new KvinTuple(item, property, null, 2, 0, 3L));
+		store.put(new KvinTuple(null, item, property, 2, 0, 3L));
 		clearInvocations(table);
 		try (var values = store.fetch(item, property, null, 0)) {
 			assertEquals(List.of(3L, 1L), values.toList().stream().map(tuple -> tuple.value).toList());
@@ -326,7 +326,7 @@ public class KvinIcebergReadOptimizationTest {
 	public void writerUsesSmallPagesByDefault() throws Exception {
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int time = 8000; time > 0; time--) {
-			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+			tuples.add(new KvinTuple(null, item, property, time, 0, (long) time));
 		}
 		store.put(tuples);
 		Table table = table();
@@ -350,10 +350,10 @@ public class KvinIcebergReadOptimizationTest {
 		int count = 8000;
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int time = count; time > 0; time--) {
-			tuples.add(new KvinTuple(item, property, null, time, 0, (long) time));
+			tuples.add(new KvinTuple(null, item, property, time, 0, (long) time));
 		}
 		for (int time = 3; time > 0; time--) {
-			tuples.add(new KvinTuple(other, property, null, time, 0, (long) time));
+			tuples.add(new KvinTuple(null, other, property, time, 0, (long) time));
 		}
 		store.put(tuples);
 		long otherId = store.getIdStore().getId(other, io.github.linkedfactory.core.kvin.ids.IdKind.ITEM, false);
@@ -393,10 +393,10 @@ public class KvinIcebergReadOptimizationTest {
 				new io.github.linkedfactory.core.kvin.Record(URIs.createURI("urn:test:field"), "object"));
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int i = 0; i < expected.size(); i++) {
-			tuples.add(new KvinTuple(item, property, null, 10, expected.size() - i, expected.get(i)));
+			tuples.add(new KvinTuple(null, item, property, 10, expected.size() - i, expected.get(i)));
 		}
-		tuples.add(new KvinTuple(item, property, null, 9, 0, "excluded"));
-		tuples.add(new KvinTuple(item, secondProperty, null, 10, 0, "second"));
+		tuples.add(new KvinTuple(null, item, property, 9, 0, "excluded"));
+		tuples.add(new KvinTuple(null, item, secondProperty, 10, 0, "second"));
 		store.put(tuples);
 		try (var values = store.fetch(List.of(item), List.of(property, secondProperty), null, 10, 10, expected.size(), 0, null)) {
 			List<KvinTuple> rows = values.toList();

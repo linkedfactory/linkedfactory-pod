@@ -86,7 +86,7 @@ import java.util.function.Predicate;
  * Null contexts select ID 0; null properties (and the interface's -1 sentinel)
  * select all properties.
  *
- * <p>Data files are sorted by item, context, property, descending time, and
+ * <p>Data files are sorted by context, item, property, descending time, and
  * descending sequence number. Deletes use Iceberg copy-on-write rewrites,
  * therefore deleted tuples are immediately absent from subsequently planned
  * fetch scans.</p>
@@ -123,9 +123,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 	private static final SortOrder SORT_ORDER = configureSortOrder(SortOrder.builderFor(SCHEMA)).build();
 
-	private static final Comparator<org.apache.iceberg.data.Record> ORDER = Comparator.comparingLong((org.apache.iceberg.data.Record r) -> (Long) r.get(0)).thenComparingLong(r -> (Long) r.get(1)).thenComparingLong(r -> (Long) r.get(2)).thenComparing((a, b) -> Long.compare((Long) b.get(3), (Long) a.get(3))).thenComparing((a, b) -> Integer.compare((Integer) b.get(4), (Integer) a.get(4)));
+	private static final Comparator<org.apache.iceberg.data.Record> ORDER = Comparator.comparingLong((org.apache.iceberg.data.Record r) -> (Long) r.get(1)).thenComparingLong(r -> (Long) r.get(0)).thenComparingLong(r -> (Long) r.get(2)).thenComparing((a, b) -> Long.compare((Long) b.get(3), (Long) a.get(3))).thenComparing((a, b) -> Integer.compare((Integer) b.get(4), (Integer) a.get(4)));
 
-	private static final Comparator<KvinRow> ROW_ORDER = Comparator.comparingLong(KvinRow::itemId).thenComparingLong(KvinRow::contextId).thenComparingLong(KvinRow::propertyId).thenComparing((a, b) -> Long.compare(b.time(), a.time())).thenComparing((a, b) -> Integer.compare(b.seqNr(), a.seqNr()));
+	private static final Comparator<KvinRow> ROW_ORDER = Comparator.comparingLong(KvinRow::contextId).thenComparingLong(KvinRow::itemId).thenComparingLong(KvinRow::propertyId).thenComparing((a, b) -> Long.compare(b.time(), a.time())).thenComparing((a, b) -> Integer.compare(b.seqNr(), a.seqNr()));
 
 	private final Path root;
 	private final Table table;
@@ -213,7 +213,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 	}
 
 	private static <T extends SortOrderBuilder<T>> T configureSortOrder(T builder) {
-		return builder.asc("itemId").asc("contextId").asc("propertyId").desc("time").desc("seqNr");
+		return builder.asc("contextId").asc("itemId").asc("propertyId").desc("time").desc("seqNr");
 	}
 
 	boolean hasSnapshot() {
@@ -576,14 +576,14 @@ public class IcebergRecordStore implements KvinRecordStore {
 			return rows;
 		}
 		// Numeric URI keys adapt the shared aggregation engine without resolving URI IDs.
-		IExtendedIterator<KvinTuple> tuples = rows.mapWith(row -> new KvinTuple(key(row.itemId()),
-				key(row.propertyId()), key(row.contextId()), row.time(), row.seqNr(), row.value()));
+		IExtendedIterator<KvinTuple> tuples = rows.mapWith(row -> new KvinTuple(key(row.contextId()),
+				key(row.itemId()), key(row.propertyId()), row.time(), row.seqNr(), row.value()));
 		return new AggregatingIterator<>(tuples, interval, op.trim().toLowerCase(java.util.Locale.ROOT), limit) {
 			@Override
 			protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
-				return new KvinTuple(item, property, context, time, seqNr, value);
+				return new KvinTuple(context, item, property, time, seqNr, value);
 			}
-		}.mapWith(tuple -> new KvinRecord(number(tuple.item), number(tuple.context), number(tuple.property),
+		}.mapWith(tuple -> new KvinRecord(number(tuple.context), number(tuple.item), number(tuple.property),
 				tuple.time, tuple.seqNr, tuple.value));
 	}
 
@@ -605,8 +605,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 	/**
 	 * Derives a lower bound for the matching rows of a file from its column
 	 * statistics, clamped by the query. The bound is valid lexicographically:
-	 * every matching row has itemId and propertyId at least as large, the
-	 * requested context, and a time no later than the bound's.
+	 * every matching row has the requested context, itemId and propertyId at
+	 * least as large, and a time no later than the bound's.
 	 */
 	private static KvinRow lowerBound(DataFile file, Set<Long> itemIds, long contextId, Set<Long> propertyIds, Long end) {
 		long item = Math.max(bound(file.lowerBounds(), 1, Long.MIN_VALUE), Collections.min(itemIds));
@@ -618,7 +618,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 		if (end != null) {
 			time = Math.min(time, end);
 		}
-		return new KvinRow(item, contextId, property, time, Integer.MAX_VALUE, null);
+		return new KvinRow(contextId, item, property, time, Integer.MAX_VALUE, null);
 	}
 
 	private static long bound(Map<Integer, ByteBuffer> bounds, int fieldId, long fallback) {
@@ -728,7 +728,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 					opened++;
 					try {
 						if (skipping) {
-							cursor.skipThrough(skipItemId, contextId, skipPropertyId);
+							cursor.skipThrough(contextId, skipItemId, skipPropertyId);
 						}
 						if (cursor.advance()) {
 							cursors.add(cursor);
@@ -802,9 +802,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 							skipping = true;
 							skipItemId = itemId;
 							skipPropertyId = propertyId;
-							pending.skipThrough(itemId, contextId, propertyId);
+							pending.skipThrough(contextId, itemId, propertyId);
 							for (RowCursor cursor : cursors) {
-								cursor.skipThrough(itemId, contextId, propertyId);
+								cursor.skipThrough(contextId, itemId, propertyId);
 							}
 						}
 
@@ -814,7 +814,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 							value = Records.decodeRecord(bytes.duplicate());
 						}
 
-						next = new KvinRecord(itemId, contextId, propertyId, time, seqNr, value);
+						next = new KvinRecord(contextId, itemId, propertyId, time, seqNr, value);
 						if (limit > 0 && requestedSeries > 0 && completedSeries == requestedSeries) {
 							close();
 						}
@@ -1070,7 +1070,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 			}
 		}
 
-		return new KvinRow((Long) record.get(0), (Long) record.get(1), (Long) record.get(2), (Long) record.get(3), (Integer) record.get(4), value);
+		return new KvinRow((Long) record.get(1), (Long) record.get(0), (Long) record.get(2), (Long) record.get(3), (Integer) record.get(4), value);
 	}
 
 	private static final class RowCursor implements AutoCloseable {
@@ -1093,8 +1093,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 			this.iterator = rows.iterator();
 		}
 
-		void skipThrough(long item, long context, long property) {
-			rows.skipThrough(item, context, property);
+		void skipThrough(long context, long item, long property) {
+			rows.skipThrough(context, item, property);
 		}
 
 		boolean advance() {

@@ -362,7 +362,7 @@ public class ServiceTest {
 			URI uri = itemUri(nr);
 			for (int i = 1; i <= values; i++) {
 				int seqNr = i % 1000;
-				KvinTuple tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, seqNr,
+				KvinTuple tuple = new KvinTuple(Kvin.DEFAULT_CONTEXT, uri, valueProperty, time, seqNr,
 						valueFactory.apply(rand));
 				store.put(tuple);
 				time += 10;
@@ -387,7 +387,7 @@ public class ServiceTest {
 				Record value = new Record(URIs.createURI("p:" + i),
 						new Record(URIs.createURI("p:nested"), rand.nextDouble() * rand.nextInt(100)));
 				int seqNr = i % 1000;
-				KvinTuple tuple = new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, seqNr, value);
+				KvinTuple tuple = new KvinTuple(Kvin.DEFAULT_CONTEXT, uri, valueProperty, time, seqNr, value);
 				store.put(tuple);
 				time += 10;
 				result.add(tuple);

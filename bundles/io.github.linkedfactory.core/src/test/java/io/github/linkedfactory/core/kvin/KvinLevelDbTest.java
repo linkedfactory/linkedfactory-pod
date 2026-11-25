@@ -88,7 +88,7 @@ public class KvinLevelDbTest extends KvinTestBase {
 			URI uri = itemUri(nr);
 			for (int i = 0; i < points; i++) {
 				long time = startTime - i * pointDistance;
-				store.put(new KvinTuple(uri, valueProperty, ctx, time, recordValue(nr, i, time)));
+				store.put(new KvinTuple(ctx, uri, valueProperty, time, recordValue(nr, i, time)));
 			}
 		});
 
@@ -119,7 +119,7 @@ public class KvinLevelDbTest extends KvinTestBase {
 			URI uri = itemUri(nr);
 			for (int i = 0; i < points; i++) {
 				long time = startTime - i * pointDistance;
-				store.put(new KvinTuple(uri, valueProperty, Kvin.DEFAULT_CONTEXT, time, recordValue(nr, i, time)));
+				store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, uri, valueProperty, time, recordValue(nr, i, time)));
 			}
 		}
 
@@ -138,9 +138,9 @@ public class KvinLevelDbTest extends KvinTestBase {
 		URI item = itemUri(1);
 		URI otherItem = itemUri(2);
 		URI ctx = URIs.createURI("ctx:1");
-		store.put(new KvinTuple(item, valueProperty, ctx, 100, 1),
-				new KvinTuple(item, valueProperty, ctx, 200, 2),
-				new KvinTuple(otherItem, valueProperty, ctx, 100, 3));
+		store.put(new KvinTuple(ctx, item, valueProperty, 100, 1),
+				new KvinTuple(ctx, item, valueProperty, 200, 2),
+				new KvinTuple(ctx, otherItem, valueProperty, 100, 3));
 		byte[] valueId = db.toId(item, valueProperty, ctx, false, null);
 
 		// delete all values of the item and property
@@ -149,7 +149,7 @@ public class KvinLevelDbTest extends KvinTestBase {
 		assertEquals(List.of(otherItem), store.descendants(URIs.createURI("http://example.org/"), ctx).toList());
 
 		// delete all values of the item in the context
-		store.put(new KvinTuple(item, valueProperty, ctx, 300, 4));
+		store.put(new KvinTuple(ctx, item, valueProperty, 300, 4));
 		assertTrue(store.delete(item, ctx));
 		assertEquals(List.of(), fetched(item, valueProperty, ctx));
 		assertEquals(List.of(otherItem), store.descendants(URIs.createURI("http://example.org/"), ctx).toList());
@@ -159,8 +159,8 @@ public class KvinLevelDbTest extends KvinTestBase {
 		db = (KvinLevelDb) store;
 		assertArrayEquals(valueId, db.toId(item, valueProperty, ctx, false, null));
 
-		store.put(new KvinTuple(item, valueProperty, ctx, 400, 5));
-		assertEquals(List.of(new KvinTuple(item, valueProperty, ctx, 400, 5)), fetched(item, valueProperty, ctx));
+		store.put(new KvinTuple(ctx, item, valueProperty, 400, 5));
+		assertEquals(List.of(new KvinTuple(ctx, item, valueProperty, 400, 5)), fetched(item, valueProperty, ctx));
 		assertArrayEquals(valueId, db.toId(item, valueProperty, ctx, false, null));
 	}
 
@@ -183,11 +183,11 @@ public class KvinLevelDbTest extends KvinTestBase {
 		// one-megabyte value-batch threshold while the cache is in use.
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int i = 0; i < 260; i++) {
-			tuples.add(new KvinTuple(item, property, context, i, i, largeValue));
+			tuples.add(new KvinTuple(context, item, property, i, i, largeValue));
 		}
-		tuples.add(new KvinTuple(otherItem, otherProperty, otherContext, 10000L, 0, largeValue));
+		tuples.add(new KvinTuple(otherContext, otherItem, otherProperty, 10000L, 0, largeValue));
 		for (int i = 0; i < 260; i++) {
-			tuples.add(new KvinTuple(item, property, context, 20000L + i, i, largeValue));
+			tuples.add(new KvinTuple(context, item, property, 20000L + i, i, largeValue));
 		}
 
 		store.put(tuples);
@@ -209,7 +209,7 @@ public class KvinLevelDbTest extends KvinTestBase {
 	@Test
 	public void testBatchWriteRecoversAfterIteratorFailure() {
 		URI item = itemUri(103);
-		KvinTuple tuple = new KvinTuple(item, valueProperty, Kvin.DEFAULT_CONTEXT, 1L, 0, "before failure");
+		KvinTuple tuple = new KvinTuple(Kvin.DEFAULT_CONTEXT, item, valueProperty, 1L, 0, "before failure");
 		Iterable<KvinTuple> failingEntries = () -> new Iterator<>() {
 			private boolean returned = false;
 
@@ -235,7 +235,7 @@ public class KvinLevelDbTest extends KvinTestBase {
 			// expected
 		}
 
-		KvinTuple afterFailure = new KvinTuple(item, valueProperty, Kvin.DEFAULT_CONTEXT, 2L, 0, "after failure");
+		KvinTuple afterFailure = new KvinTuple(Kvin.DEFAULT_CONTEXT, item, valueProperty, 2L, 0, "after failure");
 		store.put(afterFailure);
 
 		List<KvinTuple> values = store.fetch(item, valueProperty, Kvin.DEFAULT_CONTEXT, 0).toList();
@@ -250,11 +250,11 @@ public class KvinLevelDbTest extends KvinTestBase {
 		URI item2 = URIs.createURI("http://example.org/item2");
 		URI ctxA = URIs.createURI("ctx:a");
 		URI ctxB = URIs.createURI("ctx:b");
-		store.put(new KvinTuple(item1, valueProperty, ctxA, 100, 1),
-				new KvinTuple(item2, valueProperty, ctxB, 100, 2),
-				new KvinTuple(item2, valueProperty, ctxA, 100, 3),
-				new KvinTuple(item1, valueProperty, ctxB, 100, 4),
-				new KvinTuple(item1, propertyUri(1), ctxA, 200, 5));
+		store.put(new KvinTuple(ctxA, item1, valueProperty, 100, 1),
+				new KvinTuple(ctxB, item2, valueProperty, 100, 2),
+				new KvinTuple(ctxA, item2, valueProperty, 100, 3),
+				new KvinTuple(ctxB, item1, valueProperty, 100, 4),
+				new KvinTuple(ctxA, item1, propertyUri(1), 200, 5));
 
 		// all values of a context are adjacent in key order
 		List<URI> contexts = ((KvinLevelDb) store).fetchAll().mapWith(t -> t.context).toList();
@@ -277,8 +277,8 @@ public class KvinLevelDbTest extends KvinTestBase {
 		assertTrue(store.delete(item1, ctxA));
 		assertEquals(List.of(), fetched(item1, valueProperty, ctxA));
 		assertEquals(List.of(), store.properties(item1, ctxA).toList());
-		assertEquals(List.of(new KvinTuple(item1, valueProperty, ctxB, 100, 4)), fetched(item1, valueProperty, ctxB));
-		assertEquals(List.of(new KvinTuple(item2, valueProperty, ctxA, 100, 3)), fetched(item2, valueProperty, ctxA));
+		assertEquals(List.of(new KvinTuple(ctxB, item1, valueProperty, 100, 4)), fetched(item1, valueProperty, ctxB));
+		assertEquals(List.of(new KvinTuple(ctxA, item2, valueProperty, 100, 3)), fetched(item2, valueProperty, ctxA));
 		assertEquals(List.of(item2),
 				store.descendants(URIs.createURI("http://example.org/"), ctxA).toList());
 	}
@@ -290,11 +290,11 @@ public class KvinLevelDbTest extends KvinTestBase {
 		URI ctxA = URIs.createURI("ctx:a");
 		URI ctxB = URIs.createURI("ctx:b");
 		URI prefix = URIs.createURI("http://example.org/");
-		store.put(new KvinTuple(item1, valueProperty, ctxA, 100, 1),
-				new KvinTuple(item1, valueProperty, ctxA, 200, 2),
-				new KvinTuple(item2, propertyUri(1), ctxA, 100, 3),
-				new KvinTuple(item1, valueProperty, ctxB, 100, 4),
-				new KvinTuple(item2, valueProperty, null, 100, 5));
+		store.put(new KvinTuple(ctxA, item1, valueProperty, 100, 1),
+				new KvinTuple(ctxA, item1, valueProperty, 200, 2),
+				new KvinTuple(ctxA, item2, propertyUri(1), 100, 3),
+				new KvinTuple(ctxB, item1, valueProperty, 100, 4),
+				new KvinTuple(null, item2, valueProperty, 100, 5));
 
 		assertEquals(3, store.delete(ctxA));
 		assertEquals(List.of(), fetched(item1, valueProperty, ctxA));
@@ -303,8 +303,8 @@ public class KvinLevelDbTest extends KvinTestBase {
 		assertEquals(List.of(), store.descendants(prefix, ctxA).toList());
 
 		// other contexts are not changed
-		assertEquals(List.of(new KvinTuple(item1, valueProperty, ctxB, 100, 4)), fetched(item1, valueProperty, ctxB));
-		assertEquals(List.of(new KvinTuple(item2, valueProperty, Kvin.DEFAULT_CONTEXT, 100, 5)),
+		assertEquals(List.of(new KvinTuple(ctxB, item1, valueProperty, 100, 4)), fetched(item1, valueProperty, ctxB));
+		assertEquals(List.of(new KvinTuple(Kvin.DEFAULT_CONTEXT, item2, valueProperty, 100, 5)),
 				fetched(item2, valueProperty, null));
 
 		// deleting again or deleting an unknown context deletes nothing
@@ -312,14 +312,14 @@ public class KvinLevelDbTest extends KvinTestBase {
 		assertEquals(0, store.delete(URIs.createURI("ctx:unknown")));
 
 		// the context can be used again
-		store.put(new KvinTuple(item2, valueProperty, ctxA, 300, 6));
-		assertEquals(List.of(new KvinTuple(item2, valueProperty, ctxA, 300, 6)), fetched(item2, valueProperty, ctxA));
+		store.put(new KvinTuple(ctxA, item2, valueProperty, 300, 6));
+		assertEquals(List.of(new KvinTuple(ctxA, item2, valueProperty, 300, 6)), fetched(item2, valueProperty, ctxA));
 		assertEquals(List.of(item2), store.descendants(prefix, ctxA).toList());
 
 		// null selects the default context
 		assertEquals(1, store.delete((URI) null));
 		assertEquals(List.of(), fetched(item2, valueProperty, null));
-		assertEquals(List.of(new KvinTuple(item2, valueProperty, ctxA, 300, 6)), fetched(item2, valueProperty, ctxA));
+		assertEquals(List.of(new KvinTuple(ctxA, item2, valueProperty, 300, 6)), fetched(item2, valueProperty, ctxA));
 	}
 
 	@Test
@@ -329,7 +329,7 @@ public class KvinLevelDbTest extends KvinTestBase {
 		int count = 100000 + 10;
 		List<KvinTuple> tuples = new ArrayList<>();
 		for (int i = 0; i < count; i++) {
-			tuples.add(new KvinTuple(item, valueProperty, ctx, i, i));
+			tuples.add(new KvinTuple(ctx, item, valueProperty, i, i));
 		}
 		store.put(tuples);
 		assertEquals(count, store.delete(ctx));
@@ -339,9 +339,9 @@ public class KvinLevelDbTest extends KvinTestBase {
 	@Test
 	public void testReopenStoreWithFormatVersion() {
 		URI item = URIs.createURI("http://example.org/item");
-		store.put(new KvinTuple(item, valueProperty, null, 100, 1));
+		store.put(new KvinTuple(null, item, valueProperty, 100, 1));
 		recreateStore();
-		assertEquals(List.of(new KvinTuple(item, valueProperty, Kvin.DEFAULT_CONTEXT, 100, 1)),
+		assertEquals(List.of(new KvinTuple(Kvin.DEFAULT_CONTEXT, item, valueProperty, 100, 1)),
 				fetched(item, valueProperty, null));
 	}
 

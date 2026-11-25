@@ -263,7 +263,7 @@ Default implementations support single-lookup stores, while `IcebergIdStore` res
 Fetches without explicit properties buffer up to 1024 records (or the requested per-series limit, if smaller) to batch reverse property lookups, preserving record order and reusing mappings throughout the query.
 Explicit-property fetches do not read ahead.
 
-The value table declares the sort order `itemId ASC, contextId ASC, propertyId ASC, time DESC, seqNr DESC` in Iceberg metadata.
+The value table declares the sort order `contextId ASC, itemId ASC, propertyId ASC, time DESC, seqNr DESC` in Iceberg metadata.
 Each batch is physically sorted in that order, and new data files record its sort-order ID.
 Opening an existing store updates the table's default sort order if needed, without rewriting or relabeling old files.
 Sorted data and column statistics support scan pruning; sort-order metadata alone does not guarantee faster searches or globally ordered query results.

@@ -329,8 +329,8 @@ public class KvinMemTable implements Kvin {
 			var writeBatch = ids.createWriteBatch();
 			for (KvinTuple tuple : tuples) {
 				KvinRecord record = new KvinRecord(
-					toId(tuple.item, EntryType.SubjectToId, true, writeBatch),
 					toId(tuple.context, EntryType.ContextToId, true, writeBatch),
+					toId(tuple.item, EntryType.SubjectToId, true, writeBatch),
 					toId(tuple.property, EntryType.PropertyToId, true, writeBatch),
 					tuple.time,
 					tuple.seqNr,

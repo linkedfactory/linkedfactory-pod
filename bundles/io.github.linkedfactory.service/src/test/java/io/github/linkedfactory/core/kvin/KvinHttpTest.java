@@ -312,7 +312,7 @@ public class KvinHttpTest extends Mockito {
 		Assert.assertThrows(KvinException.class, () -> kvinHttp.properties(item, null));
 		Assert.assertThrows(KvinException.class, () -> kvinHttp.descendants(item, null));
 		Assert.assertThrows(KvinException.class,
-				() -> kvinHttp.put(new KvinTuple(item, URIs.createURI("http://example.org/p"), null, 1, 1)));
+				() -> kvinHttp.put(new KvinTuple(null, item, URIs.createURI("http://example.org/p"), 1, 1)));
 	}
 
 	@Test
@@ -335,7 +335,7 @@ public class KvinHttpTest extends Mockito {
 
 		URI item = URIs.createURI("http://example.org/item1");
 		KvinException e = Assert.assertThrows(KvinException.class,
-				() -> kvinHttp.put(new KvinTuple(item, URIs.createURI("http://example.org/p"), null, 1, 1)));
+				() -> kvinHttp.put(new KvinTuple(null, item, URIs.createURI("http://example.org/p"), 1, 1)));
 		Assert.assertTrue(e.getMessage().contains("HTTP 403"));
 		verify(response).close();
 	}
@@ -346,7 +346,7 @@ public class KvinHttpTest extends Mockito {
 
 		CloseableHttpResponse response = mockedResponse("", 200);
 		doReturn(response).when(httpClient).execute(any());
-		kvinHttp.put(new KvinTuple(item, URIs.createURI("http://example.org/p"), null, 1, 1));
+		kvinHttp.put(new KvinTuple(null, item, URIs.createURI("http://example.org/p"), 1, 1));
 		verify(response).close();
 
 		response = mockedResponse("[{\"@id\": \"http://example.org/p\"}]", 200);

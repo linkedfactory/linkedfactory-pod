@@ -178,7 +178,7 @@ public class KvinPartitioned implements Kvin {
 			internalResult = new AggregatingIterator<>(internalResult, interval, op.trim().toLowerCase(), limit) {
 				@Override
 				protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr, Object value) {
-					return new KvinTuple(item, property, context, time, seqNr, value);
+					return new KvinTuple(context, item, property, time, seqNr, value);
 				}
 			};
 		}

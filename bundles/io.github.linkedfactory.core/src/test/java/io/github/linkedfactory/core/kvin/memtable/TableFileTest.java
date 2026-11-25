@@ -35,10 +35,10 @@ public class TableFileTest {
 	public void shouldWriteAndReadRecords() throws IOException {
 		try (TableFile tableFile = new TableFile(tablePath)) {
 			tableFile.put(
-					new KvinRecord(1L, 2L, 3L, 1000L, 1, "first".getBytes(StandardCharsets.UTF_8)),
-					new KvinRecord(1L, 2L, 3L, 1002L, 0, "second".getBytes(StandardCharsets.UTF_8)),
-					new KvinRecord(1L, 2L, 3L, 1002L, 1, "third".getBytes(StandardCharsets.UTF_8)),
-					new KvinRecord(1L, 2L, 4L, 1003L, 0, "other-property".getBytes(StandardCharsets.UTF_8))
+					new KvinRecord(2L, 1L, 3L, 1000L, 1, "first".getBytes(StandardCharsets.UTF_8)),
+					new KvinRecord(2L, 1L, 3L, 1002L, 0, "second".getBytes(StandardCharsets.UTF_8)),
+					new KvinRecord(2L, 1L, 3L, 1002L, 1, "third".getBytes(StandardCharsets.UTF_8)),
+					new KvinRecord(2L, 1L, 4L, 1003L, 0, "other-property".getBytes(StandardCharsets.UTF_8))
 			);
 
 			List<KvinRecord> records = tableFile.fetch(1L, 3L, 2L, 10L).toList();
@@ -62,8 +62,8 @@ public class TableFileTest {
 	public void shouldReadExistingFile() throws IOException {
 		try (TableFile tableFile = new TableFile(tablePath)) {
 			tableFile.put(
-					new KvinRecord(11L, 22L, 33L, 2000L, 0, "persisted-1".getBytes(StandardCharsets.UTF_8)),
-					new KvinRecord(11L, 22L, 33L, 1999L, 0, "persisted-2".getBytes(StandardCharsets.UTF_8))
+					new KvinRecord(22L, 11L, 33L, 2000L, 0, "persisted-1".getBytes(StandardCharsets.UTF_8)),
+					new KvinRecord(22L, 11L, 33L, 1999L, 0, "persisted-2".getBytes(StandardCharsets.UTF_8))
 			);
 		}
 

@@ -628,7 +628,7 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 					if (item != null && property != null && context != null) {
 						long time = readVarint(keyBb);
 						int seq = keyBb.hasRemaining() ? (int) readVarint(keyBb) : 0;
-						next = new KvinTuple(item, property, context, time, seq, decode(entry.getValue()));
+						next = new KvinTuple(context, item, property, time, seq, decode(entry.getValue()));
 					}
 				}
 				return next;
@@ -833,7 +833,7 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 				@Override
 				protected KvinTuple createElement(URI item, URI property, URI context, long time, int seqNr,
 				                                  Object value) {
-					return new KvinTuple(item, property, context, time, seqNr, value);
+					return new KvinTuple(context, item, property, time, seqNr, value);
 				}
 			};
 		}
@@ -1003,10 +1003,10 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 							it.seek(idTimePrefix);
 
 							intervalSeq += 1;
-							return new KvinTuple(item, currentProperty, currentContext, intervalStart,
+							return new KvinTuple(currentContext, item, currentProperty, intervalStart,
 									intervalSeq, decode(entry.getValue()));
 						} else {
-							return new KvinTuple(item, currentProperty, currentContext, time, seq,
+							return new KvinTuple(currentContext, item, currentProperty, time, seq,
 									decode(entry.getValue()));
 						}
 					}

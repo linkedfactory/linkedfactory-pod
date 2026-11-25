@@ -238,6 +238,6 @@ public class ParquetHelpers {
 				value = decodeRecord((ByteBuffer) value);
 			}
 		}
-		return new KvinTuple(item, property, context, record.time(), record.seqNr(), value);
+		return new KvinTuple(context, item, property, record.time(), record.seqNr(), value);
 	}
 }

@@ -20,8 +20,8 @@ public class JsonFormatWriterTest {
 
 	@Test
 	public void shouldConvertTuplesToString() throws IOException {
-		KvinTuple tuple = new KvinTuple(URIs.createURI("http://example.org/item1"), URIs.createURI("http://example.org/properties/p1"),
-				null, 1619424246120L, 57.934878949512196);
+		KvinTuple tuple = new KvinTuple(null, URIs.createURI("http://example.org/item1"),
+				URIs.createURI("http://example.org/properties/p1"), 1619424246120L, 57.934878949512196);
 		String json = JsonFormatWriter.toJsonString(WrappedIterator.create(List.of(tuple).iterator()));
 
 		IExtendedIterator<KvinTuple> generatedTuples = new JsonFormatParser(new ByteArrayInputStream(json.getBytes())).parse();
