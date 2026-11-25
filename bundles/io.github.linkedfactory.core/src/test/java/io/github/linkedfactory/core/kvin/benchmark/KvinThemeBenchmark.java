@@ -79,17 +79,17 @@ public class KvinThemeBenchmark {
 	public enum Theme {
 		/**
 		 * A production line: a work piece starts every 90 seconds and passes the sections
-		 * "anfang", "mitte" and "end", 30 minutes apart. Each work piece has 49 process
+		 * "start", "middle" and "end", 30 minutes apart. Each work piece has 49 process
 		 * parameters of mixed types. Written in one bulk import. The query finds the work pieces
-		 * that are still in section "anfang" and returns all their values.
+		 * that are still in section "start" and returns all their values.
 		 */
-		process("http://dm.adaproq.de/vocab/", "wp1995",
-				"prefix aq: <http://dm.adaproq.de/vocab/>\n" +
+		process(PROCESS_NAMESPACE, "workPiece1995",
+				"prefix prod: <" + PROCESS_NAMESPACE + ">\n" +
 						"select * {\n" +
 						"  service <kvin:> {\n" +
-						"    { select distinct ?wp { aq:gtc aq:workpiece [ <kvin:value> ?wp ] . } }\n" +
-						"    ?wp aq:abschnitt [ <kvin:value> \"anfang\" ; <kvin:limit> 1 ] .\n" +
-						"    ?wp ?property [ <kvin:value> ?v ; <kvin:time> ?t ] .\n" +
+						"    { select distinct ?workPiece { prod:line prod:workPiece [ <kvin:value> ?workPiece ] . } }\n" +
+						"    ?workPiece prod:section [ <kvin:value> \"start\" ; <kvin:limit> 1 ] .\n" +
+						"    ?workPiece ?property [ <kvin:value> ?v ; <kvin:time> ?t ] .\n" +
 						"  }\n" +
 						"}") {
 			@Override
@@ -103,10 +103,10 @@ public class KvinThemeBenchmark {
 		 * are ordered by sequence number. Written in one bulk import. The query joins angle and
 		 * force of all channels by time and index for six parts.
 		 */
-		machine("http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.", "part:6",
-				"prefix esw: <http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.>\n" +
+		machine(MACHINE_NAMESPACE, "part6",
+				"prefix press: <" + MACHINE_NAMESPACE + ">\n" +
 						"select * {\n" +
-						"  values ?part { <part:6> <part:7> <part:8> <part:9> <part:10> <part:11> }\n" +
+						"  values ?part { press:part6 press:part7 press:part8 press:part9 press:part10 press:part11 }\n" +
 						"  service <kvin:> {\n" + machineChannelPatterns() +
 						"  }\n" +
 						"} order by ?part ?s") {
@@ -153,6 +153,8 @@ public class KvinThemeBenchmark {
 	static final int MACHINE_CHANNELS = 6;
 	static final int MACHINE_SAMPLES = 250;
 	static final long MACHINE_CYCLE = 30_000;
+	static final String PROCESS_NAMESPACE = "http://example.org/production/";
+	static final String MACHINE_NAMESPACE = "http://example.org/pressFit/";
 	static final String SENSOR_NAMESPACE = "http://example.org/plant/";
 	static final int SENSORS = 50;
 	static final int SENSOR_SAMPLES = 500;
@@ -209,9 +211,15 @@ public class KvinThemeBenchmark {
 		connection = repository.getConnection();
 		query = connection.prepareTupleQuery(QueryLanguage.SPARQL, theme.query, theme.namespace);
 
-		// fail early instead of measuring queries that return nothing
+		// fail early instead of measuring queries or fetches that return nothing
 		if (evaluateQuery(null) == 0) {
 			throw new IllegalStateException("Query of theme " + theme + " returned no results for " + store);
+		}
+		try (IExtendedIterator<KvinTuple> tuples = kvin.fetch(theme.sampleItem, null, Kvin.DEFAULT_CONTEXT, 0)) {
+			if (!tuples.hasNext()) {
+				throw new IllegalStateException("Sample item " + theme.sampleItem + " of theme " + theme
+						+ " has no values in " + store);
+			}
 		}
 	}
 
@@ -259,9 +267,9 @@ public class KvinThemeBenchmark {
 		StringBuilder patterns = new StringBuilder();
 		for (int c = 1; c <= MACHINE_CHANNELS; c++) {
 			String t = "?t" + c;
-			patterns.append("    { ?part esw:Channel").append(c).append(".Angle [ <kvin:value> ?a").append(c)
+			patterns.append("    { ?part press:channel").append(c).append("Angle [ <kvin:value> ?a").append(c)
 					.append(" ; <kvin:time> ").append(t).append(" ; <kvin:index> ?s ] ; ")
-					.append("esw:Channel").append(c).append(".Force [ <kvin:value> ?f").append(c)
+					.append("press:channel").append(c).append("Force [ <kvin:value> ?f").append(c)
 					.append(" ; <kvin:time> ").append(t).append(" ; <kvin:index> ?s ] . }\n");
 		}
 		return patterns.toString();
@@ -313,39 +321,39 @@ public class KvinThemeBenchmark {
 	}
 
 	/**
-	 * Generates the item {@code gtc} that lists all work pieces, the section history of every
+	 * Generates the item {@code line} that lists all work pieces, the section history of every
 	 * work piece and its process parameters, recorded one per second after its start.
 	 */
 	static List<KvinTuple> generateProcessData(String ns, int workPieces) {
 		Random random = new Random(200);
-		String[] sections = {"anfang", "mitte", "end"};
+		String[] sections = {"start", "middle", "end"};
 		URI ctx = Kvin.DEFAULT_CONTEXT;
-		URI gtc = URIs.createURI(ns + "gtc");
-		URI workpiece = URIs.createURI(ns + "workpiece");
-		URI section = URIs.createURI(ns + "abschnitt");
+		URI line = URIs.createURI(ns + "line");
+		URI workPiece = URIs.createURI(ns + "workPiece");
+		URI section = URIs.createURI(ns + "section");
 		List<ProcessParameter> parameters = processParameters();
 		URI[] properties = parameters.stream().map(p -> URIs.createURI(ns + p.name())).toArray(URI[]::new);
 		// the data ends shortly after the last work piece started
 		long end = START_TIME + (workPieces - 1) * PROCESS_START_INTERVAL + 5 * 60_000;
 
 		List<KvinTuple> tuples = new ArrayList<>(workPieces * (PROCESS_PROPERTIES + 4));
-		for (int wp = 0; wp < workPieces; wp++) {
-			long start = START_TIME + wp * PROCESS_START_INTERVAL;
-			URI item = URIs.createURI(ns + "wp" + wp);
-			tuples.add(new KvinTuple(gtc, workpiece, ctx, start, 0, item));
+		for (int piece = 0; piece < workPieces; piece++) {
+			long start = START_TIME + piece * PROCESS_START_INTERVAL;
+			URI item = URIs.createURI(ns + "workPiece" + piece);
+			tuples.add(new KvinTuple(line, workPiece, ctx, start, 0, item));
 			for (int s = 0; s < sections.length && start + s * PROCESS_SECTION_DURATION <= end; s++) {
 				tuples.add(new KvinTuple(item, section, ctx, start + s * PROCESS_SECTION_DURATION, 0, sections[s]));
 			}
 			for (int p = 0; p < parameters.size(); p++) {
 				ProcessParameter parameter = parameters.get(p);
-				double value = parameter.base() + parameter.drift() * wp + parameter.noise() * random.nextGaussian();
+				double value = parameter.base() + parameter.drift() * piece + parameter.noise() * random.nextGaussian();
 				Object v = switch (parameter.kind()) {
 					case 'f' -> round(value, parameter.resolution());
 					case 'd' -> Math.round(value / parameter.resolution()) * parameter.resolution();
 					case 'i' -> (int) Math.round(value);
-					case 'l' -> (long) wp + 100_000;
+					case 'l' -> (long) piece + 100_000;
 					case 'b' -> random.nextDouble() < parameter.base();
-					default -> "T-" + (100 + wp / 250);
+					default -> "T-" + (100 + piece / 250);
 				};
 				tuples.add(new KvinTuple(item, properties[p], ctx, start + (p + 1) * 1000L, 0, v));
 			}
@@ -363,13 +371,13 @@ public class KvinThemeBenchmark {
 		URI ctx = Kvin.DEFAULT_CONTEXT;
 		URI[] angles = new URI[MACHINE_CHANNELS + 1], forces = new URI[MACHINE_CHANNELS + 1];
 		for (int c = 1; c <= MACHINE_CHANNELS; c++) {
-			angles[c] = URIs.createURI(ns + "Channel" + c + ".Angle");
-			forces[c] = URIs.createURI(ns + "Channel" + c + ".Force");
+			angles[c] = URIs.createURI(ns + "channel" + c + "Angle");
+			forces[c] = URIs.createURI(ns + "channel" + c + "Force");
 		}
 		List<KvinTuple> tuples = new ArrayList<>(parts * MACHINE_CHANNELS * 2 * MACHINE_SAMPLES);
 		for (int part = 0; part < parts; part++) {
 			long time = START_TIME + part * MACHINE_CYCLE;
-			URI item = URIs.createURI("part:" + part);
+			URI item = URIs.createURI(ns + "part" + part);
 			for (int c = 1; c <= MACHINE_CHANNELS; c++) {
 				double endAngle = 35 + 10 * random.nextDouble();
 				double maxForce = 8_000 + 4_000 * random.nextDouble();
