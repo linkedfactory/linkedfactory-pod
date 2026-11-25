@@ -1,9 +1,11 @@
-package io.github.linkedfactory.core.rdf4j.fts;
+package io.github.linkedfactory.core.rdf4j.fts.elastic;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.github.linkedfactory.core.rdf4j.fts.FtsIndexOperation;
+import io.github.linkedfactory.core.rdf4j.fts.FtsIndexUpdate;
 import org.eclipse.rdf4j.model.Statement;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.junit.After;
@@ -157,6 +159,131 @@ public class HttpFtsSearchServiceTest {
 	}
 
 	@Test
+	public void elasticStrategyAppliesCommonLogicalUpdate() throws Exception {
+		Path scratchDirectory = newOutbox();
+		ElasticHttpFtsIndexUpdateStrategy strategy =
+				new ElasticHttpFtsIndexUpdateStrategy(endpoint(), "/_bulk", true,
+						scratchDirectory.toString(), HttpFtsSearchService.DEFAULT_REQUEST_TIMEOUT_MILLIS);
+		Statement statement = vf.createStatement(vf.createIRI("urn:s"), vf.createIRI("urn:p"),
+				vf.createLiteral("value"), vf.createIRI("urn:context"));
+
+		strategy.apply(new FtsIndexUpdate("transaction-1", 1,
+				List.of(new FtsIndexOperation.Statements(Set.of(statement), Set.of()))));
+		strategy.close();
+
+		assertEquals(1, requests.get());
+		assertTrue(body.get().contains("urn:s"));
+		assertEquals(0, pendingCount(scratchDirectory));
+	}
+
+	@Test
+	public void preparedPayloadIsNotSentUntilCommittedTransactionRecovery() throws Exception {
+		Path outboxDir = newOutbox();
+		String transactionId = "transaction-1";
+		HttpFtsSearchService interruptedService =
+				new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+		interruptedService.begin();
+		interruptedService.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		interruptedService.prepareCommit(transactionId);
+
+		assertTrue(Files.exists(outboxDir.resolve(transactionId + ".prepared")));
+		assertEquals(0, pendingCount(outboxDir));
+		assertEquals(0, requests.get());
+
+		HttpFtsSearchService recoveredService =
+				new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+		recoveredService.recoverCommittedTransactions(Set.of(transactionId));
+		interruptedService.shutdown();
+		recoveredService.shutdown();
+
+		assertEquals(1, requests.get());
+		assertEquals(0, pendingCount(outboxDir));
+		assertFalse(Files.exists(outboxDir.resolve(transactionId + ".prepared")));
+	}
+
+	@Test
+	public void uncertainRdfCommitPreservesPreparedPayloadForMarkerBasedRecovery() throws Exception {
+		Path outboxDir = newOutbox();
+		String transactionId = "uncertain-transaction";
+		HttpFtsSearchService service = new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+		service.begin();
+		addStatement(service, "recover-me");
+		service.prepareCommit(transactionId);
+
+		service.preservePreparedTransaction(transactionId);
+		service.rollback();
+
+		assertTrue(Files.exists(outboxDir.resolve(transactionId + ".prepared")));
+		HttpFtsSearchService recovered =
+				new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+		recovered.recoverCommittedTransactions(Set.of(transactionId));
+		recovered.shutdown();
+		service.shutdown();
+
+		assertEquals(1, requests.get());
+		assertFalse(Files.exists(outboxDir.resolve(transactionId + ".prepared")));
+	}
+
+	@Test
+	public void commitActivatesPreparedPayload() throws Exception {
+		Path outboxDir = newOutbox();
+		String transactionId = "transaction-commit";
+		HttpFtsSearchService service = new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+
+		service.begin();
+		service.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		service.prepareCommit(transactionId);
+		service.commit(transactionId);
+		service.shutdown();
+
+		assertEquals(1, requests.get());
+		assertEquals(0, pendingCount(outboxDir));
+		assertFalse(Files.exists(outboxDir.resolve(transactionId + ".prepared")));
+	}
+
+	@Test
+	public void rollbackRemovesPreparedPayload() throws Exception {
+		Path outboxDir = newOutbox();
+		HttpFtsSearchService service = new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+
+		service.begin();
+		service.addRemoveStatements(Set.of(vf.createStatement(
+				vf.createIRI("urn:s"),
+				vf.createIRI("urn:p"),
+				vf.createLiteral("x"))), Set.of());
+		service.prepareCommit("transaction-rollback");
+		assertTrue(Files.exists(outboxDir.resolve("transaction-rollback.prepared")));
+
+		service.rollback();
+		service.shutdown();
+
+		assertEquals(0, requests.get());
+		try (var files = Files.list(outboxDir)) {
+			assertFalse(files.findAny().isPresent());
+		}
+	}
+
+	@Test
+	public void recoveryDiscardsPreparedPayloadsWithoutCommittedRdfMarkers() throws Exception {
+		Path outboxDir = newOutbox();
+		Path prepared = outboxDir.resolve("rolled-back-transaction.prepared");
+		Files.writeString(prepared, "{\"op\":\"clear\"}\n");
+		HttpFtsSearchService service = new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+
+		service.recoverCommittedTransactions(Set.of());
+		service.shutdown();
+
+		assertFalse(Files.exists(prepared));
+		assertEquals(0, requests.get());
+	}
+
+	@Test
 	public void commitCoalescesStatementBatchesForSameDocument() throws Exception {
 		Path outboxDir = newOutbox();
 		HttpFtsSearchService service = new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
@@ -301,6 +428,27 @@ public class HttpFtsSearchServiceTest {
 		JsonNode payload = mapper.readTree(deleteBody.get());
 		assertTrue(payload.path("query").path("terms").has("context"));
 		assertEquals(0, pendingCount(outboxDir));
+	}
+
+	@Test
+	public void clearContextsKeepsTransactionOrder() throws Exception {
+		Path outboxDir = newOutbox();
+		HttpFtsSearchService service = new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());
+		Statement before = vf.createStatement(vf.createIRI("urn:s:before"), vf.createIRI("urn:p"),
+				vf.createLiteral("before"), vf.createIRI("urn:ctx"));
+		Statement after = vf.createStatement(vf.createIRI("urn:s:after"), vf.createIRI("urn:p"),
+				vf.createLiteral("after"), vf.createIRI("urn:ctx"));
+
+		service.begin();
+		service.addRemoveStatements(Set.of(before), Set.of());
+		service.clearContexts(vf.createIRI("urn:ctx"));
+		service.addRemoveStatements(Set.of(after), Set.of());
+		service.commit();
+		service.shutdown();
+
+		assertEquals(List.of("/_bulk", "/_refresh", "/_delete_by_query", "/_count", "/_bulk"), paths);
+		assertTrue(bodies.get(0).contains("before"));
+		assertTrue(bodies.get(4).contains("after"));
 	}
 
 	@Test
@@ -818,14 +966,6 @@ public class HttpFtsSearchServiceTest {
 		try (var json = mapper.getFactory().createGenerator(payload.toFile(),
 				com.fasterxml.jackson.core.JsonEncoding.UTF8)) {
 			json.writeStartObject();
-			json.writeStringField("op", "remove");
-			json.writeObjectFieldStart("documents");
-			json.writeObjectFieldStart("id-0");
-			json.writeStringField("id", "id-0");
-			json.writeEndObject();
-			json.writeEndObject();
-			json.writeEndObject();
-			json.writeStartObject();
 			// Legacy JSON property ordering is supported without materializing the record.
 			json.writeObjectFieldStart("documents");
 			for (int i = 0; i < documents; i++) {
@@ -836,6 +976,14 @@ public class HttpFtsSearchServiceTest {
 			}
 			json.writeEndObject();
 			json.writeStringField("op", "upsert");
+			json.writeEndObject();
+			json.writeStartObject();
+			json.writeStringField("op", "remove");
+			json.writeObjectFieldStart("documents");
+			json.writeObjectFieldStart("id-0");
+			json.writeStringField("id", "id-0");
+			json.writeEndObject();
+			json.writeEndObject();
 			json.writeEndObject();
 		}
 		HttpFtsSearchService service = new HttpFtsSearchService(endpoint(), "/_bulk", true, outboxDir.toString());

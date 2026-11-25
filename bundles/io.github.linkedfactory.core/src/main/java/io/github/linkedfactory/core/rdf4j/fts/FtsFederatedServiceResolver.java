@@ -1,5 +1,6 @@
 package io.github.linkedfactory.core.rdf4j.fts;
 
+import io.github.linkedfactory.core.rdf4j.fts.elastic.ElasticKeywordSearchBackendFactory;
 import org.eclipse.rdf4j.query.QueryEvaluationException;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.AbstractFederatedServiceResolver;
 import org.eclipse.rdf4j.query.algebra.evaluation.federation.FederatedService;
@@ -18,7 +19,7 @@ public class FtsFederatedServiceResolver extends AbstractFederatedServiceResolve
 	}
 
 	public FtsFederatedServiceResolver(FtsFederatedServiceConfig config) {
-		this(config, java.util.List.of(new ElasticKeywordSearchBackendFactory()));
+		this(config, java.util.List.of(new ElasticKeywordSearchBackendFactory(), new LuceneSearchBackendFactory()));
 	}
 
 	public FtsFederatedServiceResolver(FtsFederatedServiceConfig config,

@@ -1,4 +1,4 @@
-package io.github.linkedfactory.core.rdf4j.fts;
+package io.github.linkedfactory.core.rdf4j.fts.elastic;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,12 +13,14 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 
@@ -36,6 +38,8 @@ public class ModelsFtsLifecycleIntegrationTest {
 	private long chunkTriples;
 	private boolean verifyEachChunk;
 	private Duration requestTimeout;
+	private Duration deliveryTimeout;
+	private Duration pollInterval;
 	private String modelUri;
 	private boolean modelMayExist;
 	private Path rdfFile;
@@ -60,6 +64,15 @@ public class ModelsFtsLifecycleIntegrationTest {
 		}
 		requestTimeout = Duration.ofSeconds(Long.parseLong(
 				settingOrDefault("models.integration.timeout.seconds", "600")));
+		deliveryTimeout = Duration.ofSeconds(Long.parseLong(
+				settingOrDefault("models.integration.delivery.timeout.seconds", "600")));
+		pollInterval = Duration.ofMillis(Long.parseLong(
+				settingOrDefault("models.integration.delivery.poll.millis", "1000")));
+		if (requestTimeout.isZero() || requestTimeout.isNegative()
+				|| deliveryTimeout.isZero() || deliveryTimeout.isNegative()
+				|| pollInterval.isZero() || pollInterval.isNegative()) {
+			throw new IllegalArgumentException("Integration timeouts and polling interval must be positive");
+		}
 		modelUri = "urn:linkedfactory:loadtest:" + UUID.randomUUID();
 	}
 
@@ -90,7 +103,7 @@ public class ModelsFtsLifecycleIntegrationTest {
 
 		HttpResponse<String> getDeletedModel = sendPod("GET", modelPath(), "text/turtle", null);
 		assertStatus(getDeletedModel, 404);
-		assertEquals("Deleting the model should remove all of its FTS documents", 0, elasticsearchCount(false));
+		awaitElasticsearchCount(0, false);
 		System.out.printf(Locale.ROOT, "Model FTS lifecycle: triples=%d chunkTriples=%d upload=%dms delete=%dms%n",
 				tripleCount, chunkTriples, uploadMillis, deleteMillis);
 	}
@@ -137,8 +150,7 @@ public class ModelsFtsLifecycleIntegrationTest {
 		String actualTripleCount = queryResult.path("results").path("bindings").path(0)
 				.path("count").path("value").asText();
 		assertEquals("Uploaded generated triple count", expectedCount, Long.parseLong(actualTripleCount));
-		assertEquals("Every generated literal triple should have an FTS document",
-				expectedCount, elasticsearchCount(true));
+		awaitElasticsearchCount(expectedCount, true);
 	}
 
 	private Path createRdfFile(long first, long count) throws Exception {
@@ -159,18 +171,75 @@ public class ModelsFtsLifecycleIntegrationTest {
 		return file;
 	}
 
-	private long elasticsearchCount(boolean generatedStatementsOnly) throws Exception {
-		sendExpecting("POST", elasticsearchEndpoint + "/" + indexName + "/_refresh", null, 200);
+	private void awaitElasticsearchCount(long expectedCount, boolean generatedStatementsOnly) throws Exception {
+		awaitCount(expectedCount, deliveryTimeout, pollInterval,
+				remaining -> elasticsearchCount(generatedStatementsOnly, remaining));
+	}
+
+	static void awaitCount(long expectedCount, Duration timeout, Duration interval, CountQuery query)
+			throws Exception {
+		long start = System.nanoTime();
+		long budget = timeout.toNanos();
+		Long lastCount = null;
+		while (true) {
+			long remaining = budget - (System.nanoTime() - start);
+			if (remaining <= 0) {
+				throw new AssertionError("FTS delivery did not reach expected document count " + expectedCount
+						+ " within " + timeout + "; last observed count: " + lastCount);
+			}
+			try {
+				lastCount = query.count(Duration.ofNanos(remaining));
+			} catch (HttpTimeoutException e) {
+				if (System.nanoTime() - start < budget) {
+					throw e;
+				}
+				AssertionError failure = new AssertionError(
+						"FTS delivery timed out waiting for document count " + expectedCount
+								+ "; last observed count: " + lastCount);
+				failure.initCause(e);
+				throw failure;
+			}
+			if (lastCount == expectedCount) {
+				return;
+			}
+			remaining = budget - (System.nanoTime() - start);
+			if (remaining > 0) {
+				TimeUnit.NANOSECONDS.sleep(Math.min(interval.toNanos(), remaining));
+			}
+		}
+	}
+
+	@FunctionalInterface
+	interface CountQuery {
+		long count(Duration remaining) throws Exception;
+	}
+
+	private long elasticsearchCount(boolean generatedStatementsOnly, Duration remaining) throws Exception {
+		long start = System.nanoTime();
+		sendExpecting("POST", elasticsearchEndpoint + "/" + indexName + "/_refresh", null, 200,
+				shorterTimeout(remaining));
 		String query = generatedStatementsOnly
 				? "{\"bool\":{\"filter\":[{\"term\":{\"context\":\"" + modelUri
 						+ "\"}},{\"term\":{\"predicate\":\"urn:linkedfactory:loadtest:label\"}}]}}"
 				: "{\"term\":{\"context\":\"" + modelUri + "\"}}";
+		long remainingNanos = remaining.toNanos() - (System.nanoTime() - start);
+		if (remainingNanos <= 0) {
+			throw new HttpTimeoutException("FTS delivery timeout expired during index refresh");
+		}
 		JsonNode response = mapper.readTree(sendExpecting(
 				"POST",
 				elasticsearchEndpoint + "/" + indexName + "/_count",
 				"{\"query\":" + query + "}",
-				200).body());
-		return response.path("count").asLong();
+				200, shorterTimeout(Duration.ofNanos(remainingNanos))).body());
+		JsonNode count = response.path("count");
+		if (!count.isIntegralNumber() || !count.canConvertToLong() || count.longValue() < 0) {
+			throw new AssertionError("Invalid Elasticsearch count response: " + response);
+		}
+		return count.longValue();
+	}
+
+	private Duration shorterTimeout(Duration remaining) {
+		return remaining.compareTo(requestTimeout) < 0 ? remaining : requestTimeout;
 	}
 
 	private String modelPath() {
@@ -191,10 +260,10 @@ public class ModelsFtsLifecycleIntegrationTest {
 		return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
 	}
 
-	private HttpResponse<String> sendExpecting(String method, String url, String body, int expectedStatus)
-			throws Exception {
+	private HttpResponse<String> sendExpecting(String method, String url, String body, int expectedStatus,
+			Duration timeout) throws Exception {
 		HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url))
-				.timeout(requestTimeout)
+				.timeout(timeout)
 				.header("Content-Type", "application/json")
 				.method(method, body == null
 						? HttpRequest.BodyPublishers.noBody()
@@ -230,4 +299,5 @@ public class ModelsFtsLifecycleIntegrationTest {
 	private static String trimTrailingSlash(String value) {
 		return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
 	}
+
 }

@@ -1,6 +1,8 @@
-package io.github.linkedfactory.core.rdf4j.fts;
+package io.github.linkedfactory.core.rdf4j.fts.elastic;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchHit;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSearchRequest;
 import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;

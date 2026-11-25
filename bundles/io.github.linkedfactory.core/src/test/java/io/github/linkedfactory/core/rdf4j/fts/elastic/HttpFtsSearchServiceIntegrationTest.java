@@ -1,7 +1,9 @@
-package io.github.linkedfactory.core.rdf4j.fts;
+package io.github.linkedfactory.core.rdf4j.fts.elastic;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.linkedfactory.core.rdf4j.fts.FtsFederatedServiceConfig;
+import io.github.linkedfactory.core.rdf4j.fts.FtsSail;
 import org.eclipse.rdf4j.model.IRI;
 import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
 import org.eclipse.rdf4j.repository.sail.SailRepository;
@@ -41,6 +43,7 @@ public class HttpFtsSearchServiceIntegrationTest {
 	private String indexName;
 	private HttpFtsSearchService searchService;
 	private SailRepository repository;
+	private FtsSail ftsSail;
 	private Path outboxDir;
 
 	@Before
@@ -67,16 +70,11 @@ public class HttpFtsSearchServiceIntegrationTest {
 			deleteIndexIfExists();
 		}
 		if (outboxDir != null) {
-			try (var files = Files.list(outboxDir)) {
-				files.forEach(path -> {
-					try {
-						Files.deleteIfExists(path);
-					} catch (Exception e) {
-						throw new RuntimeException(e);
-					}
-				});
+			try (var files = Files.walk(outboxDir)) {
+				for (Path path : files.sorted(java.util.Comparator.reverseOrder()).toList()) {
+					Files.deleteIfExists(path);
+				}
 			}
-			Files.deleteIfExists(outboxDir);
 			outboxDir = null;
 		}
 	}
@@ -175,28 +173,20 @@ public class HttpFtsSearchServiceIntegrationTest {
 	}
 
 	@Test
-	public void bulkItemErrorsSurfaceAndPreserveOutbox() throws Exception {
+	public void asynchronousDeliveryRetainsWalUntilBackendRecovers() throws Exception {
 		initRepository(numberValueMapping());
 
 		try (SailRepositoryConnection connection = repository.getConnection()) {
 			connection.begin();
 			connection.add(vf.createIRI("urn:ok"), vf.createIRI("urn:number"), vf.createLiteral("42"), testContext);
 			connection.add(vf.createIRI("urn:bad"), vf.createIRI("urn:number"), vf.createLiteral("not-a-number"), testContext);
-			try {
-				connection.commit();
-				fail("Expected bulk item failure");
-			} catch (Exception expected) {
-				assertTrue(containsMessage(expected, "bulk index"));
-			}
+			connection.commit();
 		}
 
-		try (var files = Files.list(outboxDir)) {
-			assertTrue(files.filter(path -> path.toString().endsWith(".jsonl")).findAny().isPresent());
-		}
+		awaitPendingRecord();
 
 		deleteIndexIfExists();
 		createIndex(defaultIndexDefinition());
-		searchService.commit();
 
 		refreshIndex();
 		assertEquals(Set.of("42"), valuesForSubject("urn:ok"));
@@ -241,9 +231,12 @@ public class HttpFtsSearchServiceIntegrationTest {
 	private void initRepository(String indexDefinition) throws Exception {
 		createIndex(indexDefinition);
 		Files.createDirectories(Path.of("target"));
-		outboxDir = Files.createTempDirectory(Path.of("target"), "fts-es-it-outbox");
+		outboxDir = Files.createTempDirectory(Path.of("target").toAbsolutePath(), "fts-es-it-outbox");
 		searchService = new HttpFtsSearchService(endpoint, "/" + indexName + "/_bulk", true, outboxDir.toString());
-		repository = new SailRepository(new FtsSail(searchService, new MemoryStore()));
+		ftsSail = new FtsSail(searchService, outboxDir.resolve("common"), indexName,
+				FtsFederatedServiceConfig.defaults(), Set.of());
+		ftsSail.setBaseSail(new MemoryStore());
+		repository = new SailRepository(ftsSail);
 		repository.init();
 	}
 
@@ -298,7 +291,29 @@ public class HttpFtsSearchServiceIntegrationTest {
 	}
 
 	private void refreshIndex() throws Exception {
+		long deadline = System.nanoTime() + Duration.ofMinutes(2).toNanos();
+		while (ftsSail.getOutboxStatus().recordCount() != 0 && System.nanoTime() < deadline) {
+			Thread.sleep(20);
+		}
+		assertEquals("FTS WAL did not drain before refreshing Elasticsearch", 0,
+				ftsSail.getOutboxStatus().recordCount());
 		sendExpecting("POST", "/" + indexName + "/_refresh", null, 200);
+	}
+
+	private void awaitPendingRecord() throws Exception {
+		Path commonOutbox = outboxDir.resolve("common");
+		long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+		while (System.nanoTime() < deadline) {
+			if (ftsSail.getOutboxStatus().recordCount() == 1) {
+				try (var files = Files.list(commonOutbox)) {
+					if (files.anyMatch(path -> path.toString().endsWith(".pending"))) {
+						return;
+					}
+				}
+			}
+			Thread.sleep(20);
+		}
+		fail("FTS WAL did not retain the failed update as a pending record");
 	}
 
 	private long documentCount() throws Exception {

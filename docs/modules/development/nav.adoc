@@ -2,5 +2,6 @@
 * xref:development:build-and-run.adoc[Build and run Pod from source]
 * xref:development:repository-structure.adoc[Repository structure]
 * xref:development:benchmarks.adoc[Benchmarks]
+* xref:development:fts-backends.adoc[FTS backend benchmark]
 * xref:development:documentation.adoc[Documentation guidelines]
 * xref:development:upstream-baseline.adoc[eniLINK source baseline]

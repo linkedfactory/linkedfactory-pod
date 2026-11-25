@@ -151,4 +151,5 @@ SELECT ?iri ?score WHERE {
 == Next steps
 
 * xref:reference:full-text-search.adoc[] lists the configuration properties and all patterns supported in `SERVICE <fts:>`, such as `fts:field`, `fts:limit`, and `fts:snippet`.
+* xref:how-to:enable-full-text-search-with-lucene.adoc[] sets up the embedded `lucene` backend instead, without a separate search server.
 * xref:how-to:query-data.adoc[] shows how to combine asset descriptions with measurements.
