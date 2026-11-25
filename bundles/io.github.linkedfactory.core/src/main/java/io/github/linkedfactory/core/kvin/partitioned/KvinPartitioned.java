@@ -38,7 +38,7 @@ public class KvinPartitioned implements Kvin {
 	protected Duration archiveInterval;
 	protected File currentStorePath, currentStoreArchivePath, archiveStorePath;
 	protected volatile KvinLevelDb hotStore, hotStoreArchive;
-	protected KvinParquet archiveStore;
+	protected Kvin archiveStore;
 
 	ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 
@@ -57,8 +57,16 @@ public class KvinPartitioned implements Kvin {
 		if (Files.exists(this.currentStoreArchivePath.toPath())) {
 			hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
 		}
-		archiveStore = new KvinParquet(archiveStorePath.toString(), retentionPeriod);
+		archiveStore = createArchiveStore(archiveStorePath, retentionPeriod);
 		scheduleCyclicArchival();
+	}
+
+	/**
+	 * Creates the store that receives the archived values. Called from the constructor,
+	 * so overriding methods must not use instance fields of the subclass.
+	 */
+	protected Kvin createArchiveStore(File archiveStorePath, Duration retentionPeriod) {
+		return new KvinParquet(archiveStorePath.toString(), retentionPeriod);
 	}
 
 	Lock writeLock() {
@@ -99,8 +107,11 @@ public class KvinPartitioned implements Kvin {
 		try {
 			new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
 			try {
-				new Compactor(archiveStore).execute();
-				archiveStore.cleanUp();
+				if (archiveStore instanceof KvinParquet parquetStore) {
+					// other archive stores compact on their own
+					new Compactor(parquetStore).execute();
+					parquetStore.cleanUp();
+				}
 				try {
 					writeLock = writeLock();
 					this.hotStoreArchive.close();
@@ -446,9 +457,13 @@ public class KvinPartitioned implements Kvin {
 	public void close() {
 		Lock readLock = readLock();
 		try {
-			hotStore.close();
-			if (hotStoreArchive != null) {
-				hotStoreArchive.close();
+			try {
+				hotStore.close();
+				if (hotStoreArchive != null) {
+					hotStoreArchive.close();
+				}
+			} finally {
+				archiveStore.close();
 			}
 		} finally {
 			readLock.release();

@@ -15,18 +15,18 @@
  */
 package io.github.linkedfactory.core.kvin.leveldb;
 
+import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
-import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
 import net.enilink.commons.iterator.IExtendedIterator;
 
 /**
- * Copies all tuples of a LevelDB store into a Parquet archive.
+ * Copies all tuples of a LevelDB store into an archive store.
  */
 public class KvinLevelDbArchiver {
 	protected final KvinLevelDb databaseStore;
-	protected final KvinParquet archiveStore;
+	protected final Kvin archiveStore;
 
-	public KvinLevelDbArchiver(KvinLevelDb databaseStore, KvinParquet archiveStore) {
+	public KvinLevelDbArchiver(KvinLevelDb databaseStore, Kvin archiveStore) {
 		this.databaseStore = databaseStore;
 		this.archiveStore = archiveStore;
 	}
