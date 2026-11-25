@@ -155,7 +155,7 @@ To use Iceberg instead of the default value store, configure `<store> [ a <KvinI
 KvinIceberg maintains a value table in `iceberg/` and separate URI-ID tables in `iceberg-ids/items/`, `iceberg-ids/properties/`, and `iceberg-ids/contexts/`, with bounded in-memory lookup caches.
 Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots and use a value-skipping Parquet reader.
 Use a new store directory rather than pointing it at an existing KvinParquet archive.
-Retention-period cleanup is not supported by KvinIceberg.
+The service configuration of `KvinIceberg` has no retention period.
 
 The standalone `IcebergRecordStore` implements `KvinRecordStore` and operates exclusively on numeric `KvinRecord` identifiers, without creating or reading URI-ID tables.
 Null contexts select ID `0`; null properties and the interface's `-1` property sentinel select all properties.
@@ -201,6 +201,14 @@ ID tables remain unchanged.
 Omitting the partition factory (or passing null) adopts a reopened table's persisted spec.
 Supplying a factory verifies compatibility and rejects mismatches rather than silently evolving the table.
 Partition evolution is an explicit Iceberg metadata operation; reads support historical specs, new writes use the current spec, and delete rewrites repartition retained rows using the current spec.
+
+Both `IcebergRecordStore` and `KvinIceberg` accept a retention period as the second constructor argument.
+It must be positive.
+`cleanUp()` then removes all values that are older than the retention period, in one commit.
+Data files that contain only older values are dropped without being rewritten; other files that contain them are rewritten without them.
+With a partition on `time`, most old files are dropped as a whole.
+`deleteOlderThan(time)` of `IcebergRecordStore` removes the values before a given time in the same way.
+The removed data files stay on disk because older Iceberg snapshots still reference them.
 
 `delete(context)` removes all values of a context in one commit.
 Data files that contain only this context are dropped without being rewritten; other files that contain it are rewritten without its rows.

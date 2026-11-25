@@ -53,12 +53,7 @@ public class KvinPartitionedArchiveStoreTest {
 
 	@Test
 	public void shouldArchiveIntoIceberg() throws IOException {
-		KvinPartitioned store = new KvinPartitioned(tempDir, null, null) {
-			@Override
-			protected Kvin createArchiveStore(File archiveStorePath, Duration retentionPeriod) {
-				return new KvinIceberg(archiveStorePath.toString());
-			}
-		};
+		KvinPartitioned store = icebergPartitioned(null);
 		try {
 			store.put(generator(1672614000000L).generate());
 			store.runArchival();
@@ -72,6 +67,41 @@ public class KvinPartitionedArchiveStoreTest {
 			store.put(generator(1673218800000L).generate());
 			assertEquals(20, store.fetch(ITEM, PROPERTY, Kvin.DEFAULT_CONTEXT, 0).toList().size());
 			assertEquals(2, store.properties(ITEM, Kvin.DEFAULT_CONTEXT).toList().size());
+		} finally {
+			store.close();
+		}
+	}
+
+	KvinPartitioned icebergPartitioned(Duration retentionPeriod) throws IOException {
+		return new KvinPartitioned(tempDir, null, retentionPeriod) {
+			@Override
+			protected Kvin createArchiveStore(File archiveStorePath, Duration retentionPeriod) {
+				return new KvinIceberg(archiveStorePath.toString(), retentionPeriod);
+			}
+		};
+	}
+
+	@Test
+	public void shouldApplyRetentionPeriodToIcebergArchive() throws IOException {
+		long now = System.currentTimeMillis();
+		long week = Duration.ofDays(7).toMillis();
+
+		KvinPartitioned store = icebergPartitioned(null);
+		try {
+			store.put(generator(now - 4 * week).generate());
+			store.put(generator(now).generate());
+			store.runArchival();
+			assertEquals(20, store.fetch(ITEM, PROPERTY, Kvin.DEFAULT_CONTEXT, 0).toList().size());
+		} finally {
+			store.close();
+		}
+
+		store = icebergPartitioned(Duration.ofDays(7));
+		try {
+			store.runArchival();
+			assertEquals(10, store.fetch(ITEM, PROPERTY, Kvin.DEFAULT_CONTEXT, 0).toList().size());
+			assertEquals(0, store.fetch(ITEM, PROPERTY, Kvin.DEFAULT_CONTEXT,
+					now - 2 * week, 0, 0, 0, null).toList().size());
 		} finally {
 			store.close();
 		}

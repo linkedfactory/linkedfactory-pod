@@ -50,13 +50,11 @@ public class KvinIceberg implements Kvin {
 
 	/**
 	 * Creates an owned store with configurable record partitioning. A null factory
-	 * adopts an existing table's spec, or creates an unpartitioned table.
+	 * adopts an existing table's spec, or creates an unpartitioned table. With a
+	 * retention period, {@link #cleanUp()} removes the values that are older.
 	 */
 	public KvinIceberg(String archiveLocation, Duration retentionPeriod,
 			Function<Schema, PartitionSpec> partitioning) {
-		if (retentionPeriod != null) {
-			throw new UnsupportedOperationException("Iceberg retention cleanup is not implemented");
-		}
 		IcebergRecordStore records = new IcebergRecordStore(archiveLocation, retentionPeriod, partitioning);
 		try {
 			idStore = new IcebergIdStore(archiveLocation, records.hasSnapshot());
@@ -292,6 +290,17 @@ public class KvinIceberg implements Kvin {
 			Map<Long, URI> uris = idStore.getUris(ids, IdKind.PROPERTY);
 			return net.enilink.commons.iterator.WrappedIterator.create(ids.stream().map(uris::get).iterator());
 		}
+	}
+
+	/**
+	 * Removes the values that are older than the retention period of the record store.
+	 * Does nothing without a retention period or for record stores other than
+	 * {@link IcebergRecordStore}. URI-ID mappings are kept.
+	 *
+	 * @return the number of removed values
+	 */
+	public long cleanUp() {
+		return recordStore instanceof IcebergRecordStore iceberg ? iceberg.cleanUp() : 0;
 	}
 
 	public void createBranch(String branchName) {

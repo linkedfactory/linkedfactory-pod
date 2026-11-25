@@ -11,7 +11,9 @@ import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.io.CloseableIterable;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -21,9 +23,12 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.UUID;
 
 import static org.junit.Assert.*;
@@ -188,5 +193,60 @@ public class IcebergRecordStoreTest {
 			assertThrows(UnsupportedOperationException.class, () -> facade.createBranch("unsupported"));
 		}
 		verify(genericRecords, never()).close();
+	}
+
+	private Set<String> dataFiles() throws Exception {
+		var table = new HadoopTables(new Configuration()).load(directory.resolve("iceberg").toString());
+		Set<String> files = new HashSet<>();
+		try (CloseableIterable<FileScanTask> tasks = table.newScan().planFiles()) {
+			tasks.forEach(task -> files.add(task.file().location()));
+		}
+		return files;
+	}
+
+	private List<Long> times(KvinRecordStore records) {
+		try (var rows = records.fetch(1, 2L, null, 0)) {
+			return rows.toList().stream().map(KvinRecord::time).toList();
+		}
+	}
+
+	@Test
+	public void deleteOlderThanDropsOldFilesAndRewritesFilesThatSpanTheCutoff() throws Exception {
+		store.put(new KvinRecord(0, 1, 2, 1, 0, "a"), new KvinRecord(0, 1, 2, 2, 0, "b"));
+		Set<String> oldFiles = dataFiles();
+		store.put(new KvinRecord(0, 1, 2, 10, 0, "c"), new KvinRecord(0, 1, 2, 11, 0, "d"));
+		Set<String> newFiles = dataFiles();
+		newFiles.removeAll(oldFiles);
+
+		// the old file is dropped, the new one is kept as it is
+		assertEquals(2, store.deleteOlderThan(5));
+		assertEquals(newFiles, dataFiles());
+		assertEquals(List.of(11L, 10L), times(store));
+
+		// a file that spans the cutoff is rewritten
+		assertEquals(1, store.deleteOlderThan(11));
+		assertFalse(dataFiles().containsAll(newFiles));
+		assertEquals(List.of(11L), times(store));
+		assertEquals(0, store.deleteOlderThan(11));
+	}
+
+	@Test
+	public void cleanUpRemovesRecordsOlderThanTheRetentionPeriod() {
+		long now = System.currentTimeMillis();
+		long day = Duration.ofDays(1).toMillis();
+		store.put(new KvinRecord(0, 1, 2, now - 14 * day, 0, "old"), new KvinRecord(0, 1, 2, now, 0, "new"));
+		// without a retention period nothing is removed
+		assertEquals(0, store.cleanUp());
+		store.close();
+
+		store = new IcebergRecordStore(directory.toString(), Duration.ofDays(7));
+		assertEquals(1, store.cleanUp());
+		assertEquals(List.of(now), times(store));
+	}
+
+	@Test
+	public void rejectsRetentionPeriodsThatAreNotPositive() {
+		assertThrows(IllegalArgumentException.class, () -> new IcebergRecordStore(directory.toString(), Duration.ZERO));
+		assertThrows(IllegalArgumentException.class, () -> new IcebergRecordStore(directory.toString(), Duration.ofDays(-1)));
 	}
 }

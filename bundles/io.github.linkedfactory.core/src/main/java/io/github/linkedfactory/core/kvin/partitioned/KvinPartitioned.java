@@ -4,6 +4,7 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.iceberg.KvinIceberg;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDbArchiver;
 import io.github.linkedfactory.core.kvin.parquet.Compactor;
@@ -129,6 +130,15 @@ public class KvinPartitioned implements Kvin {
 			}
 		} catch (Exception e) {
 			log.error("Archiving data to archive store failed", e);
+		}
+
+		if (archiveStore instanceof KvinIceberg icebergStore) {
+			// after the hot store archive is removed, so that a failure does not archive values twice
+			try {
+				icebergStore.cleanUp();
+			} catch (Exception e) {
+				log.error("Cleaning up archive store failed", e);
+			}
 		}
 	}
 

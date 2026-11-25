@@ -62,6 +62,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -118,6 +119,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 	// Column statistics used to prune, order and lazily open data files during fetches.
 	private static final List<String> FETCH_STATS_COLUMNS = List.of("itemId", "contextId", "propertyId", "time");
 	private static final int CONTEXT_FIELD_ID = 2;
+	private static final int TIME_FIELD_ID = 4;
 
 	private static final Schema SCHEMA = new Schema(Types.NestedField.required(1, "itemId", Types.LongType.get()), Types.NestedField.required(2, "contextId", Types.LongType.get()), Types.NestedField.required(3, "propertyId", Types.LongType.get()), Types.NestedField.required(4, "time", Types.LongType.get()), Types.NestedField.required(5, "seqNr", Types.IntegerType.get()), Types.NestedField.required(6, "first", Types.BooleanType.get()), Types.NestedField.optional(7, "valueInt", Types.IntegerType.get()), Types.NestedField.optional(8, "valueLong", Types.LongType.get()), Types.NestedField.optional(9, "valueFloat", Types.FloatType.get()), Types.NestedField.optional(10, "valueDouble", Types.DoubleType.get()), Types.NestedField.optional(11, "valueString", Types.StringType.get()), Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()), Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
 
@@ -129,6 +131,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 	private final Path root;
 	private final Table table;
+	private final Duration retentionPeriod;
 	// Data files are immutable, so cached footers never become stale.
 	private final Cache<String, ParquetMetadata> footers = CacheBuilder.newBuilder().maximumSize(FOOTER_CACHE_SIZE).build();
 	// Data files of the current snapshot, planned once per snapshot and filtered per fetch.
@@ -149,16 +152,17 @@ public class IcebergRecordStore implements KvinRecordStore {
 	/**
 	 * Configures partitioning for a new table, or verifies an existing table's spec.
 	 * A null factory adopts existing partitioning and creates new tables unpartitioned.
+	 * With a retention period, {@link #cleanUp()} removes the records that are older.
 	 * Only itemId, contextId, propertyId, time, and seqNr may be partition sources.
 	 * Partition evolution must be performed explicitly, outside this constructor.
 	 */
 	public IcebergRecordStore(String archiveLocation, Duration retentionPeriod,
 			Function<Schema, PartitionSpec> partitioning) {
 		this.root = Path.of(archiveLocation).toAbsolutePath().normalize();
-
-		if (retentionPeriod != null) {
-			throw new UnsupportedOperationException("Iceberg retention cleanup is not implemented");
+		if (retentionPeriod != null && (retentionPeriod.isNegative() || retentionPeriod.isZero())) {
+			throw new IllegalArgumentException("Retention period must be positive: " + retentionPeriod);
 		}
+		this.retentionPeriod = retentionPeriod;
 
 		PartitionSpec requestedSpec = partitioning == null ? null
 				: Objects.requireNonNull(partitioning.apply(SCHEMA), "Partitioning factory returned null");
@@ -906,6 +910,34 @@ public class IcebergRecordStore implements KvinRecordStore {
 		long contextId = context == null ? DEFAULT_CONTEXT : context;
 		return deleteRows(Expressions.equal("contextId", contextId), row -> row.contextId() == contextId,
 				file -> onlyValue(file, CONTEXT_FIELD_ID, contextId));
+	}
+
+	/**
+	 * Removes the records whose time is older than the retention period, measured from now.
+	 * Does nothing if the store has no retention period.
+	 *
+	 * @return the number of removed records
+	 */
+	public synchronized long cleanUp() {
+		if (retentionPeriod == null) {
+			return 0;
+		}
+		long cutoff = System.currentTimeMillis() - retentionPeriod.toMillis();
+		log.info("Removing Iceberg records older than {}", Instant.ofEpochMilli(cutoff));
+		return deleteOlderThan(cutoff);
+	}
+
+	/**
+	 * Removes all records with a time before {@code time}. Data files whose records are all
+	 * older, for example with a partition on {@code time}, are removed from the table without
+	 * reading or rewriting them. Other files that contain older records are rewritten.
+	 *
+	 * @return the number of removed records
+	 */
+	public synchronized long deleteOlderThan(long time) {
+		return deleteRows(Expressions.lessThan("time", time), row -> row.time() < time,
+				file -> file.upperBounds() != null && file.upperBounds().containsKey(TIME_FIELD_ID)
+						&& bound(file.upperBounds(), TIME_FIELD_ID, Long.MAX_VALUE) < time);
 	}
 
 	/**
