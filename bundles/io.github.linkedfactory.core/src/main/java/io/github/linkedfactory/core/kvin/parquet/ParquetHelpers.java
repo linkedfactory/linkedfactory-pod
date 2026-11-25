@@ -23,6 +23,7 @@ import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.codec.ZstandardCodec;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
@@ -53,7 +54,7 @@ public class ParquetHelpers {
 	static final long ROW_GROUP_SIZE_DATA = 1048576L; // 1 MB - 134217728L is Parquet Java default
 	static final int PAGE_SIZE = 8192; // 8 KB
 	static final int DICT_PAGE_SIZE = 1048576; // 1 MB
-	static final int ZSTD_COMPRESSION_LEVEL = 12; // 1 - 22
+	static final int ZSTD_COMPRESSION_LEVEL = 3; // 1 - 22, same as KvinIceberg (Parquet's default)
 	public static MessageType kvinTupleType = new MessageType("KvinTupleInternal",
 			// new PrimitiveType(Repetition.REQUIRED, PrimitiveType.PrimitiveTypeName.BINARY, "id"),
 
@@ -82,7 +83,7 @@ public class ParquetHelpers {
 	static Configuration configuration = new Configuration();
 
 	static {
-		configuration.setInt("parquet.zstd.compressionLevel", ZSTD_COMPRESSION_LEVEL);
+		configuration.setInt(ZstandardCodec.PARQUET_COMPRESS_ZSTD_LEVEL, ZSTD_COMPRESSION_LEVEL);
 	}
 
 	static ParquetWriter<KvinRecord> getKvinRecordWriter(Path dataFile) throws IOException {
@@ -91,8 +92,7 @@ public class ParquetHelpers {
 				.withConf(configuration)
 				.withDictionaryEncoding(true)
 				.withDictionaryEncoding("valueObject", false)
-				//.withCompressionCodec(CompressionCodecName.ZSTD)
-				.withCompressionCodec(CompressionCodecName.SNAPPY)
+				.withCompressionCodec(CompressionCodecName.ZSTD)
 				.withRowGroupSize(ROW_GROUP_SIZE_DATA)
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
@@ -200,8 +200,7 @@ public class ParquetHelpers {
 				.withSchema(idMappingSchema)
 				.withConf(configuration)
 				.withDictionaryEncoding(true)
-				//.withCompressionCodec(CompressionCodecName.ZSTD)
-				.withCompressionCodec(CompressionCodecName.SNAPPY)
+				.withCompressionCodec(CompressionCodecName.ZSTD)
 				.withRowGroupSize(ROW_GROUP_SIZE_MAPPINGS)
 				.withPageSize(PAGE_SIZE)
 				.withDictionaryPageSize(DICT_PAGE_SIZE)
