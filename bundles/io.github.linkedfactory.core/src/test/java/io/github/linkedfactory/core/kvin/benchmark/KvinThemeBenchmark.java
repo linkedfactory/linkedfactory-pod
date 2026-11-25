@@ -40,7 +40,8 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * Every combination of {@link StoreType} and {@link Theme} is a separate trial: the store is
  * created and filled with the theme's data once, then the theme's SPARQL query and a
- * single-item fetch are measured against it.
+ * single-item fetch are measured against it. The data is generated with fixed seeds, so every
+ * trial sees the same values. Times are epoch milliseconds.
  * <p>
  * Run {@link #main(String[])} with regular JMH arguments to select benchmarks and parameters,
  * for example {@code -p store=iceberg -p theme=machine KvinThemeBenchmark.query}.
@@ -77,8 +78,10 @@ public class KvinThemeBenchmark {
 
 	public enum Theme {
 		/**
-		 * Many work pieces with few values each. The query finds the work pieces whose latest
-		 * section is "anfang" and returns all their properties.
+		 * A production line: a work piece starts every 90 seconds and passes the sections
+		 * "anfang", "mitte" and "end", 30 minutes apart. Each work piece has 49 process
+		 * parameters of mixed types. Written in one bulk import. The query finds the work pieces
+		 * that are still in section "anfang" and returns all their values.
 		 */
 		process("http://dm.adaproq.de/vocab/", "wp1995",
 				"prefix aq: <http://dm.adaproq.de/vocab/>\n" +
@@ -90,13 +93,15 @@ public class KvinThemeBenchmark {
 						"  }\n" +
 						"}") {
 			@Override
-			List<KvinTuple> generate() {
-				return generateProcessData(namespace, PROCESS_WORK_PIECES);
+			List<List<KvinTuple>> batches() {
+				return List.of(generateProcessData(namespace, PROCESS_WORK_PIECES));
 			}
 		},
 		/**
-		 * Few parts with long series per channel. The query joins angle and force of six
-		 * channels by time and index for six parts.
+		 * A press-fit station: a part every 30 seconds, with an angle and a force curve of 250
+		 * samples for each of six channels. All samples of a curve share the part's time stamp and
+		 * are ordered by sequence number. Written in one bulk import. The query joins angle and
+		 * force of all channels by time and index for six parts.
 		 */
 		machine("http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.", "part:6",
 				"prefix esw: <http://dm.adaproq.de/datamodel/ESW-M-Schraube_ABC#ESW-M-Presskraefte_1.>\n" +
@@ -106,8 +111,20 @@ public class KvinThemeBenchmark {
 						"  }\n" +
 						"} order by ?part ?s") {
 			@Override
-			List<KvinTuple> generate() {
-				return generateMachineData(namespace, MACHINE_PARTS);
+			List<List<KvinTuple>> batches() {
+				return List.of(generateMachineData(namespace, MACHINE_PARTS));
+			}
+		},
+		/**
+		 * Plant monitoring: 50 sensors report temperature, pressure, power and an energy
+		 * counter every 5 seconds. Written in time order like live ingestion, one put per
+		 * minute of data. The query is a dashboard: one-minute averages of the temperature of
+		 * ten sensors over the last 30 minutes.
+		 */
+		sensors(SENSOR_NAMESPACE, "sensor1", sensorQuery()) {
+			@Override
+			List<List<KvinTuple>> batches() {
+				return generateSensorData(namespace);
 			}
 		};
 
@@ -121,18 +138,32 @@ public class KvinThemeBenchmark {
 			this.query = query;
 		}
 
-		abstract List<KvinTuple> generate();
+		/**
+		 * The theme's data in the order it is written; each list is one put.
+		 */
+		abstract List<List<KvinTuple>> batches();
 	}
 
-	// both themes produce roughly 100,000 tuples
+	// every theme produces roughly 100,000 tuples
 	static final int PROCESS_WORK_PIECES = 2000;
-	static final int PROCESS_PROPERTIES = 50;
+	static final int PROCESS_PROPERTIES = 49;
+	static final long PROCESS_START_INTERVAL = 90_000;
+	static final long PROCESS_SECTION_DURATION = 30 * 60_000;
 	static final int MACHINE_PARTS = 34;
 	static final int MACHINE_CHANNELS = 6;
 	static final int MACHINE_SAMPLES = 250;
+	static final long MACHINE_CYCLE = 30_000;
+	static final String SENSOR_NAMESPACE = "http://example.org/plant/";
+	static final int SENSORS = 50;
+	static final int SENSOR_SAMPLES = 500;
+	static final long SENSOR_INTERVAL = 5_000;
+	static final int SENSOR_SAMPLES_PER_PUT = 12;
+	static final int SENSOR_DASHBOARD_SENSORS = 10;
+	static final long SENSOR_DASHBOARD_RANGE = 30 * 60_000;
 
-	static final long START_TIME = 1653335520L;
-	static final long WEEK = 604800L;
+	// 2023-11-14T22:13:20Z
+	static final long START_TIME = 1_700_000_000_000L;
+	static final long DAY = 24 * 60 * 60_000L;
 
 	@Param
 	public StoreType store;
@@ -162,7 +193,9 @@ public class KvinThemeBenchmark {
 	public void setup() throws IOException {
 		storeDir = Files.createTempDirectory("kvin-" + store + "-" + theme);
 		kvin = store.open(storeDir);
-		kvin.put(theme.generate());
+		for (List<KvinTuple> batch : theme.batches()) {
+			kvin.put(batch);
+		}
 
 		repository = new SailRepository(new MemoryStore());
 		resolver = new BaseFederatedServiceResolver() {
@@ -234,9 +267,54 @@ public class KvinThemeBenchmark {
 		return patterns.toString();
 	}
 
+	static String sensorQuery() {
+		long end = START_TIME + (SENSOR_SAMPLES - 1) * SENSOR_INTERVAL;
+		StringBuilder sensors = new StringBuilder();
+		for (int i = 1; i <= SENSOR_DASHBOARD_SENSORS; i++) {
+			sensors.append(" <").append(SENSOR_NAMESPACE).append("sensor").append(i).append(">");
+		}
+		return "prefix s: <" + SENSOR_NAMESPACE + ">\n" +
+				"select ?sensor ?t ?avg {\n" +
+				"  values ?sensor {" + sensors + " }\n" +
+				"  service <kvin:> {\n" +
+				"    ?sensor s:temperature [ <kvin:from> " + (end - SENSOR_DASHBOARD_RANGE) + " ; <kvin:to> " + end +
+				" ; <kvin:interval> 60000 ; <kvin:op> \"avg\" ; <kvin:time> ?t ; <kvin:value> ?avg ] .\n" +
+				"  }\n" +
+				"} order by ?sensor ?t";
+	}
+
+	static float round(double value, double resolution) {
+		return (float) (Math.round(value / resolution) * resolution);
+	}
+
 	/**
-	 * Generates the item {@code gtc} that lists all work pieces, and for every work piece a
-	 * section value plus numeric properties. Time advances by one week every 100 work pieces.
+	 * Process parameters of a work piece: name, kind, base value, noise, drift per work piece
+	 * (tool wear) and sensor resolution.
+	 */
+	record ProcessParameter(String name, char kind, double base, double noise, double drift, double resolution) {
+	}
+
+	static List<ProcessParameter> processParameters() {
+		Random random = new Random(100);
+		List<ProcessParameter> parameters = new ArrayList<>();
+		for (int p = 1; p <= PROCESS_PROPERTIES; p++) {
+			parameters.add(switch (p % 7) {
+				case 0 -> new ProcessParameter("meltTemperature" + p, 'f', 180 + 40 * random.nextDouble(), 0.4, 0.001, 0.1);
+				case 1 -> new ProcessParameter("pressure" + p, 'f', 50 + 30 * random.nextDouble(), 0.2, -0.0005, 0.01);
+				case 2 -> new ProcessParameter("spindleSpeed" + p, 'i', 1200 + 1800 * random.nextDouble(), 4, 0, 1);
+				case 3 -> new ProcessParameter("torque" + p, 'f', 20 + 40 * random.nextDouble(), 0.3, 0.002, 0.1);
+				case 4 -> new ProcessParameter("cycleTime" + p, 'd', 85 + 10 * random.nextDouble(), 0.5, 0, 0.001);
+				case 5 -> new ProcessParameter("cycleCount" + p, 'l', 0, 0, 0, 1);
+				default -> p % 2 == 0 ? new ProcessParameter("qualityOk" + p, 'b', 0.98, 0, 0, 1)
+						: new ProcessParameter("toolId" + p, 's', 0, 0, 0, 1);
+			});
+		}
+		return parameters;
+	}
+
+	/**
+	 * Generates the item {@code gtc} that lists all work pieces, the section history of every
+	 * work piece and its process parameters, recorded one per second after its start.
 	 */
 	static List<KvinTuple> generateProcessData(String ns, int workPieces) {
 		Random random = new Random(200);
@@ -245,54 +323,119 @@ public class KvinThemeBenchmark {
 		URI gtc = URIs.createURI(ns + "gtc");
 		URI workpiece = URIs.createURI(ns + "workpiece");
 		URI section = URIs.createURI(ns + "abschnitt");
-		URI[] properties = new URI[PROCESS_PROPERTIES];
-		for (int p = 1; p < PROCESS_PROPERTIES; p++) {
-			properties[p] = URIs.createURI(ns + "property" + p);
-		}
+		List<ProcessParameter> parameters = processParameters();
+		URI[] properties = parameters.stream().map(p -> URIs.createURI(ns + p.name())).toArray(URI[]::new);
+		// the data ends shortly after the last work piece started
+		long end = START_TIME + (workPieces - 1) * PROCESS_START_INTERVAL + 5 * 60_000;
 
-		List<KvinTuple> tuples = new ArrayList<>(workPieces * (PROCESS_PROPERTIES + 1));
+		List<KvinTuple> tuples = new ArrayList<>(workPieces * (PROCESS_PROPERTIES + 4));
 		for (int wp = 0; wp < workPieces; wp++) {
-			tuples.add(new KvinTuple(gtc, workpiece, ctx, START_TIME, wp, URIs.createURI(ns + "wp" + wp)));
-		}
-		long time = START_TIME;
-		for (int wp = 0; wp < workPieces; wp++) {
-			if (wp > 0 && wp % 100 == 0) {
-				time += WEEK;
-			}
+			long start = START_TIME + wp * PROCESS_START_INTERVAL;
 			URI item = URIs.createURI(ns + "wp" + wp);
-			tuples.add(new KvinTuple(item, section, ctx, time, 0, sections[random.nextInt(sections.length)]));
-			for (int p = 1; p < PROCESS_PROPERTIES; p++) {
-				tuples.add(new KvinTuple(item, properties[p], ctx, time, 0, random.nextFloat()));
+			tuples.add(new KvinTuple(gtc, workpiece, ctx, start, 0, item));
+			for (int s = 0; s < sections.length && start + s * PROCESS_SECTION_DURATION <= end; s++) {
+				tuples.add(new KvinTuple(item, section, ctx, start + s * PROCESS_SECTION_DURATION, 0, sections[s]));
+			}
+			for (int p = 0; p < parameters.size(); p++) {
+				ProcessParameter parameter = parameters.get(p);
+				double value = parameter.base() + parameter.drift() * wp + parameter.noise() * random.nextGaussian();
+				Object v = switch (parameter.kind()) {
+					case 'f' -> round(value, parameter.resolution());
+					case 'd' -> Math.round(value / parameter.resolution()) * parameter.resolution();
+					case 'i' -> (int) Math.round(value);
+					case 'l' -> (long) wp + 100_000;
+					case 'b' -> random.nextDouble() < parameter.base();
+					default -> "T-" + (100 + wp / 250);
+				};
+				tuples.add(new KvinTuple(item, properties[p], ctx, start + (p + 1) * 1000L, 0, v));
 			}
 		}
 		return tuples;
 	}
 
 	/**
-	 * Generates parts with an angle and a force series per channel. All samples of a part share
-	 * one time stamp and are distinguished by their sequence number. Time advances by one week
-	 * every five parts.
+	 * Generates press-fit curves: per part and channel, the angle rises evenly to its end
+	 * angle and the force rises quadratically to its maximum, both with sensor noise and
+	 * rounded to the sensor resolution (0.01 degree, 1 N).
 	 */
 	static List<KvinTuple> generateMachineData(String ns, int parts) {
 		Random random = new Random(200);
 		URI ctx = Kvin.DEFAULT_CONTEXT;
+		URI[] angles = new URI[MACHINE_CHANNELS + 1], forces = new URI[MACHINE_CHANNELS + 1];
+		for (int c = 1; c <= MACHINE_CHANNELS; c++) {
+			angles[c] = URIs.createURI(ns + "Channel" + c + ".Angle");
+			forces[c] = URIs.createURI(ns + "Channel" + c + ".Force");
+		}
 		List<KvinTuple> tuples = new ArrayList<>(parts * MACHINE_CHANNELS * 2 * MACHINE_SAMPLES);
-		long time = START_TIME;
 		for (int part = 0; part < parts; part++) {
-			if (part > 0 && part % 5 == 0) {
-				time += WEEK;
-			}
+			long time = START_TIME + part * MACHINE_CYCLE;
 			URI item = URIs.createURI("part:" + part);
-			int seq = 0;
 			for (int c = 1; c <= MACHINE_CHANNELS; c++) {
-				for (String kind : new String[]{".Angle", ".Force"}) {
-					URI property = URIs.createURI(ns + "Channel" + c + kind);
-					for (int s = 0; s < MACHINE_SAMPLES; s++) {
-						tuples.add(new KvinTuple(item, property, ctx, time, seq++, random.nextFloat()));
-					}
+				double endAngle = 35 + 10 * random.nextDouble();
+				double maxForce = 8_000 + 4_000 * random.nextDouble();
+				for (int s = 0; s < MACHINE_SAMPLES; s++) {
+					double progress = s / (double) (MACHINE_SAMPLES - 1);
+					float angle = round(endAngle * progress + 0.02 * random.nextGaussian(), 0.01);
+					float force = round(maxForce * progress * progress + 5 * random.nextGaussian(), 1);
+					tuples.add(new KvinTuple(item, angles[c], ctx, time, s, angle));
+					tuples.add(new KvinTuple(item, forces[c], ctx, time, s, force));
 				}
 			}
 		}
 		return tuples;
+	}
+
+	/**
+	 * Generates sensor readings in time order, one batch per minute. Temperature follows a
+	 * daily cycle, pressure varies around a set point, power depends on whether the machine
+	 * runs, and the energy counter (Wh) integrates the power.
+	 */
+	static List<List<KvinTuple>> generateSensorData(String ns) {
+		Random random = new Random(300);
+		URI ctx = Kvin.DEFAULT_CONTEXT;
+		URI temperature = URIs.createURI(ns + "temperature");
+		URI pressure = URIs.createURI(ns + "pressure");
+		URI power = URIs.createURI(ns + "power");
+		URI energy = URIs.createURI(ns + "energy");
+		URI[] sensors = new URI[SENSORS];
+		double[] baseTemperature = new double[SENSORS], basePressure = new double[SENSORS], nominalPower = new double[SENSORS];
+		boolean[] running = new boolean[SENSORS];
+		double[] energyWh = new double[SENSORS];
+		for (int i = 0; i < SENSORS; i++) {
+			sensors[i] = URIs.createURI(ns + "sensor" + (i + 1));
+			baseTemperature[i] = 22 + 3 * random.nextGaussian();
+			basePressure[i] = 6 + 0.2 * random.nextGaussian();
+			nominalPower[i] = 5 + 10 * random.nextDouble();
+			running[i] = random.nextDouble() < 0.8;
+			energyWh[i] = 1_000_000 * random.nextDouble();
+		}
+		List<List<KvinTuple>> batches = new ArrayList<>();
+		List<KvinTuple> batch = new ArrayList<>();
+		for (int sample = 0; sample < SENSOR_SAMPLES; sample++) {
+			long time = START_TIME + sample * SENSOR_INTERVAL;
+			double daily = Math.sin(2 * Math.PI * (time % DAY) / DAY);
+			for (int i = 0; i < SENSORS; i++) {
+				// machines switch on or off now and then
+				if (random.nextDouble() < 0.002) {
+					running[i] = !running[i];
+				}
+				double kw = running[i] ? nominalPower[i] * (1 + 0.03 * random.nextGaussian()) : 0;
+				energyWh[i] += kw * SENSOR_INTERVAL / 3_600.0;
+				batch.add(new KvinTuple(sensors[i], temperature, ctx, time, 0,
+						round(baseTemperature[i] + 2 * daily + (running[i] ? 1.5 : 0) + 0.05 * random.nextGaussian(), 0.1)));
+				batch.add(new KvinTuple(sensors[i], pressure, ctx, time, 0,
+						round(basePressure[i] + 0.03 * random.nextGaussian(), 0.01)));
+				batch.add(new KvinTuple(sensors[i], power, ctx, time, 0, round(kw, 0.1)));
+				batch.add(new KvinTuple(sensors[i], energy, ctx, time, 0, (long) energyWh[i]));
+			}
+			if ((sample + 1) % SENSOR_SAMPLES_PER_PUT == 0) {
+				batches.add(batch);
+				batch = new ArrayList<>();
+			}
+		}
+		if (!batch.isEmpty()) {
+			batches.add(batch);
+		}
+		return batches;
 	}
 }
