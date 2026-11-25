@@ -144,6 +144,11 @@ Example with the default model and a LevelDB store:
    ] .
 ----
 
+A LevelDB store records the version of its storage format.
+Pod does not open a store that was created by an earlier version without this record, or that has another format version; it fails with an error that names the store directory.
+Pod does not convert such stores.
+To start with an empty store, set a new `dirName` or remove the old directory.
+
 === Iceberg storage
 
 To use Iceberg instead of the default value store, configure `<store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ]`.

@@ -65,9 +65,25 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import static org.iq80.leveldb.impl.Iq80DBFactory.factory;
 
 /**
- * Indirect mapping of (item, property) -> ID and (ID, time, sequence-nr) -> value.
+ * Indirect mapping of URIs -> IDs and (context, item, property, time, sequence-nr) -> value.
+ * <p>
+ * The keys of the values database start with the context ID, followed by the IDs of
+ * item and property, so that all values of a context are stored next to each other.
+ * The layout is identified by {@link #FORMAT_VERSION}, which is stored in the ids database.
+ * A store without this marker or with another version cannot be opened.
  */
 public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
+	/**
+	 * The version of the storage format: keys of the values database start with
+	 * context, item, and property IDs.
+	 */
+	public static final int FORMAT_VERSION = 2;
+
+	/**
+	 * The key of the format version in the ids database. The prefix 0 is not used by any {@link EntryType}.
+	 */
+	static final byte[] FORMAT_VERSION_KEY = "\0formatVersion".getBytes(StandardCharsets.UTF_8);
+
 	private static final int DELETE_BATCH_SIZE = 100000;
 	private static final int MAX_VALUES_BATCH_SIZE = 1000000;
 
@@ -97,14 +113,64 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 	public final AtomicLong[] nextIds;
 
 	public KvinLevelDb(File path) {
+		DB openedIds = null;
+		DB openedValues = null;
 		try {
-			ids = factory.open(new File(path, "ids"), createOptions(false));
-			values = factory.open(new File(path, "values"), createOptions(true));
-		} catch (IOException e) {
-			throw new KvinException(e);
+			openedIds = factory.open(new File(path, "ids"), createOptions(false));
+			openedValues = factory.open(new File(path, "values"), createOptions(true));
+			checkFormatVersion(path, openedIds, openedValues);
+		} catch (IOException | RuntimeException e) {
+			closeQuietly(openedValues, e);
+			closeQuietly(openedIds, e);
+			executor.shutdown();
+			throw e instanceof KvinException ke ? ke : new KvinException(e);
 		}
+		ids = openedIds;
+		values = openedValues;
 		nextIds = Arrays.stream(readNextIds(List.of(EntryType.SubjectToId, EntryType.PropertyToId,
 				EntryType.ContextToId, EntryType.ResourceToId))).mapToObj(AtomicLong::new).toArray(AtomicLong[]::new);
+	}
+
+	/**
+	 * Writes the format version to an empty store or verifies the version of an existing store.
+	 *
+	 * @throws KvinException if the store is not empty and has no or another format version
+	 */
+	private static void checkFormatVersion(File path, DB ids, DB values) {
+		byte[] versionBytes = ids.get(FORMAT_VERSION_KEY);
+		if (versionBytes == null) {
+			if (!isEmpty(ids) || !isEmpty(values)) {
+				throw new KvinException("The LevelDB store at " + path + " has no format version. "
+						+ "It was created by an earlier version and has to be recreated.");
+			}
+			byte[] bytes = new byte[Integer.BYTES];
+			ByteBuffer.wrap(bytes).order(BYTE_ORDER).putInt(FORMAT_VERSION);
+			ids.put(FORMAT_VERSION_KEY, bytes, new WriteOptions().sync(true));
+		} else {
+			int version = versionBytes.length == Integer.BYTES ?
+					ByteBuffer.wrap(versionBytes).order(BYTE_ORDER).getInt() : -1;
+			if (version != FORMAT_VERSION) {
+				throw new KvinException("The LevelDB store at " + path + " has the unsupported format version "
+						+ version + ", expected " + FORMAT_VERSION + ".");
+			}
+		}
+	}
+
+	private static boolean isEmpty(DB db) {
+		try (DBIterator it = db.iterator()) {
+			it.seekToFirst();
+			return !it.hasNext();
+		}
+	}
+
+	private static void closeQuietly(DB db, Exception cause) {
+		if (db != null) {
+			try {
+				db.close();
+			} catch (IOException | RuntimeException e) {
+				cause.addSuppressed(e);
+			}
+		}
 	}
 
 	// open the LevelDB instance
@@ -263,9 +329,9 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 		if (propertyId != null) {
 			id = new byte[contextId.length + itemId.length + propertyId.length];
 
-			System.arraycopy(itemId, 0, id, 0, itemId.length);
-			System.arraycopy(contextId, 0, id, itemId.length, contextId.length);
-			System.arraycopy(propertyId, 0, id, itemId.length + contextId.length, propertyId.length);
+			System.arraycopy(contextId, 0, id, 0, contextId.length);
+			System.arraycopy(itemId, 0, id, contextId.length, itemId.length);
+			System.arraycopy(propertyId, 0, id, contextId.length + itemId.length, propertyId.length);
 
 			scpToIdCache.put(cacheKey, id);
 		}
@@ -288,9 +354,9 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 		byte[] itemId = toId(item, EntryType.SubjectToId, false, null);
 		boolean deletedAny = false;
 		if (itemId != null && contextId != null) {
-			byte[] prefix = new byte[itemId.length + contextId.length];
-			System.arraycopy(itemId, 0, prefix, 0, itemId.length);
-			System.arraycopy(contextId, 0, prefix, itemId.length, contextId.length);
+			byte[] prefix = new byte[contextId.length + itemId.length];
+			System.arraycopy(contextId, 0, prefix, 0, contextId.length);
+			System.arraycopy(itemId, 0, prefix, contextId.length, itemId.length);
 
 			DBIterator it = values.iterator();
 			WriteBatch batch = null;
@@ -423,15 +489,15 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 						break;
 					}
 					byte[] itemId = entry.getValue();
-					System.arraycopy(itemId, 0, valuesPrefix, 0, itemId.length);
-					System.arraycopy(contextId, 0, valuesPrefix, itemId.length, contextId.length);
-					Arrays.fill(valuesPrefix, itemId.length + contextId.length, valuesPrefix.length, (byte) 0);
+					System.arraycopy(contextId, 0, valuesPrefix, 0, contextId.length);
+					System.arraycopy(itemId, 0, valuesPrefix, contextId.length, itemId.length);
+					Arrays.fill(valuesPrefix, contextId.length + itemId.length, valuesPrefix.length, (byte) 0);
 
 					// test if there is an entry with the given context in the values table
 					valuesIt.seek(valuesPrefix);
 					if (valuesIt.hasNext() &&
-							Arrays.compare(valuesIt.next().getKey(), 0, itemId.length + contextId.length,
-									valuesPrefix, 0, itemId.length + contextId.length) == 0) {
+							Arrays.compare(valuesIt.next().getKey(), 0, contextId.length + itemId.length,
+									valuesPrefix, 0, contextId.length + itemId.length) == 0) {
 						// create array of character bytes without prefix and without trailing 0
 						byte[] uriBytes = new byte[indexOf(key, (byte) 0) - 1];
 						System.arraycopy(key, 1, uriBytes, 0, uriBytes.length);
@@ -474,13 +540,12 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 		if (contextId == null || itemId == null) {
 			return NiceIterator.emptyIterator();
 		}
-		byte[] itemAndContextId = new byte[contextId.length + itemId.length];
-		System.arraycopy(itemId, 0, itemAndContextId, 0, itemId.length);
-		System.arraycopy(contextId, 0, itemAndContextId, itemId.length, contextId.length);
+		byte[] contextAndItemId = new byte[contextId.length + itemId.length];
+		System.arraycopy(contextId, 0, contextAndItemId, 0, contextId.length);
+		System.arraycopy(itemId, 0, contextAndItemId, contextId.length, itemId.length);
 
-		byte[] prefix = new byte[itemId.length + contextId.length + Long.BYTES + 1];
-		System.arraycopy(itemId, 0, prefix, 0, itemId.length);
-		System.arraycopy(contextId, 0, prefix, itemId.length, contextId.length);
+		byte[] prefix = new byte[contextId.length + itemId.length + Long.BYTES + 1];
+		System.arraycopy(contextAndItemId, 0, prefix, 0, contextAndItemId.length);
 
 		DBIterator it = values.iterator();
 		it.seek(prefix);
@@ -490,12 +555,12 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 			protected URI computeNext() {
 				Map.Entry<byte[], byte[]> entry = it.next();
 				byte[] key = entry.getKey();
-				if (!startsWith(key, itemAndContextId)) {
+				if (!startsWith(key, contextAndItemId)) {
 					return null;
 				}
-				int propertyIdLength = varIntLength(key, itemId.length + contextId.length);
+				int propertyIdLength = varIntLength(key, contextAndItemId.length);
 				byte[] propertyIdBytes = new byte[propertyIdLength];
-				System.arraycopy(key, itemId.length + contextId.length, propertyIdBytes, 0, propertyIdBytes.length);
+				System.arraycopy(key, contextAndItemId.length, propertyIdBytes, 0, propertyIdBytes.length);
 				long propertyId = Varint.readUnsigned(ByteBuffer.wrap(propertyIdBytes));
 				Varint.writeUnsigned(prefix, contextId.length + itemId.length, propertyId + 1);
 				// go to next property
@@ -530,22 +595,22 @@ public class KvinLevelDb extends KvinLevelDbBase implements Kvin {
 					byte[] key = entry.getKey();
 					ByteBuffer keyBb = ByteBuffer.wrap(key);
 
-					int itemIdLength = Varint.firstToLength(keyBb.get(keyBb.position()));
-					long newItemId = Varint.readUnsigned(keyBb);
-					if (newItemId != itemId) {
-						item = toUri(subArray(key, 0, itemIdLength), EntryType.SubjectToId);
-						itemId = newItemId;
-					}
 					int contextIdLength = Varint.firstToLength(keyBb.get(keyBb.position()));
 					long newContextId = Varint.readUnsigned(keyBb);
 					if (newContextId != contextId) {
-						context = toUri(subArray(key, itemIdLength, contextIdLength), EntryType.ContextToId);
+						context = toUri(subArray(key, 0, contextIdLength), EntryType.ContextToId);
 						contextId = newContextId;
+					}
+					int itemIdLength = Varint.firstToLength(keyBb.get(keyBb.position()));
+					long newItemId = Varint.readUnsigned(keyBb);
+					if (newItemId != itemId) {
+						item = toUri(subArray(key, contextIdLength, itemIdLength), EntryType.SubjectToId);
+						itemId = newItemId;
 					}
 					int propertyIdLength = Varint.firstToLength(keyBb.get(keyBb.position()));
 					long newPropertyId = Varint.readUnsigned(keyBb);
 					if (newPropertyId != propertyId) {
-						property = toUri(subArray(key, itemIdLength + contextIdLength, propertyIdLength),
+						property = toUri(subArray(key, contextIdLength + itemIdLength, propertyIdLength),
 								EntryType.PropertyToId);
 						propertyId = newPropertyId;
 					}

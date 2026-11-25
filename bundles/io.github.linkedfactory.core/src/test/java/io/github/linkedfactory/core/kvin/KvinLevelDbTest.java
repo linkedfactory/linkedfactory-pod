@@ -18,24 +18,32 @@ package io.github.linkedfactory.core.kvin;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
+import org.iq80.leveldb.DB;
+import org.iq80.leveldb.Options;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.iq80.leveldb.impl.Iq80DBFactory.factory;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -234,5 +242,85 @@ public class KvinLevelDbTest extends KvinTestBase {
 		assertEquals(1, values.size());
 		assertEquals(afterFailure.time, values.get(0).time);
 		assertEquals(afterFailure.value, values.get(0).value);
+	}
+
+	@Test
+	public void testValuesAreGroupedByContext() {
+		URI item1 = URIs.createURI("http://example.org/item1");
+		URI item2 = URIs.createURI("http://example.org/item2");
+		URI ctxA = URIs.createURI("ctx:a");
+		URI ctxB = URIs.createURI("ctx:b");
+		store.put(new KvinTuple(item1, valueProperty, ctxA, 100, 1),
+				new KvinTuple(item2, valueProperty, ctxB, 100, 2),
+				new KvinTuple(item2, valueProperty, ctxA, 100, 3),
+				new KvinTuple(item1, valueProperty, ctxB, 100, 4),
+				new KvinTuple(item1, propertyUri(1), ctxA, 200, 5));
+
+		// all values of a context are adjacent in key order
+		List<URI> contexts = ((KvinLevelDb) store).fetchAll().mapWith(t -> t.context).toList();
+		assertEquals(5, contexts.size());
+		Set<URI> finished = new HashSet<>();
+		URI last = null;
+		for (URI context : contexts) {
+			if (!context.equals(last)) {
+				assertTrue("Context " + context + " is not contiguous", finished.add(context));
+				last = context;
+			}
+		}
+
+		assertEquals(Set.of(valueProperty, propertyUri(1)), new HashSet<>(store.properties(item1, ctxA).toList()));
+		assertEquals(List.of(valueProperty), store.properties(item1, ctxB).toList());
+		assertEquals(Set.of(item1, item2),
+				new HashSet<>(store.descendants(URIs.createURI("http://example.org/"), ctxB).toList()));
+
+		// deleting an item in one context keeps its values in other contexts
+		assertTrue(store.delete(item1, ctxA));
+		assertEquals(List.of(), fetched(item1, valueProperty, ctxA));
+		assertEquals(List.of(), store.properties(item1, ctxA).toList());
+		assertEquals(List.of(new KvinTuple(item1, valueProperty, ctxB, 100, 4)), fetched(item1, valueProperty, ctxB));
+		assertEquals(List.of(new KvinTuple(item2, valueProperty, ctxA, 100, 3)), fetched(item2, valueProperty, ctxA));
+		assertEquals(List.of(item2),
+				store.descendants(URIs.createURI("http://example.org/"), ctxA).toList());
+	}
+
+	@Test
+	public void testReopenStoreWithFormatVersion() {
+		URI item = URIs.createURI("http://example.org/item");
+		store.put(new KvinTuple(item, valueProperty, null, 100, 1));
+		recreateStore();
+		assertEquals(List.of(new KvinTuple(item, valueProperty, Kvin.DEFAULT_CONTEXT, 100, 1)),
+				fetched(item, valueProperty, null));
+	}
+
+	@Test
+	public void testOpenStoreWithoutFormatVersionFails() throws IOException {
+		File dir = Files.createTempDirectory("leveldb-legacy-").toFile();
+		try {
+			// a store of an earlier version: values but no format marker
+			try (DB values = factory.open(new File(dir, "values"), new Options().createIfMissing(true))) {
+				values.put(new byte[]{1, 1, 1, 0}, new byte[]{0});
+			}
+			assertThrows(KvinException.class, () -> new KvinLevelDb(dir));
+			// the failed open must release the database locks
+			assertThrows(KvinException.class, () -> new KvinLevelDb(dir));
+		} finally {
+			deleteDirectory(dir.toPath());
+		}
+	}
+
+	@Test
+	public void testOpenStoreWithOtherFormatVersionFails() throws IOException {
+		store.close();
+		try (DB ids = factory.open(new File(storeDirectory, "ids"), new Options())) {
+			byte[] version = ByteBuffer.allocate(Integer.BYTES).putInt(KvinLevelDb.FORMAT_VERSION + 1).array();
+			ids.put("\0formatVersion".getBytes(StandardCharsets.UTF_8), version);
+		}
+		assertThrows(KvinException.class, () -> new KvinLevelDb(storeDirectory));
+		// re-open with the expected version for the cleanup
+		try (DB ids = factory.open(new File(storeDirectory, "ids"), new Options())) {
+			byte[] version = ByteBuffer.allocate(Integer.BYTES).putInt(KvinLevelDb.FORMAT_VERSION).array();
+			ids.put("\0formatVersion".getBytes(StandardCharsets.UTF_8), version);
+		}
+		store = new KvinLevelDb(storeDirectory);
 	}
 }
