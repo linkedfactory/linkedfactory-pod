@@ -79,9 +79,8 @@ public class KvinMemTable implements Kvin {
 
 	final KvinRecord END_MARKER = new KvinRecord();
 	final Path path;
-	TableFile currentTableFile;
+	final TableFileSet tableFiles;
 	final ExecutorService executor = Executors.newSingleThreadExecutor();
-	int tableFileNr = 0;
 	boolean async = true;
 	final DB ids;
 	final CircularBuffer<KvinRecord> queue = new CircularBuffer<>(10000);
@@ -97,6 +96,13 @@ public class KvinMemTable implements Kvin {
 						.compressionType(CompressionType.SNAPPY));
 		this.nextIds = Arrays.stream(readNextIds(List.of(EntryType.values())))
 				.mapToObj(AtomicLong::new).toArray(AtomicLong[]::new);
+		try {
+			this.tableFiles = new TableFileSet(path);
+		} catch (IOException | RuntimeException e) {
+			ids.close();
+			executor.shutdown();
+			throw e;
+		}
 	}
 
 	private long nextId(EntryType entryType) {
@@ -236,16 +242,6 @@ public class KvinMemTable implements Kvin {
 		return id != null ? id : -1;
 	}
 
-	void nextTableFile() throws IOException {
-		if (this.currentTableFile == null || this.currentTableFile.size() > 20 * 1024 * 1024) {
-			if (this.currentTableFile != null) {
-				this.currentTableFile.close();
-			}
-			Path tableFilePath = path.resolve("entries_" + (tableFileNr++) + ".dat");
-			this.currentTableFile = new TableFile(tableFilePath);
-		}
-	}
-
 	public static byte[] encodeObject(Object valueObject) throws IOException {
 		if (valueObject instanceof Record) {
 			Record r = (Record) valueObject;
@@ -319,8 +315,7 @@ public class KvinMemTable implements Kvin {
 				} else if (data == END_MARKER) {
 					break;
 				} else {
-					nextTableFile();
-					currentTableFile.put(data);
+					tableFiles.put(data);
 				}
 			}
 			return null;
@@ -342,8 +337,7 @@ public class KvinMemTable implements Kvin {
 						Thread.onSpinWait();
 					}
 				} else {
-					nextTableFile();
-					currentTableFile.put(record);
+					tableFiles.put(record);
 				}
 
 				if (writeBatch.size() >= 10000) {
@@ -398,14 +392,13 @@ public class KvinMemTable implements Kvin {
 	}
 
 	/**
-	 * Deletes the values of the context in the current table file. The table file records
-	 * the delete as a tombstone, so it also applies after the file is opened again.
+	 * Deletes the values of the context in all table files. Each table file records
+	 * the delete as a tombstone, so it also applies after the files are opened again.
 	 */
 	@Override
 	public long delete(URI context) {
 		long contextId = toId(context == null ? DEFAULT_CONTEXT : context, EntryType.ContextToId, false, null);
-		TableFile tableFile = currentTableFile;
-		return contextId < 0 || tableFile == null ? 0 : tableFile.delete(contextId);
+		return contextId < 0 ? 0 : tableFiles.delete(contextId);
 	}
 
 	@Override
@@ -426,9 +419,7 @@ public class KvinMemTable implements Kvin {
 	@Override
 	public void close() {
 		try {
-			if (currentTableFile != null) {
-				currentTableFile.close();
-			}
+			tableFiles.close();
 			ids.close();
 			executor.shutdown();
 		} catch (IOException e) {

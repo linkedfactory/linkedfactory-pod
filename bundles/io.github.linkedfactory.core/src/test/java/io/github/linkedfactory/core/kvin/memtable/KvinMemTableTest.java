@@ -43,7 +43,7 @@ public class KvinMemTableTest {
 	}
 
 	private int count(URI item, URI context) {
-		return store.currentTableFile.fetch(id(item, KvinMemTable.EntryType.SubjectToId),
+		return store.tableFiles.fetch(id(item, KvinMemTable.EntryType.SubjectToId),
 				id(property, KvinMemTable.EntryType.PropertyToId),
 				id(context, KvinMemTable.EntryType.ContextToId), 100).toList().size();
 	}
@@ -71,7 +71,7 @@ public class KvinMemTableTest {
 		// null selects the default context
 		assertEquals(1, store.delete((URI) null));
 		assertEquals(0, count(item, Kvin.DEFAULT_CONTEXT));
-		assertEquals(List.of(), store.currentTableFile.properties(id(item, KvinMemTable.EntryType.SubjectToId),
+		assertEquals(List.of(), store.tableFiles.properties(id(item, KvinMemTable.EntryType.SubjectToId),
 				id(Kvin.DEFAULT_CONTEXT, KvinMemTable.EntryType.ContextToId)).toList());
 	}
 
@@ -88,7 +88,6 @@ public class KvinMemTableTest {
 		store.close();
 
 		store = new KvinMemTable(directory);
-		// the table file is opened by the first write
 		store.put(new KvinTuple(contextB, other, property, 2, 0, 3));
 		assertEquals(0, count(item, contextA));
 		assertEquals(1, count(item, contextB));

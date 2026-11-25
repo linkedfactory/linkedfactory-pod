@@ -394,6 +394,13 @@ public class TableFile implements KvinRecordStore {
 		return buffer.capacity();
 	}
 
+	/**
+	 * Returns the number of bytes written to the file, which is less than the mapped {@link #size()}.
+	 */
+	public synchronized long length() {
+		return buffer.position();
+	}
+
 	long contextOrDefault(Long contextId) {
 		return contextId != null ? contextId : DEFAULT_CONTEXT;
 	}
