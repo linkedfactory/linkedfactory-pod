@@ -391,6 +391,34 @@ public class LuceneFtsIndexTest {
 		assertEquals(threads * perThread, hits.size());
 	}
 
+	@Test
+	public void batchSpanningMultipleInternalChunksIndexesAndRemovesEveryEntryCorrectly() throws Exception {
+		IRI title = vf.createIRI("urn:title");
+		int total = 4_500;
+		Set<Statement> adds = new java.util.LinkedHashSet<>();
+		for (int i = 0; i < total; i++) {
+			adds.add(vf.createStatement(vf.createIRI("urn:item:" + i), title, vf.createLiteral("fox " + i)));
+		}
+		commit(adds, Set.of());
+
+		for (int i = 0; i < total; i++) {
+			assertEquals("urn:item:" + i + " must be searchable",
+					1, searchBackend.search(new FtsSearchRequest("\"fox " + i + "\"", null, 10, null, false, null)).size());
+		}
+
+		Set<Statement> removes = new java.util.LinkedHashSet<>();
+		for (int i = 0; i < total; i += 2) {
+			removes.add(vf.createStatement(vf.createIRI("urn:item:" + i), title, vf.createLiteral("fox " + i)));
+		}
+		commit(Set.of(), removes);
+
+		for (int i = 0; i < total; i++) {
+			int expected = (i % 2 == 0) ? 0 : 1;
+			assertEquals("urn:item:" + i + " removal state after a batch spanning multiple internal chunks",
+					expected, searchBackend.search(new FtsSearchRequest("\"fox " + i + "\"", null, 10, null, false, null)).size());
+		}
+	}
+
 	private void commit(Set<Statement> added, Set<Statement> removed) throws Exception {
 		searchService.begin();
 		searchService.addRemoveStatements(added, removed);

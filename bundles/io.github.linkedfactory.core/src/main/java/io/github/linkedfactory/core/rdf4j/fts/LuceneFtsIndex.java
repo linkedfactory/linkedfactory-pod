@@ -54,6 +54,8 @@ public class LuceneFtsIndex implements AutoCloseable {
 	private static final String ALL_TEXT_FIELD = "_all";
 	private static final String CONTEXT_FIELD = "_context";
 	private static final char SEP = '\u0001';
+	private static final int BATCH_CHUNK_SIZE = 2_000;
+	private static final int LARGE_DOCUMENT_ENTRY_WARNING_THRESHOLD = 10_000;
 
 	private final Directory directory;
 	private final StandardAnalyzer analyzer = new StandardAnalyzer();
@@ -78,26 +80,37 @@ public class LuceneFtsIndex implements AutoCloseable {
 	}
 
 	public void applyAddRemove(Map<String, List<FieldValue>> added, Map<String, List<FieldValue>> removed) throws IOException {
-		Set<String> subjects = new LinkedHashSet<>();
-		subjects.addAll(added.keySet());
-		subjects.addAll(removed.keySet());
+		List<String> subjects = new ArrayList<>();
+		Set<String> seen = new LinkedHashSet<>();
+		seen.addAll(added.keySet());
+		seen.addAll(removed.keySet());
+		subjects.addAll(seen);
 		if (subjects.isEmpty()) {
 			return;
 		}
 		synchronized (lock) {
-			try (DirectoryReader reader = DirectoryReader.open(writer)) {
-				Map<String, List<FieldValue>> currentBySubject = readEntriesForSubjects(reader, subjects);
-				for (String subject : subjects) {
-					List<FieldValue> current = currentBySubject.getOrDefault(subject, new ArrayList<>());
-					List<FieldValue> toRemove = removed.getOrDefault(subject, List.of());
-					current.removeIf(toRemove::contains);
-					for (FieldValue entry : added.getOrDefault(subject, List.of())) {
-						if (!current.contains(entry)) {
-							current.add(entry);
-						}
+			for (int start = 0; start < subjects.size(); start += BATCH_CHUNK_SIZE) {
+				List<String> chunk = subjects.subList(start, Math.min(start + BATCH_CHUNK_SIZE, subjects.size()));
+				applyAddRemoveChunk(chunk, added, removed);
+			}
+		}
+	}
+
+	private void applyAddRemoveChunk(List<String> chunk, Map<String, List<FieldValue>> added,
+			Map<String, List<FieldValue>> removed) throws IOException {
+		Set<String> chunkSet = new LinkedHashSet<>(chunk);
+		try (DirectoryReader reader = DirectoryReader.open(writer)) {
+			Map<String, List<FieldValue>> currentBySubject = readEntriesForSubjects(reader, chunkSet);
+			for (String subject : chunkSet) {
+				List<FieldValue> current = currentBySubject.getOrDefault(subject, new ArrayList<>());
+				List<FieldValue> toRemove = removed.getOrDefault(subject, List.of());
+				current.removeIf(toRemove::contains);
+				for (FieldValue entry : added.getOrDefault(subject, List.of())) {
+					if (!current.contains(entry)) {
+						current.add(entry);
 					}
-					writeDocument(subject, current);
 				}
+				writeDocument(subject, current);
 			}
 		}
 	}
@@ -241,6 +254,11 @@ public class LuceneFtsIndex implements AutoCloseable {
 		if (entries.isEmpty()) {
 			writer.deleteDocuments(key);
 		} else {
+			if (entries.size() >= LARGE_DOCUMENT_ENTRY_WARNING_THRESHOLD) {
+				logger.warn("Subject {} now has {} indexed statements in one Lucene document; every further "
+						+ "add or remove on it reads and rewrites all of them. Consider splitting this subject's "
+						+ "data across more subjects if this keeps growing.", subject, entries.size());
+			}
 			writer.updateDocument(key, buildDocument(subject, entries));
 		}
 	}
