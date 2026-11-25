@@ -4,9 +4,6 @@ import com.google.common.cache.Cache;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.data.GenericRecord;
-import org.apache.iceberg.data.Record;
-import org.apache.iceberg.expressions.Evaluator;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.io.CloseableIterable;
@@ -52,16 +49,19 @@ import java.util.concurrent.ExecutionException;
  * all row groups, the task's split range is applied here, using the same
  * midpoint rule as Parquet's range metadata filter.</p>
  */
-final class SeriesSkippingReader implements CloseableIterable<Record>, CloseableIterator<Record> {
+final class SeriesSkippingReader implements CloseableIterable<KvinRow>, CloseableIterator<KvinRow> {
+	// Indexes in the KVIN schema: the series start marker and the first optional
+	// value column (valueInt). Columns 0-4 are the key columns.
+	private static final int FIRST_COLUMN = 5;
+	private static final int FIRST_VALUE_COLUMN = 6;
 	// Creating a Configuration per reader re-parses Hadoop's default resources.
 	private static final Configuration CONF = new Configuration();
 
 	private final Schema schema;
 	private final Expression filter;
-	private final Evaluator evaluator;
+	private final KeyFilter keyFilter;
 	private final ParquetFileReader reader;
 	private final MessageType fileSchema;
-	private final GenericRecord keys;
 	private final long rangeStart;
 	private final long rangeEnd;
 	private ParquetMetricsRowGroupFilter groupFilter;
@@ -75,7 +75,7 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 	private boolean completed;
 	private boolean groupFilterDirty;
 	private boolean closed;
-	private Record next;
+	private KvinRow next;
 
 	SeriesSkippingReader(Schema schema, FileScanTask task, Expression filter,
 			Cache<String, ParquetMetadata> footers) throws IOException {
@@ -91,8 +91,7 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 			Cache<String, Map<Long, ColumnIndexStore>> columnIndexes) throws IOException {
 		this.schema = schema;
 		this.filter = filter;
-		this.evaluator = new Evaluator(schema.asStruct(), filter);
-		this.keys = GenericRecord.create(schema);
+		this.keyFilter = KeyFilter.of(schema, filter);
 		this.groupFilter = new ParquetMetricsRowGroupFilter(schema, filter);
 		this.rangeStart = task.start();
 		this.rangeEnd = task.start() + task.length();
@@ -181,6 +180,17 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 		};
 	}
 
+	/**
+	 * True if the statistics of a column chunk show that all its rows are null.
+	 */
+	private static boolean allNull(ColumnChunkMetaData chunk, long rowCount) {
+		if (chunk == null) {
+			return false;
+		}
+		var statistics = chunk.getStatistics();
+		return statistics != null && statistics.isNumNullsSet() && statistics.getNumNulls() == rowCount;
+	}
+
 	private boolean inRange(BlockMetaData group) {
 		long midpoint = group.getStartingPos() + group.getCompressedSize() / 2;
 		return midpoint >= rangeStart && midpoint < rangeEnd;
@@ -195,7 +205,7 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 	}
 
 	@Override
-	public CloseableIterator<Record> iterator() {
+	public CloseableIterator<KvinRow> iterator() {
 		return this;
 	}
 
@@ -228,9 +238,18 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 					new GroupRecordConverter(fileSchema).getRootConverter(), fileSchema,
 					reader.getFileMetaData().getCreatedBy());
 			columns = new ColumnReader[schema.columns().size()];
+			Map<String, ColumnChunkMetaData> chunks = new HashMap<>();
+			for (ColumnChunkMetaData chunk : group.getColumns()) {
+				chunks.put(chunk.getPath().toDotString(), chunk);
+			}
 			for (int i = 0; i < columns.length; i++) {
-				columns[i] = store.getColumnReader(fileSchema.getColumnDescription(
-						new String[]{schema.columns().get(i).name()}));
+				String name = schema.columns().get(i).name();
+				// fetches do not use the series start marker; value columns without
+				// any value in this row group are not read at all
+				if (i == FIRST_COLUMN || i >= FIRST_VALUE_COLUMN && allNull(chunks.get(name), group.getRowCount())) {
+					continue;
+				}
+				columns[i] = store.getColumnReader(fileSchema.getColumnDescription(new String[]{name}));
 			}
 			remaining = pages.getRowCount();
 			if (remaining > 0) {
@@ -265,28 +284,38 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 		try {
 			while (remaining > 0 || nextGroup()) {
 				remaining--;
-				for (int i = 0; i < 5; i++) {
-					keys.set(i, i == 4 ? (Object) columns[i].getInteger() : columns[i].getLong());
-					columns[i].consume();
-				}
-				boolean keep = !isCompleted((Long) keys.get(0), (Long) keys.get(1), (Long) keys.get(2))
-						&& evaluator.eval(keys);
-				GenericRecord record = keep ? keys.copy() : null;
-				for (int i = 5; i < columns.length; i++) {
+				long itemId = columns[0].getLong();
+				columns[0].consume();
+				long contextId = columns[1].getLong();
+				columns[1].consume();
+				long propertyId = columns[2].getLong();
+				columns[2].consume();
+				long time = columns[3].getLong();
+				columns[3].consume();
+				int seqNr = columns[4].getInteger();
+				columns[4].consume();
+				boolean keep = !isCompleted(itemId, contextId, propertyId)
+						&& keyFilter.matches(itemId, contextId, propertyId, time, seqNr);
+				Object value = null;
+				for (int i = FIRST_VALUE_COLUMN; i < columns.length; i++) {
 					ColumnReader column = columns[i];
+					if (column == null) {
+						continue;
+					}
 					boolean present = column.getCurrentDefinitionLevel() == column.getDescriptor().getMaxDefinitionLevel();
 					if (present) {
-						if (keep) {
-							record.set(i, switch (i) {
-								case 5, 11 -> column.getBoolean();
+						// a row has at most one value; keep the first, as before
+						if (keep && value == null) {
+							value = switch (i) {
 								case 6 -> column.getInteger();
 								case 7 -> column.getLong();
 								case 8 -> column.getFloat();
 								case 9 -> column.getDouble();
 								case 10 -> column.getBinary().toStringUsingUTF8();
+								case 11 -> column.getBoolean();
 								case 12 -> ByteBuffer.wrap(column.getBinary().getBytes());
 								default -> throw new IllegalStateException("Unexpected KVIN column: " + i);
-							});
+							};
 						} else {
 							column.skip();
 						}
@@ -294,7 +323,7 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 					column.consume();
 				}
 				if (keep) {
-					next = record;
+					next = new KvinRow(itemId, contextId, propertyId, time, seqNr, value);
 					return true;
 				}
 			}
@@ -306,11 +335,11 @@ final class SeriesSkippingReader implements CloseableIterable<Record>, Closeable
 	}
 
 	@Override
-	public Record next() {
+	public KvinRow next() {
 		if (!hasNext()) {
 			throw new NoSuchElementException();
 		}
-		Record result = next;
+		KvinRow result = next;
 		next = null;
 		return result;
 	}

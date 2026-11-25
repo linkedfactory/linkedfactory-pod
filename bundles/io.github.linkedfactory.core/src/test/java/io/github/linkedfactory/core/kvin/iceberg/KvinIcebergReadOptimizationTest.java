@@ -75,7 +75,7 @@ public class KvinIcebergReadOptimizationTest {
 						locations.add(task.file().location());
 						try (var reader = new SeriesSkippingReader(table.schema(), task, Expressions.alwaysTrue(), footers)) {
 							while (reader.hasNext()) {
-								assertTrue(times.add((Long) reader.next().get(3)));
+								assertTrue(times.add(reader.next().time()));
 							}
 						}
 					}
@@ -149,8 +149,8 @@ public class KvinIcebergReadOptimizationTest {
 			field.setAccessible(true);
 			ColumnReader[] columns = (ColumnReader[]) field.get(reader);
 			columns[10] = spy(columns[10]);
-			reader.skipThrough((Long) first.get(0), (Long) first.get(1), (Long) first.get(2));
-			assertEquals("next", reader.next().get(10));
+			reader.skipThrough(first.itemId(), first.contextId(), first.propertyId());
+			assertEquals("next", reader.next().value());
 			assertFalse(reader.hasNext());
 			verify(columns[10], times(9)).skip();
 			verify(columns[10], times(1)).getBinary();
@@ -184,8 +184,8 @@ public class KvinIcebergReadOptimizationTest {
 			field.setAccessible(true);
 			ParquetFileReader file = spy((ParquetFileReader) field.get(reader));
 			field.set(reader, file);
-			reader.skipThrough((Long) first.get(0), (Long) first.get(1), (Long) first.get(2));
-			assertEquals("next", reader.next().get(10));
+			reader.skipThrough(first.itemId(), first.contextId(), first.propertyId());
+			assertEquals("next", reader.next().value());
 			assertFalse(reader.hasNext());
 			long reads = mockingDetails(file).getInvocations().stream()
 					.filter(invocation -> invocation.getMethod().getName().equals("readFilteredRowGroup")).count();
@@ -214,7 +214,7 @@ public class KvinIcebergReadOptimizationTest {
 			var task = tasks.iterator().next();
 			location = task.file().location();
 			try (var reader = new SeriesSkippingReader(table.schema(), task, Expressions.equal("itemId", otherId), footers, indexes)) {
-				assertEquals(1L, reader.next().get(3));
+				assertEquals(1L, reader.next().time());
 				assertFalse(reader.hasNext());
 			}
 		}
@@ -238,13 +238,88 @@ public class KvinIcebergReadOptimizationTest {
 		try (var tasks = table.newScan().planFiles();
 			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(),
 					 Expressions.equal("itemId", otherId), footers, indexes)) {
-			assertEquals(1L, reader.next().get(3));
+			assertEquals(1L, reader.next().time());
 			assertFalse(reader.hasNext());
 		}
 		assertTrue("expected the cached page index to be used", uses.get() > 0);
 		try (var values = store.fetch(other, property, null, 0)) {
 			assertEquals(List.of(1L), values.toList().stream().map(tuple -> tuple.time).toList());
 		}
+	}
+
+	@Test
+	public void allNullValueColumnsAreNotRead() throws Exception {
+		List<KvinTuple> tuples = new ArrayList<>();
+		for (int time = 100; time > 0; time--) {
+			tuples.add(new KvinTuple(item, property, null, time, 0, (float) time));
+		}
+		store.put(tuples);
+		store.put(new KvinTuple(item, secondProperty, null, 1, 0, "text"));
+		Table table = table();
+		var field = SeriesSkippingReader.class.getDeclaredField("columns");
+		field.setAccessible(true);
+		int checked = 0;
+		try (var tasks = table.newScan().planFiles()) {
+			for (var task : tasks) {
+				boolean floats = task.file().recordCount() == 100;
+				try (var reader = new SeriesSkippingReader(table.schema(), task, Expressions.alwaysTrue(),
+						CacheBuilder.newBuilder().<String, ParquetMetadata>build())) {
+					var first = reader.next();
+					ColumnReader[] columns = (ColumnReader[]) field.get(reader);
+					// key columns are always read, the series start marker never
+					for (int i = 0; i <= 4; i++) {
+						assertNotNull(columns[i]);
+					}
+					assertNull(columns[5]);
+					// valueFloat (8) and valueString (10)
+					assertEquals(floats, columns[8] != null);
+					assertEquals(!floats, columns[10] != null);
+					assertNull(columns[7]);
+					assertEquals(floats ? (Object) 100f : "text", first.value());
+					checked++;
+				}
+			}
+		}
+		assertEquals(2, checked);
+		try (var values = store.fetch(item, null, null, 0)) {
+			List<KvinTuple> rows = values.toList();
+			assertEquals(101, rows.size());
+			assertEquals(100f, rows.get(0).value);
+			assertEquals("text", rows.get(100).value);
+		}
+	}
+
+	@Test
+	public void fetchesPlanFilesOncePerSnapshot() throws Exception {
+		URI other = URIs.createURI("urn:test:other");
+		store.put(new KvinTuple(item, property, null, 1, 0, 1L));
+		store.put(new KvinTuple(other, property, null, 1, 0, 2L));
+		var field = IcebergRecordStore.class.getDeclaredField("table");
+		field.setAccessible(true);
+		Table table = spy((Table) field.get(store.getRecordStore()));
+		field.set(store.getRecordStore(), table);
+
+		for (int i = 0; i < 3; i++) {
+			try (var values = store.fetch(item, property, null, 0)) {
+				assertEquals(List.of(1L), values.toList().stream().map(tuple -> tuple.value).toList());
+			}
+			// fetches of different items share the planned file list
+			try (var values = store.fetch(other, property, null, 0)) {
+				assertEquals(List.of(2L), values.toList().stream().map(tuple -> tuple.value).toList());
+			}
+		}
+		verify(table, times(1)).newScan();
+
+		// a write creates a new snapshot, which is planned again
+		store.put(new KvinTuple(item, property, null, 2, 0, 3L));
+		clearInvocations(table);
+		try (var values = store.fetch(item, property, null, 0)) {
+			assertEquals(List.of(3L, 1L), values.toList().stream().map(tuple -> tuple.value).toList());
+		}
+		try (var values = store.fetch(item, property, null, 0)) {
+			assertEquals(2, values.toList().size());
+		}
+		verify(table, times(1)).newScan();
 	}
 
 	@Test
@@ -287,13 +362,13 @@ public class KvinIcebergReadOptimizationTest {
 		try (var tasks = table.newScan().planFiles();
 			 var reader = new SeriesSkippingReader(table.schema(), tasks.iterator().next(),
 					 Expressions.equal("itemId", otherId), footers)) {
-			assertEquals(otherId, reader.next().get(0));
+			assertEquals(otherId, reader.next().itemId());
 			var field = SeriesSkippingReader.class.getDeclaredField("pages");
 			field.setAccessible(true);
 			long rows = ((org.apache.parquet.column.page.PageReadStore) field.get(reader)).getRowCount();
 			assertTrue("expected only matching pages, read " + rows + " rows", rows < count);
-			assertEquals(otherId, reader.next().get(0));
-			assertEquals(otherId, reader.next().get(0));
+			assertEquals(otherId, reader.next().itemId());
+			assertEquals(otherId, reader.next().itemId());
 			assertFalse(reader.hasNext());
 		}
 		// the cached footer must still hold all row groups for other filters

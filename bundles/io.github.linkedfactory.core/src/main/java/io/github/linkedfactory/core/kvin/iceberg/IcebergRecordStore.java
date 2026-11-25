@@ -22,6 +22,7 @@ import org.apache.iceberg.ManifestFiles;
 import org.apache.iceberg.PartitionKey;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.SortOrderBuilder;
 import org.apache.iceberg.StructLike;
@@ -32,8 +33,11 @@ import org.apache.iceberg.data.parquet.GenericParquetReaders;
 import org.apache.iceberg.data.parquet.GenericParquetWriter;
 import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
+import org.apache.iceberg.expressions.Evaluator;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
+import org.apache.iceberg.expressions.InclusiveMetricsEvaluator;
+import org.apache.iceberg.expressions.Projections;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.CloseableGroup;
 import org.apache.iceberg.io.CloseableIterable;
@@ -110,8 +114,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 	// and 1 MB pages would make a point fetch decode large parts of a file.
 	static final long DEFAULT_ROW_GROUP_SIZE = 8L * 1024 * 1024;
 	static final long DEFAULT_PAGE_SIZE = 8L * 1024;
-	// Column statistics used to order and lazily open data files during fetches.
-	private static final List<String> FETCH_STATS_COLUMNS = List.of("itemId", "propertyId", "time");
+	// Column statistics used to prune, order and lazily open data files during fetches.
+	private static final List<String> FETCH_STATS_COLUMNS = List.of("itemId", "contextId", "propertyId", "time");
 
 	private static final Schema SCHEMA = new Schema(Types.NestedField.required(1, "itemId", Types.LongType.get()), Types.NestedField.required(2, "contextId", Types.LongType.get()), Types.NestedField.required(3, "propertyId", Types.LongType.get()), Types.NestedField.required(4, "time", Types.LongType.get()), Types.NestedField.required(5, "seqNr", Types.IntegerType.get()), Types.NestedField.required(6, "first", Types.BooleanType.get()), Types.NestedField.optional(7, "valueInt", Types.IntegerType.get()), Types.NestedField.optional(8, "valueLong", Types.LongType.get()), Types.NestedField.optional(9, "valueFloat", Types.FloatType.get()), Types.NestedField.optional(10, "valueDouble", Types.DoubleType.get()), Types.NestedField.optional(11, "valueString", Types.StringType.get()), Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()), Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
 
@@ -125,6 +129,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private final Table table;
 	// Data files are immutable, so cached footers never become stale.
 	private final Cache<String, ParquetMetadata> footers = CacheBuilder.newBuilder().maximumSize(FOOTER_CACHE_SIZE).build();
+	// Data files of the current snapshot, planned once per snapshot and filtered per fetch.
+	private long plannedSnapshotId = -1;
+	private List<FileScanTask> plannedFiles = List.of();
 	// Page indexes per file and row group start position, for skipping pages in point fetches.
 	private final Cache<String, Map<Long, ColumnIndexStore>> columnIndexes =
 			CacheBuilder.newBuilder().maximumSize(FOOTER_CACHE_SIZE).build();
@@ -617,6 +624,30 @@ public class IcebergRecordStore implements KvinRecordStore {
 		return value == null ? fallback : Conversions.<Long>fromByteBuffer(Types.LongType.get(), value);
 	}
 
+	/**
+	 * Returns all data files of the current snapshot with the statistics used by
+	 * fetches. Planning reads the manifests, so it is repeated only after the
+	 * snapshot changed. Call {@code table.refresh()} first.
+	 */
+	private List<FileScanTask> currentFiles() {
+		Snapshot snapshot = table.currentSnapshot();
+		if (snapshot == null) {
+			return List.of();
+		}
+		if (snapshot.snapshotId() != plannedSnapshotId) {
+			List<FileScanTask> tasks = new ArrayList<>();
+			try (CloseableIterable<FileScanTask> planned = table.newScan().useSnapshot(snapshot.snapshotId())
+					.includeColumnStats(FETCH_STATS_COLUMNS).planFiles()) {
+				planned.forEach(tasks::add);
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+			plannedFiles = List.copyOf(tasks);
+			plannedSnapshotId = snapshot.snapshotId();
+		}
+		return plannedFiles;
+	}
+
 	private synchronized IExtendedIterator<KvinRecord> fetchRows(List<Long> items, List<Long> properties, Long context, Long end, Long begin, long limit) {
 		if (items.isEmpty()) {
 			return NiceIterator.emptyIterator();
@@ -642,17 +673,24 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 		table.refresh();
 
+		// same pruning as a filtered scan: partition values, then column statistics
+		Expression fileFilter = filter;
+		InclusiveMetricsEvaluator metrics = new InclusiveMetricsEvaluator(table.schema(), fileFilter);
+		Map<Integer, Evaluator> partitionFilters = new HashMap<>();
 		List<PlannedFile> files = new ArrayList<>();
-		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter)
-				.includeColumnStats(FETCH_STATS_COLUMNS).planFiles()) {
-			for (FileScanTask task : tasks) {
-				if (!task.deletes().isEmpty()) {
-					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
-				}
-				files.add(new PlannedFile(task, lowerBound(task.file(), itemIds, contextId, propertyIds, end)));
+		for (FileScanTask task : currentFiles()) {
+			DataFile file = task.file();
+			Evaluator partitionFilter = partitionFilters.computeIfAbsent(file.specId(), specId -> {
+				PartitionSpec spec = table.specs().get(specId);
+				return new Evaluator(spec.partitionType(), Projections.inclusive(spec).project(fileFilter));
+			});
+			if (!partitionFilter.eval(file.partition()) || !metrics.eval(file)) {
+				continue;
 			}
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			if (!task.deletes().isEmpty()) {
+				throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
+			}
+			files.add(new PlannedFile(task, lowerBound(file, itemIds, contextId, propertyIds, end)));
 		}
 		// Files are opened lazily in bound order: a file is opened only once its bound
 		// is not after the merge head, so it cannot hold a smaller unread matching row.
@@ -992,12 +1030,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 		return new KvinRow((Long) record.get(0), (Long) record.get(1), (Long) record.get(2), (Long) record.get(3), (Integer) record.get(4), value);
 	}
 
-	private record KvinRow(long itemId, long contextId, long propertyId, long time, int seqNr, Object value) {
-	}
-
 	private static final class RowCursor implements AutoCloseable {
-		final CloseableIterable<org.apache.iceberg.data.Record> rows;
-		final CloseableIterator<org.apache.iceberg.data.Record> iterator;
+		final SeriesSkippingReader rows;
+		final CloseableIterator<KvinRow> iterator;
 		KvinRow row;
 
 		RowCursor(FileScanTask task, Expression filter, Cache<String, ParquetMetadata> footers,
@@ -1016,9 +1051,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 		}
 
 		void skipThrough(long item, long context, long property) {
-			if (rows instanceof SeriesSkippingReader reader) {
-				reader.skipThrough(item, context, property);
-			}
+			rows.skipThrough(item, context, property);
 		}
 
 		boolean advance() {
@@ -1026,7 +1059,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 				return false;
 			}
 
-			row = toKvinRow(iterator.next());
+			row = iterator.next();
 			return true;
 		}
 
