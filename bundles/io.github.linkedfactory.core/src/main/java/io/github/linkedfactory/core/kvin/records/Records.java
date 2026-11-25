@@ -1,4 +1,4 @@
-package io.github.linkedfactory.core.kvin.parquet;
+package io.github.linkedfactory.core.kvin.records;
 
 import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.kvin.leveldb.EntryType;

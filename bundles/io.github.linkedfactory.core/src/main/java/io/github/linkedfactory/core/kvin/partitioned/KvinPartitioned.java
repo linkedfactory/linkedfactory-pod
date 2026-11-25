@@ -7,8 +7,6 @@ import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.iceberg.KvinIceberg;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDbArchiver;
-import io.github.linkedfactory.core.kvin.parquet.Compactor;
-import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
@@ -67,7 +65,7 @@ public class KvinPartitioned implements Kvin {
 	 * so overriding methods must not use instance fields of the subclass.
 	 */
 	protected Kvin createArchiveStore(File archiveStorePath, Duration retentionPeriod) {
-		return new KvinParquet(archiveStorePath.toString(), retentionPeriod);
+		return new KvinIceberg(archiveStorePath.toString(), retentionPeriod);
 	}
 
 	Lock writeLock() {
@@ -108,25 +106,16 @@ public class KvinPartitioned implements Kvin {
 		try {
 			new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
 			try {
-				if (archiveStore instanceof KvinParquet parquetStore) {
-					// other archive stores compact on their own
-					new Compactor(parquetStore).execute();
-					parquetStore.cleanUp();
-				}
-				try {
-					writeLock = writeLock();
-					this.hotStoreArchive.close();
-					this.hotStoreArchive = null;
-					FileUtils.deleteDirectory(this.currentStoreArchivePath);
-				} catch (IOException e) {
-					log.error("Deleting hot store archive failed", e);
-				} finally {
-					if (writeLock != null) {
-						writeLock.release();
-					}
-				}
+				writeLock = writeLock();
+				this.hotStoreArchive.close();
+				this.hotStoreArchive = null;
+				FileUtils.deleteDirectory(this.currentStoreArchivePath);
 			} catch (IOException e) {
-				log.error("Compacting archive store failed", e);
+				log.error("Deleting hot store archive failed", e);
+			} finally {
+				if (writeLock != null) {
+					writeLock.release();
+				}
 			}
 		} catch (Exception e) {
 			log.error("Archiving data to archive store failed", e);

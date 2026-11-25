@@ -8,7 +8,6 @@ public class ConfigModule extends KommaModule {
 		addConcept(IKvinFactory.class, "plugin://io.github.linkedfactory.service/data/Kvin");
 		addBehaviour(KvinLevelDbFactory.class);
 		addBehaviour(KvinPartitionedFactory.class);
-		addBehaviour(KvinParquetFactory.class);
 		addBehaviour(KvinIcebergFactory.class);
 	}
 }

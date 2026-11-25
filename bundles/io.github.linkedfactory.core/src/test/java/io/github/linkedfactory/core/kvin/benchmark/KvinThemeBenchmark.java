@@ -4,7 +4,6 @@ import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.iceberg.KvinIceberg;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
-import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
 import io.github.linkedfactory.core.rdf4j.common.BaseFederatedServiceResolver;
 import io.github.linkedfactory.core.rdf4j.kvin.KvinFederatedService;
 import net.enilink.commons.iterator.IExtendedIterator;
@@ -58,12 +57,6 @@ public class KvinThemeBenchmark {
 			@Override
 			Kvin open(Path dir) {
 				return new KvinLevelDb(dir.toFile());
-			}
-		},
-		parquet {
-			@Override
-			Kvin open(Path dir) {
-				return new KvinParquet(dir.toAbsolutePath() + "/");
 			}
 		},
 		iceberg {

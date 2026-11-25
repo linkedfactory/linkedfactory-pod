@@ -6,7 +6,7 @@ import io.github.linkedfactory.core.kvin.records.KvinRecordStore;
 import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
-import io.github.linkedfactory.core.kvin.parquet.Records;
+import io.github.linkedfactory.core.kvin.records.Records;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
@@ -191,7 +191,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 				}
 			} else {
 				if (Files.exists(root.resolve("metadata"))) {
-					throw new IllegalArgumentException("Existing KvinParquet archive cannot be opened as KvinIceberg: " + root);
+					// archives of the removed KvinParquet store keep their metadata in this folder
+					throw new IllegalArgumentException("Directory contains an unsupported Parquet archive: " + root);
 				}
 
 				table = tables.create(SCHEMA, requestedSpec == null ? PartitionSpec.unpartitioned() : requestedSpec,

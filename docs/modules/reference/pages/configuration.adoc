@@ -149,12 +149,49 @@ Pod does not open a store that was created by an earlier version without this re
 Pod does not convert such stores.
 To start with an empty store, set a new `dirName` or remove the old directory.
 
+=== Partitioned storage
+
+A partitioned store writes new values to LevelDB and moves them to an Iceberg archive at a fixed interval:
+
+[source,turtle]
+----
+<store> [
+    a <KvinPartitioned> ;
+    <dirName> "linkedfactory-partitioned" ;
+    <archiveInterval> "P7D" ;
+    <retentionPeriod> "P30D"
+] .
+----
+
+[cols="1,3",options="header"]
+|===
+|Setting |Meaning
+
+|`dirName`
+|Store directory. Default: `linkedfactory-partition`.
+
+|`archiveInterval`
+|Time between two archival runs. The first run starts when Pod starts. Without this setting, values stay in LevelDB.
+
+|`retentionPeriod`
+|Optional. After each archival run, archived values that are older than this period are removed.
+|===
+
+Both durations are ISO 8601 durations such as `P7D`, or a number of milliseconds.
+New values go to `current/`; the archive in `archive/` is an Iceberg store as described in <<Iceberg storage>>.
+Queries read both.
+Deletes only change values that are not archived yet.
+
+Pod does not open a store whose `archive/` directory holds a Parquet archive of an earlier Pod version; it fails with an error that names the directory.
+Pod does not convert such archives.
+To start with an empty archive, set a new `dirName` or remove the old directory.
+
 === Iceberg storage
 
 To use Iceberg instead of the default value store, configure `<store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ]`.
 KvinIceberg maintains a value table in `iceberg/` and separate URI-ID tables in `iceberg-ids/items/`, `iceberg-ids/properties/`, and `iceberg-ids/contexts/`, with bounded in-memory lookup caches.
 Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots and use a value-skipping Parquet reader.
-Use a new store directory rather than pointing it at an existing KvinParquet archive.
+KvinIceberg does not open a directory that holds a Parquet archive of an earlier Pod version.
 The service configuration of `KvinIceberg` has no retention period.
 
 The standalone `IcebergRecordStore` implements `KvinRecordStore` and operates exclusively on numeric `KvinRecord` identifiers, without creating or reading URI-ID tables.

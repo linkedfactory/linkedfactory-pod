@@ -4,7 +4,7 @@ import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.Record;
 import io.github.linkedfactory.core.kvin.ids.IdKind;
 import io.github.linkedfactory.core.kvin.ids.IdStore;
-import io.github.linkedfactory.core.kvin.parquet.Records;
+import io.github.linkedfactory.core.kvin.records.Records;
 import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import io.github.linkedfactory.core.kvin.records.KvinRecordStore;
 import net.enilink.komma.core.URI;
@@ -330,5 +330,12 @@ public class IcebergRecordStoreTest {
 		// only the snapshot that is not the head of a branch expires
 		assertEquals(1, store.expireSnapshotsReplacedBefore(afterDelete + 1));
 		oldFiles.forEach(file -> assertTrue(Files.exists(localPath(file))));
+	}
+
+	@Test
+	public void rejectsDirectoriesWithAParquetArchive() throws Exception {
+		Path archive = directory.resolve("parquet-archive");
+		Files.createDirectories(archive.resolve("metadata"));
+		assertThrows(IllegalArgumentException.class, () -> new IcebergRecordStore(archive.toString()));
 	}
 }

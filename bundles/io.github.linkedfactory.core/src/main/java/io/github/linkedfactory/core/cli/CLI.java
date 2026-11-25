@@ -5,7 +5,6 @@ import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.http.KvinHttp;
 import io.github.linkedfactory.core.kvin.iceberg.KvinIceberg;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
-import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
 import io.github.linkedfactory.core.kvin.util.JsonFormatWriter;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
@@ -62,11 +61,6 @@ public class CLI {
 				Files.createDirectories(path);
 			}
 			return new KvinIceberg(path.toString());
-		} else if ("parquet".equals(type) || Files.isDirectory(path.resolve("metadata"))) {
-			if (!Files.isDirectory(path)) {
-				Files.createDirectories(path);
-			}
-			return new KvinParquet(path.toString());
 		} else {
 			throw new IllegalArgumentException("Invalid store location: " + storeLocation);
 		}
@@ -108,7 +102,7 @@ public class CLI {
 	static class Copy extends FetchBase implements Runnable {
 		@Parameters(paramLabel = "<sink>", description = "location of the sink KVIN store")
 		protected String sinkLocation;
-		@Option(names = {"--sink-type"}, description = "type of the sink KVIN store (if newly created): leveldb, parquet, iceberg")
+		@Option(names = {"--sink-type"}, description = "type of the sink KVIN store (if newly created): leveldb, iceberg")
 		String sinkType;
 
 		@Override

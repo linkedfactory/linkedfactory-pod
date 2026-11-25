@@ -2,7 +2,6 @@ package io.github.linkedfactory.core.kvin.iceberg;
 
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
-import io.github.linkedfactory.core.kvin.parquet.KvinParquet;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
@@ -22,7 +21,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Point-query latency of KvinIceberg, with KvinParquet as a reference.
+ * Point-query latency of KvinIceberg.
  *
  * <p>Data is ingested like a live system: each put covers one time window for
  * all series, so the Iceberg table consists of one compacted file plus several
@@ -43,9 +42,6 @@ public class KvinIcebergPointQueryBenchmark {
 	static final long START = 1_700_000_000_000L;
 	static final long END = START + (long) (WINDOWS * VALUES_PER_WINDOW - 1) * STEP;
 
-	@Param({"iceberg", "parquet"})
-	public String storeType;
-
 	File directory;
 	Kvin store;
 	URI[] items;
@@ -61,8 +57,8 @@ public class KvinIcebergPointQueryBenchmark {
 
 	@Setup(Level.Trial)
 	public void setup() throws IOException {
-		directory = Files.createTempDirectory("kvin-point-query-" + storeType).toFile();
-		store = "iceberg".equals(storeType) ? new KvinIceberg(directory.getPath()) : new KvinParquet(directory.getPath());
+		directory = Files.createTempDirectory("kvin-point-query").toFile();
+		store = new KvinIceberg(directory.getPath());
 		items = new URI[ITEMS];
 		for (int i = 0; i < ITEMS; i++) {
 			items[i] = URIs.createURI("http://example.org/item/" + i);

@@ -65,7 +65,7 @@ public class KvinPartitionedTest {
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673823600000L).generate());
 
 		assertTrue(kvinPartitioned.archiveStorePath.listFiles().length > 0); // main folder
-		assertEquals(2, new File(kvinPartitioned.archiveStorePath, "2023").listFiles(f -> f.isDirectory()).length); // folder for year 2023
+		assertTrue(new File(kvinPartitioned.archiveStorePath, "iceberg/metadata").isDirectory()); // Iceberg value table
 
 		storeIterator = kvinPartitioned.hotStore.fetchAll();
 		recordCount = 0;
