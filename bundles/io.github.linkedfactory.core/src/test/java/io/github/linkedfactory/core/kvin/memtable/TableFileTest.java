@@ -15,6 +15,7 @@ import java.util.List;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class TableFileTest {
 	private File tempDir;
@@ -76,6 +77,45 @@ public class TableFileTest {
 
 			assertEquals(1999L, records.get(1).time());
 			assertArrayEquals("persisted-2".getBytes(StandardCharsets.UTF_8), (byte[]) records.get(1).value());
+		}
+	}
+
+	@Test
+	public void shouldDeleteContext() throws IOException {
+		byte[] value = "v".getBytes(StandardCharsets.UTF_8);
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			tableFile.put(
+					new KvinRecord(2L, 1L, 3L, 1000L, 0, value),
+					new KvinRecord(2L, 1L, 3L, 1001L, 0, value),
+					new KvinRecord(2L, 1L, 4L, 1000L, 0, value),
+					new KvinRecord(5L, 1L, 3L, 1000L, 0, value),
+					new KvinRecord(2L, 7L, 3L, 1000L, 0, value),
+					new KvinRecord(1L, 1L, 3L, 1000L, 0, value),
+					new KvinRecord(3L, 1L, 3L, 1000L, 0, value)
+			);
+			// sort the offsets of one series, the deleted count includes sorted and unsorted offsets
+			assertEquals(2, tableFile.fetch(1L, 3L, 2L, 10L).toList().size());
+			tableFile.put(new KvinRecord(2L, 1L, 3L, 1002L, 0, value));
+
+			assertEquals(5, tableFile.delete(2L));
+			assertEquals(List.of(), tableFile.fetch(1L, 3L, 2L, 10L).toList());
+			assertEquals(List.of(), tableFile.fetch(7L, 3L, 2L, 10L).toList());
+			assertEquals(List.of(), tableFile.properties(1L, 2L).toList());
+
+			// other contexts, including the neighbouring IDs, are kept
+			assertEquals(1, tableFile.fetch(1L, 3L, 1L, 10L).toList().size());
+			assertEquals(1, tableFile.fetch(1L, 3L, 3L, 10L).toList().size());
+			assertEquals(1, tableFile.fetch(1L, 3L, 5L, 10L).toList().size());
+
+			assertEquals(0, tableFile.delete(2L));
+			assertEquals(0, tableFile.delete(9L));
+
+			// the context can be used again
+			tableFile.put(new KvinRecord(2L, 1L, 3L, 2000L, 0, value));
+			List<KvinRecord> records = tableFile.fetch(1L, 3L, 2L, 10L).toList();
+			assertEquals(1, records.size());
+			assertEquals(2000L, records.get(0).time());
+			assertTrue(tableFile.properties(1L, 2L).toList().contains(3L));
 		}
 	}
 }

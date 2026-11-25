@@ -397,6 +397,17 @@ public class KvinMemTable implements Kvin {
 		return false;
 	}
 
+	/**
+	 * Deletes the values of the context in the current table file. Like the other
+	 * deletes of {@link TableFile}, this only changes the in-memory index.
+	 */
+	@Override
+	public long delete(URI context) {
+		long contextId = toId(context == null ? DEFAULT_CONTEXT : context, EntryType.ContextToId, false, null);
+		TableFile tableFile = currentTableFile;
+		return contextId < 0 || tableFile == null ? 0 : tableFile.delete(contextId);
+	}
+
 	@Override
 	public IExtendedIterator<URI> descendants(URI item, URI context) {
 		return null;
@@ -415,7 +426,9 @@ public class KvinMemTable implements Kvin {
 	@Override
 	public void close() {
 		try {
-			currentTableFile.close();
+			if (currentTableFile != null) {
+				currentTableFile.close();
+			}
 			ids.close();
 			executor.shutdown();
 		} catch (IOException e) {

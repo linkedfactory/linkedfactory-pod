@@ -25,7 +25,8 @@ public class TableFile implements KvinRecordStore {
 	RandomAccessFile rafile;
 	FileChannel channel;
 	MappedByteBuffer buffer;
-	Map<ItemWithContext, List<ItemData>> items = new ConcurrentSkipListMap<>();
+	// sorted by context first, so that all items of a context form one range
+	final ConcurrentSkipListMap<ItemWithContext, List<ItemData>> items = new ConcurrentSkipListMap<>();
 
 	boolean hasPreviousIds = false;
 	long previousItemId;
@@ -177,6 +178,28 @@ public class TableFile implements KvinRecordStore {
 		return items.remove(new ItemWithContext(itemId, contextOrDefault(contextId))) != null;
 	}
 
+	/**
+	 * Deletes all records of the context by removing its range of items from the index.
+	 */
+	@Override
+	public long delete(Long contextId) {
+		long ctx = contextOrDefault(contextId);
+		var range = items.subMap(new ItemWithContext(Long.MIN_VALUE, ctx), true,
+				new ItemWithContext(Long.MAX_VALUE, ctx), true);
+		long deleted = 0;
+		for (var entry : range.entrySet()) {
+			List<ItemData> itemDataList = entry.getValue();
+			synchronized (itemDataList) {
+				if (items.remove(entry.getKey(), itemDataList)) {
+					for (ItemData itemData : itemDataList) {
+						deleted += size(itemData);
+					}
+				}
+			}
+		}
+		return deleted;
+	}
+
 	@Override
 	public IExtendedIterator<Long> properties(long itemId, Long contextId) {
 		var itemDataList = items.get(new ItemWithContext(itemId, contextOrDefault(contextId)));
@@ -279,6 +302,13 @@ public class TableFile implements KvinRecordStore {
 				itemData.sorted = merged;
 			}
 			return itemData.sorted != null ? itemData.sorted : OffsetList.EMPTY;
+		}
+	}
+
+	long size(ItemData itemData) {
+		synchronized (itemData.unsorted) {
+			OffsetList sorted = itemData.sorted;
+			return (sorted != null ? sorted.size : 0) + itemData.unsorted.size;
 		}
 	}
 
@@ -493,8 +523,8 @@ public class TableFile implements KvinRecordStore {
 
 		@Override
 		public int compareTo(ItemWithContext o) {
-			int c = Long.compare(itemId, o.itemId);
-			return c != 0 ? c : Long.compare(contextId, o.contextId);
+			int c = Long.compare(contextId, o.contextId);
+			return c != 0 ? c : Long.compare(itemId, o.itemId);
 		}
 
 		@Override
