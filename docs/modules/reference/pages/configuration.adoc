@@ -294,8 +294,8 @@ Set them with Iceberg's `Table.updateProperties()`; each write reads the current
 |Parquet page size of data files. Reads skip pages that cannot contain the requested values.
 
 |`kvin.compaction.min-files`
-|32
-|Number of small files in a partition that starts compaction after a write. Must be at least 2.
+|8
+|Number of files of one tier in a partition that are merged together. Also the factor between tiers. Must be at least 2.
 
 |`write.target-file-size-bytes`
 |128 MB
@@ -319,11 +319,18 @@ Each batch is physically sorted in that order, and new data files record its sor
 Opening an existing store updates the table's default sort order if needed, without rewriting or relabeling old files.
 Sorted data and column statistics support scan pruning; sort-order metadata alone does not guarantee faster searches or globally ordered query results.
 
-After successful appends, automatic compaction merge-sorts small value files when their count within a partition and spec ID reaches the Iceberg table property `kvin.compaction.min-files` (default 32, minimum 2).
+After each successful append, the store starts a tiered compaction in a background thread.
+Only one compaction runs at a time per store; writes and reads do not wait for it.
+A value file's tier is `floor(log~F~(record count))`, where F is the Iceberg table property `kvin.compaction.min-files` (default 8, minimum 2).
+When a partition and spec ID has F files of one tier, compaction merge-sorts them into files of a higher tier, starting with the lowest such tier, and repeats until no tier has F files.
+Each value is therefore rewritten at most once per tier.
 Files smaller than half `write.target-file-size-bytes` are eligible; output files roll at that target (128 MiB if unset).
-Each pass merges at most 128 files per partition/spec group, or the configured minimum if larger, without merging different partitions or relabeling historical specs.
-Compaction runs synchronously, adding latency to the triggering write, and preserves duplicates, series-start markers, and files referenced by existing readers and snapshots.
-Compaction failures are logged and propagated, but the preceding append remains committed; an uncertain compaction commit retains its output files rather than risking data loss.
+Each merge takes at most 128 files, or F if larger, without merging different partitions or relabeling historical specs.
+Compaction preserves duplicates, series-start markers, and files referenced by existing readers and snapshots.
+Background compaction failures are logged; the appended data remains committed, and the next append starts another compaction.
+`IcebergRecordStore.compact()` runs a compaction in the compaction thread, waits for it, and throws its failures.
+A compaction that conflicts with a concurrent delete fails and removes its output files; an uncertain compaction commit retains its output files rather than risking data loss.
+Closing the store waits for a running compaction and skips queued ones.
 
 Every output file regenerates `first=true` for the first row of each item/context/property series, including a series continued from the preceding output file, so property discovery remains correct after compaction.
 

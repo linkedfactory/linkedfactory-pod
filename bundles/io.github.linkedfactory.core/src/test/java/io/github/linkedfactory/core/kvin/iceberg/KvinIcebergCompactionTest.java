@@ -34,6 +34,9 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
@@ -68,8 +71,16 @@ public class KvinIcebergCompactionTest {
 		return new HadoopTables(new Configuration()).load(directory.resolve("iceberg").toString());
 	}
 
-	private Table spyStoreTable() throws Exception {
-		var field = IcebergRecordStore.class.getDeclaredField("table");
+	private IcebergRecordStore recordStore() {
+		return (IcebergRecordStore) store.getRecordStore();
+	}
+
+	private void awaitCompaction() {
+		recordStore().awaitCompaction();
+	}
+
+	private Table spyCompactionTable() throws Exception {
+		var field = IcebergRecordStore.class.getDeclaredField("compactionTable");
 		field.setAccessible(true);
 		Table spy = spy((Table) field.get(store.getRecordStore()));
 		field.set(store.getRecordStore(), spy);
@@ -168,9 +179,11 @@ public class KvinIcebergCompactionTest {
 		}
 		store.put(batches.get(0));
 		store.put(batches.get(1));
+		awaitCompaction();
 		List<DataFile> original = files();
 		assertEquals("No rewrite before threshold", 2, original.size());
 		store.put(batches.get(2));
+		awaitCompaction();
 		List<DataFile> compacted = files();
 		assertEquals(1, compacted.size());
 		List<GenericRecord> expected = new ArrayList<>();
@@ -215,10 +228,14 @@ public class KvinIcebergCompactionTest {
 
 	@Test
 	public void defaultThresholdDoesNotCompactSmallNumberOfFiles() throws Exception {
-		for (int i = 0; i < 3; i++) {
+		for (int i = 0; i < 7; i++) {
 			store.put(new KvinTuple(null, item, property, i, 0, i));
 		}
-		assertEquals(3, files().size());
+		awaitCompaction();
+		assertEquals(7, files().size());
+		store.put(new KvinTuple(null, item, property, 7, 0, 7));
+		awaitCompaction();
+		assertEquals("The default merges eight files of one tier", 1, files().size());
 	}
 
 	@Test
@@ -228,11 +245,13 @@ public class KvinIcebergCompactionTest {
 				new KvinTuple(null, item, property, 1, 0, "one"));
 		store.put(new KvinTuple(null, item, property, 4, 0, "four"),
 				new KvinTuple(null, item, property, 2, 0, "two"));
+		awaitCompaction();
 		List<DataFile> pinnedFiles = files();
 		try (IExtendedIterator<KvinTuple> pinned = store.fetch(item, property, null, 0)) {
 			assertEquals(5L, pinned.next().time);
 			store.put(new KvinTuple(null, item, property, 6, 0, "six"),
 					new KvinTuple(null, item, property, 3, 0, "three"));
+			awaitCompaction();
 			assertEquals(1, files().size());
 			for (long expected : new long[]{4, 2, 1}) {
 				assertTrue(pinned.hasNext());
@@ -265,15 +284,19 @@ public class KvinIcebergCompactionTest {
 			}
 			store.put(batch);
 		}
+		awaitCompaction();
 		List<GenericRecord> expected = allRows();
 		long maxSize = files().stream().mapToLong(DataFile::fileSizeInBytes).max().orElseThrow();
 		long targetSize = maxSize * 2 + 1024;
 		table().updateProperties().set("kvin.compaction.min-files", "4")
 				.set(TableProperties.WRITE_TARGET_FILE_SIZE_BYTES, Long.toString(targetSize)).commit();
 		store.put(new KvinTuple(null, item, property, 1024, 0, new byte[]{1, 2, 3}));
+		awaitCompaction();
 		List<DataFile> outputs = files();
-		assertTrue("Target size must roll output files", outputs.size() > 1);
+		assertTrue("Target size must roll output files", outputs.size() > 2);
 		assertTrue("Compaction must reduce file fanout", outputs.size() < 5);
+		assertTrue("The single new record stays in its own tier",
+				outputs.stream().anyMatch(file -> file.recordCount() == 1));
 		assertSortedAndMarked(outputs);
 		for (DataFile output : outputs) {
 			List<GenericRecord> outputRows = rows(output);
@@ -301,6 +324,7 @@ public class KvinIcebergCompactionTest {
 		}
 		assertFalse(largeFiles.isEmpty());
 		store.put(new KvinTuple(null, item, property, 1025, 0, "tail"));
+		awaitCompaction();
 		Set<String> remainingFiles = new HashSet<>();
 		for (DataFile file : files()) {
 			remainingFiles.add(file.location());
@@ -343,7 +367,10 @@ public class KvinIcebergCompactionTest {
 	@Test
 	public void compactionFailureDoesNotRollBackCommittedAppend() throws Exception {
 		table().updateProperties().set("kvin.compaction.min-files", "invalid").commit();
-		assertThrows(NumberFormatException.class, () -> store.put(new KvinTuple(null, item, property, 1, 0, "committed")));
+		// the background compaction fails and logs the failure, the write succeeds
+		store.put(new KvinTuple(null, item, property, 1, 0, "committed"));
+		awaitCompaction();
+		assertThrows(NumberFormatException.class, () -> recordStore().compact());
 		assertEquals(1, files().size());
 		store.close();
 		store = new KvinIceberg(directory.toString());
@@ -355,11 +382,12 @@ public class KvinIcebergCompactionTest {
 
 	@Test
 	public void concurrentDeleteConflictsAndCleansOnlyUncommittedCompactionFiles() throws Exception {
-		table().updateProperties().set("kvin.compaction.min-files", "3").commit();
-		store.put(new KvinTuple(null, item, property, 1, 0, "deleted"),
-				new KvinTuple(null, item, property, 2, 0, "retained"));
+		store.put(new KvinTuple(null, item, property, 1, 0, "deleted"));
+		store.put(new KvinTuple(null, item, property, 2, 0, "retained"));
 		store.put(new KvinTuple(null, item, property, 3, 0, "retained"));
-		Table table = spyStoreTable();
+		awaitCompaction();
+		table().updateProperties().set("kvin.compaction.min-files", "3").commit();
+		Table table = spyCompactionTable();
 		RewriteFiles rewrite = spy(table.newRewrite());
 		doReturn(rewrite).when(table).newRewrite();
 		Set<DataFile> outputs = new HashSet<>();
@@ -373,14 +401,12 @@ public class KvinIcebergCompactionTest {
 			}
 			return invocation.callRealMethod();
 		}).when(rewrite).commit();
-		assertThrows(ValidationException.class,
-				() -> store.put(new KvinTuple(null, item, property, 4, 0, "appended")));
+		assertThrows(ValidationException.class, () -> recordStore().compact());
 		assertFalse(outputs.isEmpty());
 		for (DataFile output : outputs) {
 			assertFalse("Only failed rewrite outputs are removed", Files.exists(Path.of(output.location())));
 		}
 		try (IExtendedIterator<KvinTuple> rows = store.fetch(item, property, null, 0)) {
-			assertEquals("appended", rows.next().value);
 			assertEquals(3L, rows.next().time);
 			assertEquals(2L, rows.next().time);
 			assertFalse(rows.hasNext());
@@ -389,17 +415,18 @@ public class KvinIcebergCompactionTest {
 
 	@Test
 	public void uncertainCompactionCommitNeverRemovesPotentiallyCommittedFiles() throws Exception {
-		table().updateProperties().set("kvin.compaction.min-files", "2").commit();
 		store.put(new KvinTuple(null, item, property, 1, 0, "first"));
-		Table table = spyStoreTable();
+		store.put(new KvinTuple(null, item, property, 2, 0, "second"));
+		awaitCompaction();
+		table().updateProperties().set("kvin.compaction.min-files", "2").commit();
+		Table table = spyCompactionTable();
 		RewriteFiles rewrite = spy(table.newRewrite());
 		doReturn(rewrite).when(table).newRewrite();
 		doAnswer(invocation -> {
 			invocation.callRealMethod();
 			throw new CommitStateUnknownException(new IllegalStateException("Lost commit response"));
 		}).when(rewrite).commit();
-		assertThrows(CommitStateUnknownException.class,
-				() -> store.put(new KvinTuple(null, item, property, 2, 0, "second")));
+		assertThrows(CommitStateUnknownException.class, () -> recordStore().compact());
 		assertEquals(1, files().size());
 		assertEquals(2, allRows().size());
 		store.close();
@@ -409,5 +436,120 @@ public class KvinIcebergCompactionTest {
 			assertEquals("first", rows.next().value);
 			assertFalse(rows.hasNext());
 		}
+	}
+
+	@Test
+	public void tierIsTheFloorOfTheLogarithmOfTheRecordCount() {
+		assertEquals(0, IcebergRecordStore.tier(0, 8));
+		assertEquals(0, IcebergRecordStore.tier(7, 8));
+		assertEquals(1, IcebergRecordStore.tier(8, 8));
+		assertEquals(1, IcebergRecordStore.tier(63, 8));
+		assertEquals(2, IcebergRecordStore.tier(64, 8));
+		assertEquals(62, IcebergRecordStore.tier(Long.MAX_VALUE, 2));
+	}
+
+	@Test
+	public void mergesOnlyFilesOfTheSameTier() throws Exception {
+		table().updateProperties().set("kvin.compaction.min-files", "2").commit();
+		List<KvinTuple> large = new ArrayList<>();
+		for (int time = 0; time < 16; time++) {
+			large.add(new KvinTuple(null, item, property, time, 0, (long) time));
+		}
+		// 16 records: tier 4
+		store.put(large);
+		// 1 record: tier 0, alone in its tier
+		store.put(new KvinTuple(null, item, property, 100, 0, 100L));
+		awaitCompaction();
+		assertEquals(2, files().size());
+		String largeFile = files().stream().filter(file -> file.recordCount() == 16).findFirst().orElseThrow().location();
+		// a second tier-0 file completes tier 0, the merged file has 2 records: tier 1
+		store.put(new KvinTuple(null, item, property, 101, 0, 101L));
+		awaitCompaction();
+		List<DataFile> files = files();
+		assertEquals(2, files.size());
+		assertTrue("Files of other tiers are not rewritten",
+				files.stream().anyMatch(file -> file.location().equals(largeFile)));
+		assertTrue(files.stream().anyMatch(file -> file.recordCount() == 2));
+		try (IExtendedIterator<KvinTuple> rows = store.fetch(item, property, null, 0)) {
+			assertEquals(18, rows.toList().size());
+		}
+	}
+
+	@Test
+	public void cascadesMergesThroughHigherTiers() throws Exception {
+		table().updateProperties().set("kvin.compaction.min-files", "2").commit();
+		// with a fan-in of 2, single-record writes merge into files of 2, 4 and 8 records
+		for (int time = 0; time < 8; time++) {
+			store.put(new KvinTuple(null, item, property, time, 0, (long) time));
+			awaitCompaction();
+		}
+		List<DataFile> files = files();
+		assertEquals(1, files.size());
+		assertEquals(8, files.getFirst().recordCount());
+		assertSortedAndMarked(files);
+	}
+
+	@Test
+	public void writesDoNotWaitForARunningCompaction() throws Exception {
+		table().updateProperties().set("kvin.compaction.min-files", "2").commit();
+		store.put(new KvinTuple(null, item, property, 1, 0, "first"));
+		awaitCompaction();
+		Table table = spyCompactionTable();
+		CountDownLatch started = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		Set<String> threads = java.util.concurrent.ConcurrentHashMap.newKeySet();
+		AtomicBoolean blocked = new AtomicBoolean();
+		// blocks the first compaction while it plans, before it merges and commits
+		doAnswer(newScan -> {
+			threads.add(Thread.currentThread().getName());
+			if (blocked.compareAndSet(false, true)) {
+				started.countDown();
+				assertTrue(release.await(30, TimeUnit.SECONDS));
+			}
+			return newScan.callRealMethod();
+		}).when(table).newScan();
+		store.put(new KvinTuple(null, item, property, 2, 0, "second"));
+		assertTrue(started.await(30, TimeUnit.SECONDS));
+		// writes and reads proceed while the compaction is running
+		store.put(new KvinTuple(null, item, property, 3, 0, "third"));
+		store.put(new KvinTuple(null, item, property, 4, 0, "fourth"));
+		try (IExtendedIterator<KvinTuple> rows = store.fetch(item, property, null, 0)) {
+			assertEquals(4, rows.toList().size());
+		}
+		release.countDown();
+		awaitCompaction();
+		assertEquals("All compactions run in one thread", 1, threads.size());
+		assertTrue(threads.iterator().next().startsWith("kvin-iceberg-compaction-"));
+		assertEquals("Four single records merge into one file", 1, files().size());
+		try (IExtendedIterator<KvinTuple> rows = store.fetch(item, property, null, 0)) {
+			assertEquals(List.of(4L, 3L, 2L, 1L), rows.toList().stream().map(tuple -> tuple.time).toList());
+		}
+	}
+
+	@Test
+	public void closeWaitsForARunningCompaction() throws Exception {
+		table().updateProperties().set("kvin.compaction.min-files", "2").commit();
+		store.put(new KvinTuple(null, item, property, 1, 0, "first"));
+		awaitCompaction();
+		Table table = spyCompactionTable();
+		CountDownLatch started = new CountDownLatch(1);
+		AtomicBoolean committed = new AtomicBoolean();
+		doAnswer(newRewrite -> {
+			RewriteFiles rewrite = spy((RewriteFiles) newRewrite.callRealMethod());
+			doAnswer(commit -> {
+				started.countDown();
+				Thread.sleep(500);
+				Object result = commit.callRealMethod();
+				committed.set(true);
+				return result;
+			}).when(rewrite).commit();
+			return rewrite;
+		}).when(table).newRewrite();
+		store.put(new KvinTuple(null, item, property, 2, 0, "second"));
+		assertTrue(started.await(30, TimeUnit.SECONDS));
+		store.close();
+		store = null;
+		assertTrue("Close returns after the running compaction committed", committed.get());
+		assertEquals(1, files().size());
 	}
 }

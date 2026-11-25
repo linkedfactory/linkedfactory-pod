@@ -80,7 +80,15 @@ import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -94,12 +102,15 @@ import java.util.function.Predicate;
  * therefore deleted tuples are immediately absent from subsequently planned
  * fetch scans.</p>
  *
- * <p>After a successful append, automatic sorted compaction rewrites small files
- * when {@code kvin.compaction.min-files} (default 32, minimum 2) is reached.
- * Files smaller than half {@code write.target-file-size-bytes} (default 128 MiB)
- * are eligible; merged output rolls at the target size. Existing snapshots and
- * readers retain their original files. Compaction failures are logged and thrown
- * to the caller, but the preceding append remains committed.</p>
+ * <p>After a successful append, tiered compaction runs in a background thread, one
+ * compaction at a time per store. A file's tier is {@code floor(log_F(recordCount))},
+ * where F is {@code kvin.compaction.min-files} (default 8, minimum 2). When a partition
+ * has F files of one tier, they are merge-sorted into files of a higher tier, so each
+ * record is rewritten at most once per tier. Files smaller than half
+ * {@code write.target-file-size-bytes} (default 128 MiB) are eligible; merged output
+ * rolls at the target size. Existing snapshots and readers retain their original
+ * files. Background compaction failures are logged; {@link #compact()} runs a
+ * compaction and throws its failures. The preceding append always remains committed.</p>
  */
 public class IcebergRecordStore implements KvinRecordStore {
 	private static final Logger log = LoggerFactory.getLogger(IcebergRecordStore.class);
@@ -110,7 +121,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 	static final int DEFAULT_WRITE_BATCH_RECORDS = 131_072;
 	private static final int MAX_COMMIT_RETRIES = 5;
 	private static final String COMPACTION_MIN_FILES = "kvin.compaction.min-files";
-	private static final int DEFAULT_COMPACTION_MIN_FILES = 32;
+	private static final int DEFAULT_COMPACTION_MIN_FILES = 8;
 	private static final long DEFAULT_COMPACTION_TARGET_SIZE = 128L * 1024 * 1024;
 	private static final int COMPACTION_MAX_INPUT_FILES = 128;
 	private static final int FOOTER_CACHE_SIZE = 4096;
@@ -133,6 +144,18 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 	private final Path root;
 	private final Table table;
+	// A separate table instance, so that compaction neither shares state with nor blocks writes and reads.
+	private final Table compactionTable;
+	// Runs one compaction at a time; requests while one is queued are coalesced.
+	private final ExecutorService compactor;
+	private final AtomicBoolean compactionScheduled = new AtomicBoolean();
+	/*
+	 * Serializes the commits of both table instances. Each commit refreshes its table while
+	 * holding the lock, so commits of this store never conflict with each other and need no
+	 * retries with backoff. Merging and writing files happens outside of the lock.
+	 */
+	private final Object commitLock = new Object();
+	private volatile boolean closed;
 	private final Duration retentionPeriod;
 	// Data files are immutable, so cached footers never become stale.
 	private final Cache<String, ParquetMetadata> footers = CacheBuilder.newBuilder().maximumSize(FOOTER_CACHE_SIZE).build();
@@ -204,9 +227,17 @@ public class IcebergRecordStore implements KvinRecordStore {
 			if (!table.sortOrder().sameOrder(SORT_ORDER)) {
 				configureSortOrder(table.replaceSortOrder()).commit();
 			}
+
+			compactionTable = tables.load(location);
+			enableManifestCaching(compactionTable);
 		} catch (IOException e) {
 			throw new UncheckedIOException("Unable to initialize Iceberg store at " + root, e);
 		}
+		compactor = Executors.newSingleThreadExecutor(task -> {
+			Thread thread = new Thread(task, "kvin-iceberg-compaction-" + root.getFileName());
+			thread.setDaemon(true);
+			return thread;
+		});
 	}
 
 	private static void validatePartitionSpec(PartitionSpec spec) {
@@ -283,7 +314,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 			if (!files.isEmpty()) {
 				commitAppend(files);
 				committed = true;
-				compactSmallFiles();
+				scheduleCompaction();
 			}
 		} catch (CommitStateUnknownException e) {
 			// A possibly committed file must never be removed.
@@ -306,11 +337,13 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private void commitAppend(List<DataFile> files) throws IOException {
 		for (int attempt = 1; attempt <= MAX_COMMIT_RETRIES; attempt++) {
 			try {
-				table.refresh();
+				synchronized (commitLock) {
+					table.refresh();
 
-				var append = table.newAppend();
-				files.forEach(append::appendFile);
-				append.commit();
+					var append = table.newAppend();
+					files.forEach(append::appendFile);
+					append.commit();
+				}
 
 				return;
 			} catch (CommitFailedException e) {
@@ -323,22 +356,114 @@ public class IcebergRecordStore implements KvinRecordStore {
 		}
 	}
 
-	private void compactSmallFiles() throws IOException {
+	/**
+	 * Starts a background compaction unless one is already queued. A compaction that is
+	 * running when this is called is followed by another one, so new files are considered.
+	 */
+	private void scheduleCompaction() {
+		if (!closed && compactionScheduled.compareAndSet(false, true)) {
+			try {
+				compactor.execute(() -> {
+					compactionScheduled.set(false);
+					try {
+						compactTiers();
+					} catch (IOException | RuntimeException e) {
+						// already logged by compactTier
+					}
+				});
+			} catch (RejectedExecutionException e) {
+				// the store is closing
+				compactionScheduled.set(false);
+			}
+		}
+	}
+
+	/**
+	 * Compacts all tiers that have enough files, in the compaction thread. Waits for a
+	 * running background compaction first, so that only one compaction runs at a time.
+	 *
+	 * @throws UncheckedIOException if reading or writing data files fails
+	 * @throws org.apache.iceberg.exceptions.ValidationException if a concurrent delete
+	 *                                                           replaced an input file
+	 */
+	public void compact() {
+		runInCompactor(() -> {
+			compactTiers();
+			return null;
+		});
+	}
+
+	/**
+	 * Waits until the background compactions that were scheduled before this call are done.
+	 */
+	void awaitCompaction() {
+		runInCompactor(() -> null);
+	}
+
+	private void runInCompactor(Callable<Void> task) {
+		try {
+			compactor.submit(task).get();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("Interrupted while waiting for Iceberg compaction", e);
+		} catch (ExecutionException e) {
+			Throwable cause = e.getCause();
+			if (cause instanceof RuntimeException runtime) {
+				throw runtime;
+			}
+			if (cause instanceof Error error) {
+				throw error;
+			}
+			if (cause instanceof IOException io) {
+				throw new UncheckedIOException("Iceberg compaction failed", io);
+			}
+			throw new IllegalStateException("Iceberg compaction failed", cause);
+		}
+	}
+
+	private void compactTiers() throws IOException {
+		while (!closed && compactTier()) {
+			// a merge creates a file of a higher tier, which may complete that tier
+		}
+	}
+
+	/**
+	 * The tier of a file with the given number of records: {@code floor(log_fanIn(records))}.
+	 * Merging {@code fanIn} files of tier k yields at least {@code fanIn^(k+1)} records, so the
+	 * output always belongs to a higher tier.
+	 */
+	static int tier(long records, int fanIn) {
+		int tier = 0;
+		for (long remaining = records; remaining >= fanIn; remaining /= fanIn) {
+			tier++;
+		}
+		return tier;
+	}
+
+	/**
+	 * Merges, in every partition, the files of the lowest tier that has at least
+	 * {@code kvin.compaction.min-files} files, and commits all merges in one rewrite.
+	 *
+	 * @return whether files were rewritten
+	 */
+	private boolean compactTier() throws IOException {
+		Table table = compactionTable;
 		List<String> paths = new ArrayList<>();
 		try {
 			table.refresh();
-			int minimum = Integer.parseInt(table.properties().getOrDefault(COMPACTION_MIN_FILES, Integer.toString(DEFAULT_COMPACTION_MIN_FILES)));
+			int fanIn = Integer.parseInt(table.properties().getOrDefault(COMPACTION_MIN_FILES, Integer.toString(DEFAULT_COMPACTION_MIN_FILES)));
 			long targetSize = Long.parseLong(table.properties().getOrDefault(TableProperties.WRITE_TARGET_FILE_SIZE_BYTES, Long.toString(DEFAULT_COMPACTION_TARGET_SIZE)));
-			if (minimum < 2 || targetSize <= 0) {
+			if (fanIn < 2 || targetSize <= 0) {
 				throw new IllegalArgumentException("Iceberg compaction requires kvin.compaction.min-files >= 2 and a positive write.target-file-size-bytes");
 			}
 			if (table.currentSnapshot() == null || !table.sortOrder().sameOrder(SORT_ORDER)) {
-				return;
+				return false;
 			}
 
 			long snapshotId = table.currentSnapshot().snapshotId();
-			Map<PartitionGroup, Map<String, DataFile>> groups = new LinkedHashMap<>();
-			int maximum = Math.max(minimum, COMPACTION_MAX_INPUT_FILES);
+			// eligible files per partition and tier
+			Map<PartitionGroup, TreeMap<Integer, Map<String, DataFile>>> groups = new LinkedHashMap<>();
+			int maximum = Math.max(fanIn, COMPACTION_MAX_INPUT_FILES);
 			try (CloseableIterable<FileScanTask> tasks = table.newScan().useSnapshot(snapshotId).planFiles()) {
 				for (FileScanTask task : tasks) {
 					if (!task.deletes().isEmpty()) {
@@ -351,7 +476,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 						PartitionSpec spec = table.specs().get(file.specId());
 						PartitionGroup group = new PartitionGroup(file.specId(),
 								StructLikeWrapper.forType(spec.partitionType()).copyFor(file.partition()));
-						Map<String, DataFile> candidates = groups.computeIfAbsent(group, key -> new LinkedHashMap<>());
+						Map<String, DataFile> candidates = groups.computeIfAbsent(group, key -> new TreeMap<>())
+								.computeIfAbsent(tier(file.recordCount(), fanIn), key -> new LinkedHashMap<>());
 						if (candidates.size() < maximum) {
 							candidates.putIfAbsent(file.location(), file);
 						}
@@ -362,14 +488,15 @@ public class IcebergRecordStore implements KvinRecordStore {
 			Set<DataFile> inputs = new LinkedHashSet<>();
 			Set<DataFile> replacements = new LinkedHashSet<>();
 			for (var entry : groups.entrySet()) {
-				Map<String, DataFile> candidates = entry.getValue();
-				if (candidates.size() < minimum) {
+				Map<String, DataFile> candidates = entry.getValue().values().stream()
+						.filter(tierFiles -> tierFiles.size() >= fanIn).findFirst().orElse(null);
+				if (candidates == null) {
 					continue;
 				}
 				List<String> groupPaths = new ArrayList<>();
 				Set<DataFile> merged;
 				try {
-					merged = mergeCompactionFiles(candidates.values(), table.specs().get(entry.getKey().specId()),
+					merged = mergeCompactionFiles(table, candidates.values(), table.specs().get(entry.getKey().specId()),
 							candidates.values().iterator().next().partition(), targetSize, groupPaths);
 				} finally {
 					paths.addAll(groupPaths);
@@ -382,19 +509,23 @@ public class IcebergRecordStore implements KvinRecordStore {
 				}
 			}
 			if (inputs.isEmpty()) {
-				return;
+				return false;
 			}
 			// Validate against exactly the snapshot read: concurrent appends are safe,
 			// but replaced inputs and newly added row-level deletes must conflict.
-			table.newRewrite().validateFromSnapshot(snapshotId)
-					.rewriteFiles(inputs, replacements).commit();
+			synchronized (commitLock) {
+				table.refresh();
+				table.newRewrite().validateFromSnapshot(snapshotId)
+						.rewriteFiles(inputs, replacements).commit();
+			}
 			invalidateFooters(inputs);
+			return true;
 		} catch (CommitStateUnknownException e) {
-			log.error("Iceberg compaction commit state is unknown; appended tuples remain committed and output files are retained", e);
+			log.error("Iceberg compaction commit state is unknown; output files are retained", e);
 			throw e;
 		} catch (IOException | RuntimeException e) {
 			cleanup(paths);
-			log.error("Iceberg compaction failed after tuples were appended; the append remains committed", e);
+			log.error("Iceberg compaction failed; committed data is unchanged", e);
 			throw e;
 		}
 	}
@@ -402,8 +533,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private record PartitionGroup(int specId, StructLikeWrapper partition) {
 	}
 
-	private Set<DataFile> mergeCompactionFiles(Iterable<DataFile> files, PartitionSpec spec, StructLike partition,
-			long targetSize, List<String> paths) throws IOException {
+	private Set<DataFile> mergeCompactionFiles(Table table, Iterable<DataFile> files, PartitionSpec spec,
+			StructLike partition, long targetSize, List<String> paths) throws IOException {
 		Set<DataFile> replacements = new LinkedHashSet<>();
 		PriorityQueue<CompactionCursor> queue = new PriorityQueue<>((a, b) -> ORDER.compare(a.row, b.row));
 		try (CloseableGroup readers = new CloseableGroup()) {
@@ -417,7 +548,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 				}
 			}
 			while (!queue.isEmpty()) {
-				DataWriter<org.apache.iceberg.data.Record> writer = newWriter(spec, partition, targetSize, paths);
+				DataWriter<org.apache.iceberg.data.Record> writer = newWriter(table, spec, partition, targetSize, paths);
 				long item = 0, context = 0, property = 0;
 				boolean first = true;
 				try (writer) {
@@ -442,7 +573,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 		return replacements;
 	}
 
-	private DataWriter<org.apache.iceberg.data.Record> newWriter(PartitionSpec spec, StructLike partition,
+	private DataWriter<org.apache.iceberg.data.Record> newWriter(Table table, PartitionSpec spec, StructLike partition,
 			Long targetSize, List<String> paths) throws IOException {
 		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet").toString();
 		paths.add(path);
@@ -540,7 +671,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 			current.set(5, first);
 		}
 
-		DataWriter<org.apache.iceberg.data.Record> writer = newWriter(spec, partition, null, paths);
+		DataWriter<org.apache.iceberg.data.Record> writer = newWriter(table, spec, partition, null, paths);
 
 		try (writer) {
 			batch.forEach(writer::write);
@@ -556,7 +687,10 @@ public class IcebergRecordStore implements KvinRecordStore {
 			throw new IllegalStateException("Cannot create a branch without a snapshot");
 		}
 
-		table.manageSnapshots().createBranch(branchName, table.currentSnapshot().snapshotId()).commit();
+		synchronized (commitLock) {
+			table.refresh();
+			table.manageSnapshots().createBranch(branchName, table.currentSnapshot().snapshotId()).commit();
+		}
 	}
 
 	@Override
@@ -956,6 +1090,12 @@ public class IcebergRecordStore implements KvinRecordStore {
 	 * @return the number of expired snapshots
 	 */
 	synchronized int expireSnapshotsReplacedBefore(long time) {
+		synchronized (commitLock) {
+			return expireSnapshotsReplacedBeforeLocked(time);
+		}
+	}
+
+	private int expireSnapshotsReplacedBeforeLocked(long time) {
 		table.refresh();
 		// the snapshot that was current at the given time; all older snapshots were replaced before
 		Snapshot currentAtTime = null;
@@ -1119,9 +1259,11 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private void commitRewrite(Set<DataFile> deleteFiles, Set<DataFile> addFiles) {
 		for (int attempt = 1; attempt <= MAX_COMMIT_RETRIES; attempt++) {
 			try {
-				table.refresh();
+				synchronized (commitLock) {
+					table.refresh();
 
-				table.newRewrite().rewriteFiles(deleteFiles, addFiles).commit();
+					table.newRewrite().rewriteFiles(deleteFiles, addFiles).commit();
+				}
 				invalidateFooters(deleteFiles);
 
 				return;
@@ -1253,8 +1395,21 @@ public class IcebergRecordStore implements KvinRecordStore {
 		return delete(itemId, null, contextId, Long.MAX_VALUE, Long.MIN_VALUE) > 0;
 	}
 
+	/**
+	 * Waits for a running compaction to finish; queued compactions are skipped.
+	 */
 	@Override
 	public void close() {
+		closed = true;
+		compactor.shutdown();
+		try {
+			while (!compactor.awaitTermination(10, TimeUnit.SECONDS)) {
+				log.info("Waiting for Iceberg compaction to finish before closing {}", root);
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
 		ManifestFiles.dropCache(table.io());
+		ManifestFiles.dropCache(compactionTable.io());
 	}
 }

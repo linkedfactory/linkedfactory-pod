@@ -224,12 +224,15 @@ public class IcebergPartitioningTest {
 				schema -> PartitionSpec.builderFor(schema).identity("propertyId").build())) {
 			table().updateProperties().set("kvin.compaction.min-files", "3").commit();
 			store.put(new KvinRecord(0, 1, 2, 0, 0, 0), new KvinRecord(0, 1, 3, 0, 0, 0));
+			store.awaitCompaction();
 			assertEquals(2, files().size());
 			DataFile untouched = files(Expressions.equal("propertyId", 3L)).getFirst();
 			store.put(new KvinRecord(0, 1, 2, 1, 0, 1));
+			store.awaitCompaction();
 			assertEquals("Threshold is not applied across partitions", 3, files().size());
 			List<DataFile> oldFiles = files();
 			store.put(new KvinRecord(0, 1, 2, 2, 0, 2));
+			store.awaitCompaction();
 			assertEquals(2, files().size());
 			assertEquals(untouched.location(), files(Expressions.equal("propertyId", 3L)).getFirst().location());
 			for (DataFile file : oldFiles) {
@@ -287,6 +290,7 @@ public class IcebergPartitioningTest {
 					}
 				}
 				store.put(batch);
+				store.awaitCompaction();
 			}
 			assertEquals(2, files().size());
 			assertTrue(files().stream().allMatch(file -> file.recordCount() == 4));
@@ -347,17 +351,21 @@ public class IcebergPartitioningTest {
 		try (var store = new IcebergRecordStore(root().toString())) {
 			for (int time = 0; time < 3; time++) {
 				store.put(new KvinRecord(0, 1, 2, time, 0, time));
+				store.awaitCompaction();
 			}
 			int originalSpec = table().spec().specId();
 			Table evolved = table();
 			evolved.updateSpec().addField("contextId").commit();
 			evolved.updateProperties().set("kvin.compaction.min-files", "3").commit();
 			store.put(new KvinRecord(0, 1, 2, 3, 0, 3));
+			store.awaitCompaction();
 			assertEquals(2, files().size());
 			assertEquals(1, files().stream().filter(file -> file.specId() == originalSpec).count());
 			store.put(new KvinRecord(0, 1, 2, 4, 0, 4));
+			store.awaitCompaction();
 			assertEquals("Different spec IDs must not reach the threshold together", 3, files().size());
 			store.put(new KvinRecord(0, 1, 2, 5, 0, 5));
+			store.awaitCompaction();
 			assertEquals(2, files().size());
 			assertValidFiles();
 			try (var rows = store.fetch(1, 2L, null, 0)) {
