@@ -159,6 +159,17 @@ public interface KvinRecordStore extends Closeable {
 	boolean delete(long itemId, Long contextId);
 
 	/**
+	 * Deletes all records of the given context.
+	 *
+	 * @param contextId The context ID, <code>null</code> for the default context.
+	 * @return Number of deleted records.
+	 * @throws UnsupportedOperationException if the store does not support deleting contexts
+	 */
+	default long delete(Long contextId) {
+		throw new UnsupportedOperationException("Deleting a context is not supported by " + getClass().getName());
+	}
+
+	/**
 	 * Returns all known properties of a given item.
 	 *
 	 * @param itemId    The item ID.

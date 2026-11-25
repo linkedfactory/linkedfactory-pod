@@ -355,6 +355,30 @@ public class KvinIcebergTest {
 	}
 
 	@Test
+	public void deletesContexts() {
+		URI context = URIs.createURI("urn:test:context");
+		store.put(new KvinTuple(item, property, context, 1, 0, 1),
+				new KvinTuple(other, property, context, 2, 0, 2),
+				new KvinTuple(item, property, null, 3, 0, 3));
+
+		assertEquals(2, store.delete(context));
+		assertEquals(List.of(), store.fetch(item, property, context, 0).toList());
+		assertEquals(List.of(), store.fetch(other, property, context, 0).toList());
+		assertEquals(List.of(), store.properties(item, context).toList());
+		assertEquals(List.of(3), store.fetch(item, property, null, 0).toList().stream().map(t -> t.value).toList());
+
+		assertEquals(0, store.delete(context));
+		assertEquals(0, store.delete(URIs.createURI("urn:test:unknown")));
+
+		store.put(new KvinTuple(other, property, context, 4, 0, 4));
+		assertEquals(List.of(4), store.fetch(other, property, context, 0).toList().stream().map(t -> t.value).toList());
+
+		assertEquals(1, store.delete((URI) null));
+		assertEquals(List.of(), store.fetch(item, property, null, 0).toList());
+		assertEquals(List.of(4), store.fetch(other, property, context, 0).toList().stream().map(t -> t.value).toList());
+	}
+
+	@Test
 	public void deferredReadersKeepTheirSnapshotAcrossDeletes() {
 		store.put(new KvinTuple(item, property, null, 3, 0, 3),
 				new KvinTuple(item, property, null, 2, 0, 2),

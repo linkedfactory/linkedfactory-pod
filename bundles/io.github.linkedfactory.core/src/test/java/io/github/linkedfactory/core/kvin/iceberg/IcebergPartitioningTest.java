@@ -147,6 +147,78 @@ public class IcebergPartitioningTest {
 	}
 
 	@Test
+	public void contextDeleteDropsContextPartitionsWithoutRewriting() throws Exception {
+		try (var store = new IcebergRecordStore(root().toString(), null,
+				schema -> PartitionSpec.builderFor(schema).identity("contextId").build())) {
+			List<KvinRecord> input = new ArrayList<>();
+			for (long context : List.of(0L, 4L, 5L)) {
+				for (long item : List.of(1L, 2L)) {
+					for (long time = 0; time < 5; time++) {
+						input.add(new KvinRecord(item, context, 2, time, 0, time));
+					}
+				}
+			}
+			store.put(input);
+			store.put(new KvinRecord(1, 4, 3, 0, 0, 0L));
+			List<String> kept = files(Expressions.notEqual("contextId", 4L)).stream().map(DataFile::location).toList();
+			assertEquals(2, files(Expressions.equal("contextId", 4L)).size());
+
+			assertEquals(11, store.delete(4L));
+
+			// the remaining files are the original files of the other contexts
+			assertEquals(kept.stream().sorted().toList(),
+					files().stream().map(DataFile::location).sorted().toList());
+			try (var rows = store.fetch(List.of(1L, 2L), List.of(), 4L, Long.MAX_VALUE, Long.MIN_VALUE, 0, 0, null)) {
+				assertEquals(List.of(), rows.toList());
+			}
+			try (var properties = store.properties(1, 4L)) {
+				assertEquals(List.of(), properties.toList());
+			}
+			try (var rows = store.fetch(List.of(1L, 2L), List.of(), 5L, Long.MAX_VALUE, Long.MIN_VALUE, 0, 0, null)) {
+				assertEquals(10, rows.toList().size());
+			}
+			assertEquals(0, store.delete(4L));
+			assertEquals(10, store.delete((Long) null));
+			try (var rows = store.fetch(1, 2L, null, 0)) {
+				assertFalse(rows.hasNext());
+			}
+			assertValidFiles();
+		}
+	}
+
+	@Test
+	public void contextDeleteRewritesFilesWithOtherContexts() throws Exception {
+		try (var store = new IcebergRecordStore(root().toString())) {
+			store.put(new KvinRecord(1, 0, 2, 0, 0, 0L), new KvinRecord(1, 4, 2, 0, 0, 1L),
+					new KvinRecord(2, 4, 2, 1, 0, 2L), new KvinRecord(2, 5, 2, 1, 0, 3L));
+			store.put(new KvinRecord(3, 4, 2, 0, 0, 4L));
+			assertEquals(2, files().size());
+
+			assertEquals(3, store.delete(4L));
+
+			// the file with only context 4 is dropped, the mixed file is rewritten
+			assertEquals(1, files().size());
+			assertEquals(2, files().getFirst().recordCount());
+			assertValidFiles();
+			try (var rows = store.fetch(List.of(1L, 2L, 3L), List.of(), 4L, Long.MAX_VALUE, Long.MIN_VALUE, 0, 0, null)) {
+				assertEquals(List.of(), rows.toList());
+			}
+			try (var rows = store.fetch(1, 2L, null, 0)) {
+				assertEquals(List.of(0L), rows.toList().stream().map(r -> r.value()).toList());
+			}
+			try (var rows = store.fetch(2, 2L, 5L, 0)) {
+				assertEquals(List.of(3L), rows.toList().stream().map(r -> r.value()).toList());
+			}
+
+			// the context can be written again
+			store.put(new KvinRecord(1, 4, 2, 7, 0, 7L));
+			try (var rows = store.fetch(1, 2L, 4L, 0)) {
+				assertEquals(List.of(7L), rows.toList().stream().map(r -> r.value()).toList());
+			}
+		}
+	}
+
+	@Test
 	public void compactionThresholdAndDeleteRewritesArePartitionLocal() throws Exception {
 		try (var store = new IcebergRecordStore(root().toString(), null,
 				schema -> PartitionSpec.builderFor(schema).identity("propertyId").build())) {

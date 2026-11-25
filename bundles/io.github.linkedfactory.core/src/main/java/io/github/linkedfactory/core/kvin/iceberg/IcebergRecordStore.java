@@ -79,6 +79,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * Standalone Iceberg-backed numeric record store, with no URI-ID tables.
@@ -116,6 +117,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 	static final long DEFAULT_PAGE_SIZE = 8L * 1024;
 	// Column statistics used to prune, order and lazily open data files during fetches.
 	private static final List<String> FETCH_STATS_COLUMNS = List.of("itemId", "contextId", "propertyId", "time");
+	private static final int CONTEXT_FIELD_ID = 2;
 
 	private static final Schema SCHEMA = new Schema(Types.NestedField.required(1, "itemId", Types.LongType.get()), Types.NestedField.required(2, "contextId", Types.LongType.get()), Types.NestedField.required(3, "propertyId", Types.LongType.get()), Types.NestedField.required(4, "time", Types.LongType.get()), Types.NestedField.required(5, "seqNr", Types.IntegerType.get()), Types.NestedField.required(6, "first", Types.BooleanType.get()), Types.NestedField.optional(7, "valueInt", Types.IntegerType.get()), Types.NestedField.optional(8, "valueLong", Types.LongType.get()), Types.NestedField.optional(9, "valueFloat", Types.FloatType.get()), Types.NestedField.optional(10, "valueDouble", Types.DoubleType.get()), Types.NestedField.optional(11, "valueString", Types.StringType.get()), Types.NestedField.optional(12, "valueBool", Types.BooleanType.get()), Types.NestedField.optional(13, "valueObject", Types.BinaryType.get()));
 
@@ -891,11 +893,48 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 		Expression filter = Expressions.and(Expressions.and(Expressions.equal("itemId", itemId), Expressions.equal("contextId", contextId)), Expressions.and((propertyId == null || propertyId == -1 ? Expressions.alwaysTrue() : Expressions.equal("propertyId", propertyId)), Expressions.and(Expressions.greaterThanOrEqual("time", lower), Expressions.lessThanOrEqual("time", upper))));
 
+		return deleteRows(filter, row -> matchesDelete(row, itemId, propertyId, contextId, lower, upper), file -> false);
+	}
+
+	/**
+	 * Deletes all records of a context. Data files that contain only this context, for
+	 * example with an identity partition on {@code contextId}, are removed from the table
+	 * without reading or rewriting them. Other files that contain the context are rewritten.
+	 */
+	@Override
+	public synchronized long delete(Long context) {
+		long contextId = context == null ? DEFAULT_CONTEXT : context;
+		return deleteRows(Expressions.equal("contextId", contextId), row -> row.contextId() == contextId,
+				file -> onlyValue(file, CONTEXT_FIELD_ID, contextId));
+	}
+
+	/**
+	 * Returns whether the column statistics of the file show that all its rows have the given value.
+	 */
+	private static boolean onlyValue(DataFile file, int fieldId, long value) {
+		Map<Integer, ByteBuffer> lowerBounds = file.lowerBounds();
+		Map<Integer, ByteBuffer> upperBounds = file.upperBounds();
+		return lowerBounds != null && upperBounds != null
+				&& lowerBounds.containsKey(fieldId) && upperBounds.containsKey(fieldId)
+				&& bound(lowerBounds, fieldId, Long.MIN_VALUE) == value
+				&& bound(upperBounds, fieldId, Long.MAX_VALUE) == value;
+	}
+
+	/**
+	 * Removes the matching rows with a copy-on-write rewrite in one commit.
+	 *
+	 * @param filter       selects the data files that may contain matching rows
+	 * @param matches      selects the rows to delete
+	 * @param fullyMatches selects data files whose rows all match, they are dropped without reading them
+	 * @return the number of deleted rows
+	 */
+	private long deleteRows(Expression filter, Predicate<KvinRow> matches, Predicate<DataFile> fullyMatches) {
 		table.refresh();
 
 		Map<String, DataFile> affectedFiles = new LinkedHashMap<>();
 
-		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter).planFiles()) {
+		try (CloseableIterable<FileScanTask> tasks = table.newScan().filter(filter)
+				.includeColumnStats(FETCH_STATS_COLUMNS).planFiles()) {
 			for (FileScanTask task : tasks) {
 				if (!task.deletes().isEmpty()) {
 					throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg deletes");
@@ -919,10 +958,15 @@ public class IcebergRecordStore implements KvinRecordStore {
 		Set<DataFile> addFiles = new LinkedHashSet<>();
 		List<String> temporaryPaths = new ArrayList<>();
 		long deleted = 0;
-		boolean committed = false;
 
 		try {
 			for (DataFile file : affectedFiles.values()) {
+				if (fullyMatches.test(file)) {
+					deleted += file.recordCount();
+					deleteFiles.add(file);
+					continue;
+				}
+
 				List<GenericRecord> retained = new ArrayList<>();
 				long removedFromFile = 0;
 
@@ -930,7 +974,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 					for (org.apache.iceberg.data.Record record : rows) {
 						KvinRow row = toKvinRow(record);
 
-						if (matchesDelete(row, itemId, propertyId, contextId, lower, upper)) {
+						if (matches.test(row)) {
 							removedFromFile++;
 						} else {
 							retained.add(toGenericRecord(row));
@@ -957,7 +1001,6 @@ public class IcebergRecordStore implements KvinRecordStore {
 			}
 
 			commitRewrite(deleteFiles, addFiles);
-			committed = true;
 
 			return deleted;
 		} catch (CommitStateUnknownException e) {

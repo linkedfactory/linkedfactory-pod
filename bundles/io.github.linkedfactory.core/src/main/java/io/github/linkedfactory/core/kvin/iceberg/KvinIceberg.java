@@ -275,6 +275,12 @@ public class KvinIceberg implements Kvin {
 	}
 
 	@Override
+	public long delete(URI context) {
+		long contextId = idStore.getId(context(context), IdKind.CONTEXT, false);
+		return contextId == 0 ? 0 : recordStore.delete(contextId);
+	}
+
+	@Override
 	public IExtendedIterator<URI> properties(URI item, URI context) {
 		long itemId = idStore.getId(item, IdKind.ITEM, false);
 		long contextId = idStore.getId(context(context), IdKind.CONTEXT, false);

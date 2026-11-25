@@ -202,6 +202,10 @@ Omitting the partition factory (or passing null) adopts a reopened table's persi
 Supplying a factory verifies compatibility and rejects mismatches rather than silently evolving the table.
 Partition evolution is an explicit Iceberg metadata operation; reads support historical specs, new writes use the current spec, and delete rewrites repartition retained rows using the current spec.
 
+`delete(context)` removes all values of a context in one commit.
+Data files that contain only this context are dropped without being rewritten; other files that contain it are rewritten without its rows.
+With an `identity("contextId")` partition, every file holds a single context, so deleting a context does not rewrite any data.
+
 For service configuration, optional `<partitionSpec>` accepts native Iceberg partition-spec JSON.
 For example, item bucketing with 32 buckets:
 
