@@ -22,26 +22,33 @@ import java.nio.file.Path;
  * pages of a row group in parallel.</p>
  */
 final class ParquetInputFiles {
+	/**
+	 * Reads with Hadoop's default configuration, for readers outside of a store.
+	 */
+	static final ParquetInputFiles DEFAULT = new ParquetInputFiles(new Configuration());
+
 	// Creating a Configuration per reader re-parses Hadoop's default resources. This also
 	// applies to ParquetReadOptions.builder() without a configuration, which creates one.
-	private static final Configuration CONF = new Configuration();
-	private static final ParquetConfiguration PARQUET_CONF = new HadoopParquetConfiguration(CONF);
+	private final Configuration conf;
+	private final ParquetConfiguration parquetConf;
 
-	private ParquetInputFiles() {
+	ParquetInputFiles(Configuration conf) {
+		this.conf = conf;
+		this.parquetConf = new HadoopParquetConfiguration(conf);
 	}
 
-	static InputFile inputFile(String location) throws IOException {
+	InputFile inputFile(String location) throws IOException {
 		Path local = ArchiveLocation.localPath(location);
 		if (local != null) {
 			return new LocalInputFile(local);
 		}
-		return HadoopInputFile.fromPath(new org.apache.hadoop.fs.Path(location), CONF);
+		return HadoopInputFile.fromPath(new org.apache.hadoop.fs.Path(location), conf);
 	}
 
-	static ParquetReadOptions.Builder readOptions(String location) {
+	ParquetReadOptions.Builder readOptions(String location) {
 		if (ArchiveLocation.localPath(location) != null) {
-			return ParquetReadOptions.builder(PARQUET_CONF).withUseHadoopVectoredIo(false);
+			return ParquetReadOptions.builder(parquetConf).withUseHadoopVectoredIo(false);
 		}
-		return HadoopReadOptions.builder(CONF, new org.apache.hadoop.fs.Path(location));
+		return HadoopReadOptions.builder(conf, new org.apache.hadoop.fs.Path(location));
 	}
 }

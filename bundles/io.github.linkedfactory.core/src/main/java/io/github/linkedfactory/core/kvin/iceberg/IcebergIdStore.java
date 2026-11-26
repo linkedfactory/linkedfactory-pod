@@ -78,11 +78,19 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 	}
 
 	public IcebergIdStore(String archiveLocation) {
-		this(archiveLocation, false);
+		this(KvinIcebergOptions.builder(archiveLocation).build());
 	}
 
-	IcebergIdStore(String archiveLocation, boolean requireExisting) {
-		root = ArchiveLocation.of(archiveLocation);
+	/**
+	 * Opens the URI-ID tables of an archive. Of the settings, only the location and the Hadoop
+	 * properties apply to the URI-ID tables.
+	 */
+	public IcebergIdStore(KvinIcebergOptions options) {
+		this(options, false);
+	}
+
+	IcebergIdStore(KvinIcebergOptions options, boolean requireExisting) {
+		root = ArchiveLocation.of(options.location());
 		try {
 			String key = root.toString();
 			if (root.isLocal()) {
@@ -96,7 +104,7 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 					coordinator.writer.flush();
 				}
 				try (FileChannel initialization = openLockFile(); var ignored = initialization == null ? null : initialization.lock()) {
-					Configuration conf = new Configuration();
+					Configuration conf = options.newHadoopConfiguration();
 					HadoopTables tables = new HadoopTables(conf);
 					String[] names = {"items", "contexts", "properties"};
 					if (requireExisting) {

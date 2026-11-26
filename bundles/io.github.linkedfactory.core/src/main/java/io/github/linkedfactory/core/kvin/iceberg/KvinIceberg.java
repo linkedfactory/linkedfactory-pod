@@ -11,11 +11,15 @@ import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
 import net.enilink.komma.core.URI;
 import org.apache.iceberg.PartitionSpec;
-import org.apache.iceberg.PartitionSpecParser;
 import org.apache.iceberg.Schema;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /**
@@ -24,21 +28,14 @@ import java.util.function.Function;
  * owned by the caller. ID mappings are flushed before records are committed.
  */
 public class KvinIceberg implements Kvin {
+	private static final Logger log = LoggerFactory.getLogger(KvinIceberg.class);
 	private static final int BATCH_SIZE = 8192;
 	private static final int READ_BATCH_SIZE = 1024;
 	private final KvinRecordStore recordStore;
 	private final IdStore idStore;
 	private final boolean owned;
-
-	/**
-	 * Opens an owned store using native Iceberg partition-spec JSON, or the
-	 * default/adoption behavior when null. Keeps Iceberg types inside this bundle
-	 * for callers such as the OSGi service configuration.
-	 */
-	public static KvinIceberg withPartitionSpec(String archiveLocation, String partitionSpec) {
-		return new KvinIceberg(archiveLocation, null, partitionSpec == null ? null
-				: schema -> PartitionSpecParser.fromJson(schema, partitionSpec));
-	}
+	// runs cleanups at the configured interval, or null
+	private final ScheduledExecutorService cleaner;
 
 	public KvinIceberg(String archiveLocation) {
 		this(archiveLocation, null);
@@ -55,15 +52,46 @@ public class KvinIceberg implements Kvin {
 	 */
 	public KvinIceberg(String archiveLocation, Duration retentionPeriod,
 			Function<Schema, PartitionSpec> partitioning) {
-		IcebergRecordStore records = new IcebergRecordStore(archiveLocation, retentionPeriod, partitioning);
+		this(KvinIcebergOptions.builder(archiveLocation).retentionPeriod(retentionPeriod)
+				.partitioning(partitioning).build());
+	}
+
+	/**
+	 * Creates an owned store with the given settings, see {@link KvinIcebergOptions}. With a
+	 * cleanup interval, {@link #cleanUp()} runs in a background thread at that interval.
+	 */
+	public KvinIceberg(KvinIcebergOptions options) {
+		IcebergRecordStore records = new IcebergRecordStore(options);
 		try {
-			idStore = new IcebergIdStore(archiveLocation, records.hasSnapshot());
+			idStore = new IcebergIdStore(options, records.hasSnapshot());
 		} catch (RuntimeException e) {
 			records.close();
 			throw e;
 		}
 		recordStore = records;
 		owned = true;
+		Duration interval = options.cleanUpInterval();
+		if (interval != null) {
+			cleaner = Executors.newSingleThreadScheduledExecutor(task -> {
+				Thread thread = new Thread(task, "kvin-iceberg-cleanup");
+				thread.setDaemon(true);
+				return thread;
+			});
+			cleaner.scheduleWithFixedDelay(this::runCleanUp, interval.toMillis(), interval.toMillis(),
+					TimeUnit.MILLISECONDS);
+		} else {
+			cleaner = null;
+		}
+	}
+
+	private void runCleanUp() {
+		try {
+			long removed = cleanUp();
+			log.info("Cleaned up Iceberg store, removed {} values", removed);
+		} catch (Exception e) {
+			// the next run tries again
+			log.error("Cleaning up Iceberg store failed", e);
+		}
 	}
 
 	/**
@@ -73,6 +101,7 @@ public class KvinIceberg implements Kvin {
 		this.recordStore = Objects.requireNonNull(recordStore);
 		this.idStore = Objects.requireNonNull(idStore);
 		owned = false;
+		cleaner = null;
 	}
 
 	public KvinRecordStore getRecordStore() {
@@ -334,6 +363,18 @@ public class KvinIceberg implements Kvin {
 
 	@Override
 	public void close() {
+		if (cleaner != null) {
+			// cancels the next runs; a running cleanup finishes its commit before the stores close
+			cleaner.shutdown();
+			try {
+				if (!cleaner.awaitTermination(10, TimeUnit.SECONDS)) {
+					log.info("Waiting for Iceberg cleanup to finish before closing");
+					cleaner.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+				}
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+		}
 		if (owned) {
 			try {
 				((IcebergIdStore) idStore).close();

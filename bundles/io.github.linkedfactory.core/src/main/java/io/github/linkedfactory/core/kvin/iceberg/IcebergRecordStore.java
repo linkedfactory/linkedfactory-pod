@@ -142,6 +142,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private static final Comparator<KvinRow> ROW_ORDER = Comparator.comparingLong(KvinRow::contextId).thenComparingLong(KvinRow::itemId).thenComparingLong(KvinRow::propertyId).thenComparing((a, b) -> Long.compare(b.time(), a.time())).thenComparing((a, b) -> Integer.compare(b.seqNr(), a.seqNr()));
 
 	private final ArchiveLocation root;
+	// opens data files for fetches with the Hadoop configuration of this store
+	private final ParquetInputFiles inputFiles;
 	private final Table table;
 	// A separate table instance, so that compaction neither shares state with nor blocks writes and reads.
 	private final Table compactionTable;
@@ -182,11 +184,21 @@ public class IcebergRecordStore implements KvinRecordStore {
 	 */
 	public IcebergRecordStore(String archiveLocation, Duration retentionPeriod,
 			Function<Schema, PartitionSpec> partitioning) {
-		this.root = ArchiveLocation.of(archiveLocation);
-		if (retentionPeriod != null && (retentionPeriod.isNegative() || retentionPeriod.isZero())) {
-			throw new IllegalArgumentException("Retention period must be positive: " + retentionPeriod);
-		}
-		this.retentionPeriod = retentionPeriod;
+		this(KvinIcebergOptions.builder(archiveLocation).retentionPeriod(retentionPeriod)
+				.partitioning(partitioning).build());
+	}
+
+	/**
+	 * Opens the value table with the given settings, see {@link KvinIcebergOptions}.
+	 * The cleanup interval is ignored; call {@link #cleanUp()} to clean up.
+	 */
+	public IcebergRecordStore(KvinIcebergOptions options) {
+		this.root = ArchiveLocation.of(options.location());
+		this.retentionPeriod = options.retentionPeriod();
+		Function<Schema, PartitionSpec> partitioning = options.partitioning();
+		validateTableProperties(options.tableProperties());
+		Configuration conf = options.newHadoopConfiguration();
+		this.inputFiles = new ParquetInputFiles(conf);
 
 		PartitionSpec requestedSpec = partitioning == null ? null
 				: Objects.requireNonNull(partitioning.apply(SCHEMA), "Partitioning factory returned null");
@@ -200,7 +212,6 @@ public class IcebergRecordStore implements KvinRecordStore {
 			}
 
 			String location = root.resolve("iceberg");
-			Configuration conf = new Configuration();
 			HadoopTables tables = new HadoopTables(conf);
 			boolean existing = root.exists("iceberg/metadata", conf);
 
@@ -220,8 +231,13 @@ public class IcebergRecordStore implements KvinRecordStore {
 					throw new IllegalArgumentException("Directory contains an unsupported Parquet archive: " + root);
 				}
 
+				Map<String, String> properties = new HashMap<>(tableProperties());
+				properties.putAll(options.tableProperties());
 				table = tables.create(SCHEMA, requestedSpec == null ? PartitionSpec.unpartitioned() : requestedSpec,
-						SORT_ORDER, tableProperties(), location);
+						SORT_ORDER, properties, location);
+			}
+			if (existing) {
+				updateTableProperties(table, options.tableProperties());
 			}
 
 			enableManifestCaching(table);
@@ -264,6 +280,49 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 	private static Map<String, String> tableProperties() {
 		return Map.of(TableProperties.DEFAULT_FILE_FORMAT, FileFormat.PARQUET.name(), TableProperties.FORMAT_VERSION, "2", TableProperties.PARQUET_COMPRESSION, "zstd");
+	}
+
+	/**
+	 * Rejects configured values of the properties that this store reads, so that a wrong
+	 * configuration fails when the store opens and not on the first write or compaction.
+	 */
+	private static void validateTableProperties(Map<String, String> properties) {
+		requireAtLeast(properties, WRITE_BATCH_RECORDS, 1);
+		requireAtLeast(properties, COMPACTION_MIN_FILES, 2);
+		requireAtLeast(properties, TableProperties.WRITE_TARGET_FILE_SIZE_BYTES, 1);
+		requireAtLeast(properties, TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, 1);
+		requireAtLeast(properties, TableProperties.PARQUET_PAGE_SIZE_BYTES, 1);
+	}
+
+	private static void requireAtLeast(Map<String, String> properties, String key, long minimum) {
+		String value = properties.get(key);
+		if (value == null) {
+			return;
+		}
+		try {
+			if (Long.parseLong(value) >= minimum) {
+				return;
+			}
+		} catch (NumberFormatException e) {
+			// reported below
+		}
+		throw new IllegalArgumentException("Table property " + key + " must be a number of at least " + minimum + ": " + value);
+	}
+
+	/**
+	 * Commits the configured table properties whose values differ from those of the table.
+	 */
+	private static void updateTableProperties(Table table, Map<String, String> properties) {
+		Map<String, String> current = table.properties();
+		var changes = properties.entrySet().stream()
+				.filter(property -> !property.getValue().equals(current.get(property.getKey())))
+				.toList();
+		if (!changes.isEmpty()) {
+			var update = table.updateProperties();
+			changes.forEach(property -> update.set(property.getKey(), property.getValue()));
+			update.commit();
+			log.info("Updated properties {} of Iceberg table {}", changes, table.location());
+		}
 	}
 
 	private static void enableManifestCaching(Table table) {
@@ -869,7 +928,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 			private void openFiles() {
 				while (nextFile < files.size() && (cursors.isEmpty()
 						|| ROW_ORDER.compare(files.get(nextFile).bound(), cursors.peek().row) <= 0)) {
-					RowCursor cursor = new RowCursor(files.get(nextFile++).task(), readFilter, footers, columnIndexes);
+					RowCursor cursor = new RowCursor(files.get(nextFile++).task(), readFilter, footers, columnIndexes, inputFiles);
 					opened++;
 					try {
 						if (skipping) {
@@ -1327,13 +1386,13 @@ public class IcebergRecordStore implements KvinRecordStore {
 		KvinRow row;
 
 		RowCursor(FileScanTask task, Expression filter, Cache<String, ParquetMetadata> footers,
-				Cache<String, Map<Long, ColumnIndexStore>> columnIndexes) {
+				Cache<String, Map<Long, ColumnIndexStore>> columnIndexes, ParquetInputFiles inputFiles) {
 			if (!task.deletes().isEmpty()) {
 				throw new IllegalStateException("Iceberg delete files are not supported by KvinIceberg reads");
 			}
 
 			try {
-				this.rows = new SeriesSkippingReader(SCHEMA, task, filter, footers, columnIndexes);
+				this.rows = new SeriesSkippingReader(SCHEMA, task, filter, footers, columnIndexes, inputFiles);
 			} catch (IOException e) {
 				throw new UncheckedIOException("Unable to open Iceberg series reader", e);
 			}

@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
-import java.time.format.DateTimeParseException;
 
 @Iri("plugin://io.github.linkedfactory.service/data/KvinPartitioned")
 public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
@@ -24,8 +23,8 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 			ILiteral retentionPeriod = getRetentionPeriod();
 			log.info("Using path: {} for archiving", archivePath);
 
-			Duration archiveIntervalDuration = durationFromLiteral(archiveInterval);
-			Duration retentionPeriodDuration = durationFromLiteral(retentionPeriod);
+			Duration archiveIntervalDuration = ConfigLiterals.duration(archiveInterval);
+			Duration retentionPeriodDuration = ConfigLiterals.duration(retentionPeriod);
 
 			if (archiveIntervalDuration == null ) {
 				log.error("invalid archive interval : {}", archiveInterval);
@@ -41,20 +40,4 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 
 	@Iri("plugin://io.github.linkedfactory.service/data/retentionPeriod")
 	public abstract ILiteral getRetentionPeriod();
-
-	private Duration durationFromLiteral(ILiteral literal) {
-		Duration duration = null;
-		if (literal != null) {
-			try {
-				duration = Duration.ofMillis(Long.parseLong(literal.getLabel()));
-			} catch (NumberFormatException nfe) {
-				try {
-					duration = Duration.parse(literal.getLabel());
-				} catch (DateTimeParseException dtpe) {
-					// ignore
-				}
-			}
-		}
-		return duration;
-	}
 }

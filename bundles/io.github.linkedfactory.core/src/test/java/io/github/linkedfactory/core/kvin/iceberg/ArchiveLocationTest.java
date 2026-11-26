@@ -58,16 +58,16 @@ public class ArchiveLocationTest {
 	@Test
 	public void readsLocalFilesDirectlyAndRemoteFilesWithVectoredIo() throws Exception {
 		Path file = temporary.newFile("data.parquet").toPath();
-		assertTrue(ParquetInputFiles.inputFile(file.toString()) instanceof LocalInputFile);
-		assertFalse(ParquetInputFiles.readOptions(file.toString()).build().useHadoopVectoredIo());
+		assertTrue(ParquetInputFiles.DEFAULT.inputFile(file.toString()) instanceof LocalInputFile);
+		assertFalse(ParquetInputFiles.DEFAULT.readOptions(file.toString()).build().useHadoopVectoredIo());
 
 		// Creating a configuration per read parses Hadoop's default resources and made reads 30 times slower.
 		assertSame("Local reads share one configuration",
-				ParquetInputFiles.readOptions(file.toString()).build().getConfiguration(),
-				ParquetInputFiles.readOptions(file.toString()).build().getConfiguration());
+				ParquetInputFiles.DEFAULT.readOptions(file.toString()).build().getConfiguration(),
+				ParquetInputFiles.DEFAULT.readOptions(file.toString()).build().getConfiguration());
 
 		String remote = RemoteTestFileSystem.SCHEME + ":" + file;
-		assertTrue(ParquetInputFiles.inputFile(remote) instanceof HadoopInputFile);
-		assertTrue(ParquetInputFiles.readOptions(remote).build().useHadoopVectoredIo());
+		assertTrue(ParquetInputFiles.DEFAULT.inputFile(remote) instanceof HadoopInputFile);
+		assertTrue(ParquetInputFiles.DEFAULT.readOptions(remote).build().useHadoopVectoredIo());
 	}
 }

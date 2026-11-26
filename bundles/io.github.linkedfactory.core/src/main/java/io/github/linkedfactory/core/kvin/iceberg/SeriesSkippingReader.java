@@ -74,16 +74,23 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 
 	SeriesSkippingReader(Schema schema, FileScanTask task, Expression filter,
 			Cache<String, ParquetMetadata> footers) throws IOException {
-		this(schema, task, filter, footers, null);
+		this(schema, task, filter, footers, null, ParquetInputFiles.DEFAULT);
+	}
+
+	SeriesSkippingReader(Schema schema, FileScanTask task, Expression filter,
+			Cache<String, ParquetMetadata> footers,
+			Cache<String, Map<Long, ColumnIndexStore>> columnIndexes) throws IOException {
+		this(schema, task, filter, footers, columnIndexes, ParquetInputFiles.DEFAULT);
 	}
 
 	/**
 	 * @param columnIndexes optional cache of page indexes, keyed by file location
 	 *                      and row group start position; {@code null} reads them per reader
+	 * @param inputFiles    opens the data file with the configuration of the store
 	 */
 	SeriesSkippingReader(Schema schema, FileScanTask task, Expression filter,
 			Cache<String, ParquetMetadata> footers,
-			Cache<String, Map<Long, ColumnIndexStore>> columnIndexes) throws IOException {
+			Cache<String, Map<Long, ColumnIndexStore>> columnIndexes, ParquetInputFiles inputFiles) throws IOException {
 		this.schema = schema;
 		this.filter = filter;
 		this.keyFilter = KeyFilter.of(schema, filter);
@@ -91,10 +98,10 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 		this.rangeStart = task.start();
 		this.rangeEnd = task.start() + task.length();
 		String location = task.file().location();
-		InputFile inputFile = ParquetInputFiles.inputFile(location);
+		InputFile inputFile = inputFiles.inputFile(location);
 		// The record filter lets readFilteredRowGroup skip pages via the column index.
 		// Dictionary and bloom filters would read extra data on every open.
-		ParquetReadOptions.Builder optionsBuilder = ParquetInputFiles.readOptions(location)
+		ParquetReadOptions.Builder optionsBuilder = inputFiles.readOptions(location)
 				.useDictionaryFilter(false).useBloomFilter(false);
 		FilterPredicate pageFilter = ParquetPageFilters.convert(schema, filter);
 		if (pageFilter != null) {
