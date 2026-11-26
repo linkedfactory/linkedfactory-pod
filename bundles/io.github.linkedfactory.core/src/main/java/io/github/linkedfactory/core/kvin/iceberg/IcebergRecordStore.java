@@ -62,7 +62,6 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -142,7 +141,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 	private static final Comparator<KvinRow> ROW_ORDER = Comparator.comparingLong(KvinRow::contextId).thenComparingLong(KvinRow::itemId).thenComparingLong(KvinRow::propertyId).thenComparing((a, b) -> Long.compare(b.time(), a.time())).thenComparing((a, b) -> Integer.compare(b.seqNr(), a.seqNr()));
 
-	private final Path root;
+	private final ArchiveLocation root;
 	private final Table table;
 	// A separate table instance, so that compaction neither shares state with nor blocks writes and reads.
 	private final Table compactionTable;
@@ -183,7 +182,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 	 */
 	public IcebergRecordStore(String archiveLocation, Duration retentionPeriod,
 			Function<Schema, PartitionSpec> partitioning) {
-		this.root = Path.of(archiveLocation).toAbsolutePath().normalize();
+		this.root = ArchiveLocation.of(archiveLocation);
 		if (retentionPeriod != null && (retentionPeriod.isNegative() || retentionPeriod.isZero())) {
 			throw new IllegalArgumentException("Retention period must be positive: " + retentionPeriod);
 		}
@@ -196,11 +195,14 @@ public class IcebergRecordStore implements KvinRecordStore {
 		}
 
 		try {
-			Files.createDirectories(root);
+			if (root.isLocal()) {
+				Files.createDirectories(root.localPath());
+			}
 
-			String location = root.resolve("iceberg").toString();
-			HadoopTables tables = new HadoopTables(new Configuration());
-			boolean existing = Files.exists(root.resolve("iceberg/metadata"));
+			String location = root.resolve("iceberg");
+			Configuration conf = new Configuration();
+			HadoopTables tables = new HadoopTables(conf);
+			boolean existing = root.exists("iceberg/metadata", conf);
 
 			if (existing) {
 				table = tables.load(location);
@@ -213,7 +215,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 					throw new IllegalArgumentException("Partition configuration does not match existing Iceberg table at " + location);
 				}
 			} else {
-				if (Files.exists(root.resolve("metadata"))) {
+				if (root.exists("metadata", conf)) {
 					// archives of the removed KvinParquet store keep their metadata in this folder
 					throw new IllegalArgumentException("Directory contains an unsupported Parquet archive: " + root);
 				}
@@ -234,7 +236,8 @@ public class IcebergRecordStore implements KvinRecordStore {
 			throw new UncheckedIOException("Unable to initialize Iceberg store at " + root, e);
 		}
 		compactor = Executors.newSingleThreadExecutor(task -> {
-			Thread thread = new Thread(task, "kvin-iceberg-compaction-" + root.getFileName());
+			String name = root.toString();
+			Thread thread = new Thread(task, "kvin-iceberg-compaction-" + name.substring(name.lastIndexOf('/') + 1));
 			thread.setDaemon(true);
 			return thread;
 		});
@@ -575,9 +578,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 	private DataWriter<org.apache.iceberg.data.Record> newWriter(Table table, PartitionSpec spec, StructLike partition,
 			Long targetSize, List<String> paths) throws IOException {
-		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet").toString();
+		String path = root.resolve("iceberg/data/" + UUID.randomUUID() + ".parquet");
 		paths.add(path);
-		Files.createDirectories(Path.of(path).getParent());
+		// creates missing parent directories of local files
 		var builder = Parquet.write(table.io().newOutputFile(path)).forTable(table);
 		Map<String, String> properties = table.properties();
 		long rowGroupSize = PropertyUtil.propertyAsLong(properties, TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES,
@@ -637,8 +640,9 @@ public class IcebergRecordStore implements KvinRecordStore {
 	private void cleanup(List<String> paths) {
 		for (String path : paths) {
 			try {
-				Files.deleteIfExists(Path.of(path));
-			} catch (IOException e) {
+				// does nothing if the file was never created
+				table.io().deleteFile(path);
+			} catch (RuntimeException e) {
 				log.warn("Unable to remove uncommitted Iceberg file {}", path, e);
 			}
 		}

@@ -35,7 +35,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
 import java.util.HashMap;
@@ -48,9 +47,10 @@ import java.util.UUID;
 /**
  * Persistent URI-ID mappings in three independent Iceberg tables.
  *
- * <p>New mappings are staged until {@link #flush()} (or close). Allocation holds
- * the archive's file lock until flushing, so callers must flush a batch before
- * waiting for another process to allocate IDs. Instances in this JVM coordinate
+ * <p>New mappings are staged until {@link #flush()} (or close). For a local archive,
+ * allocation holds the archive's file lock until flushing, so callers must flush a batch
+ * before waiting for another process to allocate IDs. A remote archive has no file lock,
+ * so only one process may allocate IDs in it. Instances in this JVM coordinate
  * automatically, flushing a previous allocator before switching writers.
  * Pending batches automatically flush at 8192 mappings.</p>
  */
@@ -61,9 +61,9 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 	private static final int BATCH_SIZE = 8192;
 	private static final PartitionSpec SPEC = PartitionSpec.unpartitioned();
 	private static final Schema ID_SCHEMA = new Schema(Types.NestedField.required(1, "id", Types.LongType.get()), Types.NestedField.required(2, "value", Types.StringType.get()));
-	private static final Cache<Path, Coordinator> COORDINATORS = CacheBuilder.newBuilder().weakValues().build();
+	private static final Cache<String, Coordinator> COORDINATORS = CacheBuilder.newBuilder().weakValues().build();
 
-	private final Path root;
+	private final ArchiveLocation root;
 	private final IdTable[] ids = new IdTable[3];
 	private final Coordinator coordinator;
 	@SuppressWarnings("unchecked")
@@ -82,33 +82,38 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 	}
 
 	IcebergIdStore(String archiveLocation, boolean requireExisting) {
-		root = Path.of(archiveLocation).toAbsolutePath().normalize();
+		root = ArchiveLocation.of(archiveLocation);
 		try {
-			Files.createDirectories(root);
-			// Canonical paths also coordinate instances opened through directory symlinks.
-			coordinator = COORDINATORS.get(root.toRealPath(), Coordinator::new);
+			String key = root.toString();
+			if (root.isLocal()) {
+				Files.createDirectories(root.localPath());
+				// Canonical paths also coordinate instances opened through directory symlinks.
+				key = root.localPath().toRealPath().toString();
+			}
+			coordinator = COORDINATORS.get(key, Coordinator::new);
 			synchronized (coordinator) {
 				if (coordinator.writer != null) {
 					coordinator.writer.flush();
 				}
-				try (FileChannel initialization = FileChannel.open(root.resolve("iceberg-ids.lock"),
-						StandardOpenOption.CREATE, StandardOpenOption.WRITE); var ignored = initialization.lock()) {
-					HadoopTables tables = new HadoopTables(new Configuration());
+				try (FileChannel initialization = openLockFile(); var ignored = initialization == null ? null : initialization.lock()) {
+					Configuration conf = new Configuration();
+					HadoopTables tables = new HadoopTables(conf);
 					String[] names = {"items", "contexts", "properties"};
 					if (requireExisting) {
 						for (String name : names) {
-							Path path = root.resolve("iceberg-ids").resolve(name);
-							if (!Files.exists(path.resolve("metadata"))) {
-								throw new IOException("Missing Iceberg ID table at " + path);
+							String path = "iceberg-ids/" + name;
+							if (!root.exists(path + "/metadata", conf)) {
+								throw new IOException("Missing Iceberg ID table at " + root.resolve(path));
 							}
 						}
 					}
 					for (int kind = 0; kind < names.length; kind++) {
-						Path path = root.resolve("iceberg-ids").resolve(names[kind]);
-						Table table = Files.exists(path.resolve("metadata")) ? tables.load(path.toString())
-								: tables.create(ID_SCHEMA, SPEC, tableProperties(), path.toString());
+						String path = "iceberg-ids/" + names[kind];
+						String location = root.resolve(path);
+						Table table = root.exists(path + "/metadata", conf) ? tables.load(location)
+								: tables.create(ID_SCHEMA, SPEC, tableProperties(), location);
 						if (!table.schema().sameSchema(ID_SCHEMA) || !table.spec().isUnpartitioned()) {
-							throw new IllegalStateException("Incompatible Iceberg ID table at " + path);
+							throw new IllegalStateException("Incompatible Iceberg ID table at " + location);
 						}
 						enableManifestCaching(table);
 						ids[kind] = new IdTable(table);
@@ -120,6 +125,18 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 		} catch (java.util.concurrent.ExecutionException e) {
 			throw new IllegalStateException(e);
 		}
+	}
+
+	/**
+	 * Opens the lock file that serializes ID allocation across processes, or returns
+	 * {@code null} for a remote archive, which has no file locks.
+	 */
+	private FileChannel openLockFile() throws IOException {
+		if (!root.isLocal()) {
+			return null;
+		}
+		return FileChannel.open(root.localPath().resolve("iceberg-ids.lock"),
+				StandardOpenOption.CREATE, StandardOpenOption.WRITE);
 	}
 
 	private static int index(IdKind kind) {
@@ -144,9 +161,8 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 			coordinator.writer.flush();
 		}
 		try {
-			channel = FileChannel.open(root.resolve("iceberg-ids.lock"),
-					StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-			lock = channel.lock();
+			channel = openLockFile();
+			lock = channel == null ? null : channel.lock();
 			coordinator.writer = this;
 			for (IdTable idTable : ids) {
 				idTable.refresh();
@@ -453,9 +469,8 @@ public class IcebergIdStore implements IdStore, AutoCloseable {
 				return;
 			}
 
-			String path = root.resolve("iceberg-ids/data/" + UUID.randomUUID() + ".parquet").toString();
-
-			Files.createDirectories(Path.of(path).getParent());
+			// creates missing parent directories of local files
+			String path = root.resolve("iceberg-ids/data/" + UUID.randomUUID() + ".parquet");
 
 			var appender = Parquet.write(table.io().newOutputFile(path)).forTable(table).writerVersion(ParquetProperties.WriterVersion.PARQUET_2_0).createWriterFunc(message -> GenericParquetWriter.create(ID_SCHEMA, message)).<org.apache.iceberg.data.Record>build();
 

@@ -199,6 +199,11 @@ Null contexts select ID `0`; null properties and the interface's `-1` property s
 Latest-value fetches include negative timestamps.
 `IcebergIdStore` implements `IdStore` for all `IdKind` values and can be used without a record store.
 Location-based constructors take the archive root and preserve the existing directory layout.
+The root is a local path, a `file:` URI, or a URI of another Hadoop file system, such as `s3a://bucket/archive`.
+Pod does not include connectors for remote file systems; the connector for the scheme must be on the classpath.
+The service configuration supports only local directories.
+Fetches read local data files directly, without the Hadoop file system and without vectored I/O.
+They read remote data files through the Hadoop file system with vectored I/O, which requests the pages of a row group in parallel.
 
 [source,java]
 ----
@@ -303,7 +308,8 @@ Set them with Iceberg's `Table.updateProperties()`; each write reads the current
 |===
 
 ID allocation stages mappings, including forward and reverse lookups, until `flush()` or `close()`; batches automatically flush at 8192 new mappings.
-Allocation is serialized using `iceberg-ids.lock`, held until flushing, so independent processes must flush before waiting for another process to allocate.
+In a local archive, allocation is serialized using `iceberg-ids.lock`, held until flushing, so independent processes must flush before waiting for another process to allocate.
+A remote archive has no lock file, so only one process may write to it.
 Instances within the same JVM coordinate automatically, flushing the previous writer when another instance allocates.
 The facade resolves IDs in batches and flushes mappings before passing records to the record store, keeping pending mappings and record buffers bounded.
 A flush failure retains the allocation lock and pending mappings for retry, preventing reassignment of IDs already handed to callers.

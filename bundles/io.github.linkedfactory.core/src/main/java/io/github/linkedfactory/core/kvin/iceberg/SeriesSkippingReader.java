@@ -1,7 +1,6 @@
 package io.github.linkedfactory.core.kvin.iceberg;
 
 import com.google.common.cache.Cache;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.expressions.Expression;
@@ -9,7 +8,6 @@ import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.parquet.ParquetMetricsRowGroupFilter;
-import org.apache.parquet.HadoopReadOptions;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnReader;
 import org.apache.parquet.column.impl.ColumnReadStoreImpl;
@@ -25,7 +23,7 @@ import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
-import org.apache.parquet.hadoop.util.HadoopInputFile;
+import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.SeekableInputStream;
 import org.apache.parquet.schema.MessageType;
 
@@ -54,9 +52,6 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 	// value column (valueInt). Columns 0-4 are the key columns.
 	private static final int FIRST_COLUMN = 5;
 	private static final int FIRST_VALUE_COLUMN = 6;
-	// Creating a Configuration per reader re-parses Hadoop's default resources.
-	private static final Configuration CONF = new Configuration();
-
 	private final Schema schema;
 	private final Expression filter;
 	private final KeyFilter keyFilter;
@@ -96,11 +91,10 @@ final class SeriesSkippingReader implements CloseableIterable<KvinRow>, Closeabl
 		this.rangeStart = task.start();
 		this.rangeEnd = task.start() + task.length();
 		String location = task.file().location();
-		var path = new org.apache.hadoop.fs.Path(location);
-		HadoopInputFile inputFile = HadoopInputFile.fromPath(path, CONF);
+		InputFile inputFile = ParquetInputFiles.inputFile(location);
 		// The record filter lets readFilteredRowGroup skip pages via the column index.
 		// Dictionary and bloom filters would read extra data on every open.
-		ParquetReadOptions.Builder optionsBuilder = HadoopReadOptions.builder(CONF, path)
+		ParquetReadOptions.Builder optionsBuilder = ParquetInputFiles.readOptions(location)
 				.useDictionaryFilter(false).useBloomFilter(false);
 		FilterPredicate pageFilter = ParquetPageFilters.convert(schema, filter);
 		if (pageFilter != null) {
