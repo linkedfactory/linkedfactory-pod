@@ -35,8 +35,13 @@ public class KvinPartitionedFactoryTest {
 			String archiveLocation, String hadoopProperties) {
 		return new KvinPartitionedFactory() {
 			@Override
-			public String getDirName() {
+			public String getLocation() {
 				return temporary.getRoot().getAbsolutePath();
+			}
+
+			@Override
+			public String getDirName() {
+				return null;
 			}
 
 			@Override

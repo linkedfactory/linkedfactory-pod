@@ -22,8 +22,7 @@ public abstract class KvinIcebergFactory extends KvinLevelDbFactory {
 	}
 
 	KvinIcebergOptions options() {
-		String dirName = getDirName();
-		String location = locationInWorkspace(dirName == null ? "linkedfactory-iceberg" : dirName);
+		String location = locationInWorkspace(getLocationOr("linkedfactory-iceberg"));
 		Duration retentionPeriod = ConfigLiterals.requireDuration(getRetentionPeriod(), "retentionPeriod");
 		Duration cleanUpInterval = ConfigLiterals.requireDuration(getCleanUpInterval(), "cleanUpInterval");
 		if (cleanUpInterval == null && retentionPeriod != null) {

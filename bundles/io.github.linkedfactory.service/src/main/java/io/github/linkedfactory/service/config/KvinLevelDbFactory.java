@@ -9,7 +9,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.file.Path;
 
 @Iri("plugin://io.github.linkedfactory.service/data/KvinLevelDb")
 public abstract class KvinLevelDbFactory implements IKvinFactory {
@@ -24,9 +26,40 @@ public abstract class KvinLevelDbFactory implements IKvinFactory {
 		return new KvinLevelDb(valueStorePath);
 	}
 
-	protected File getStorePathOr(String name) {
+	/**
+	 * Returns the configured location, or a default location.
+	 */
+	protected String getLocationOr(String defaultLocation) {
+		String location = getLocation();
 		String dirName = getDirName();
-		return inWorkspace(dirName == null ? name : dirName);
+		if (dirName != null) {
+			if (location != null) {
+				throw new IllegalArgumentException("Set only location, not both location and the deprecated dirName");
+			}
+			log.warn("The setting dirName is deprecated, use location instead");
+			location = dirName;
+		}
+		return location == null ? defaultLocation : location;
+	}
+
+	/**
+	 * Returns the configured location as a local directory in the workspace, or a default
+	 * directory. Accepts {@code file:} URIs and rejects other URIs, because LevelDB stores
+	 * its files in a local directory.
+	 */
+	protected File getStorePathOr(String name) {
+		String location = getLocationOr(name);
+		if (location.startsWith("file:")) {
+			try {
+				return Path.of(URI.create(location)).toFile();
+			} catch (IllegalArgumentException e) {
+				throw new IllegalArgumentException("Invalid file URI, use an absolute one such as file:///data/store: " + location, e);
+			}
+		}
+		if (KvinIcebergOptions.hasUriScheme(location)) {
+			throw new IllegalArgumentException("The location of a LevelDB store must be a local path: " + location);
+		}
+		return inWorkspace(location);
 	}
 
 	/**
@@ -51,6 +84,13 @@ public abstract class KvinLevelDbFactory implements IKvinFactory {
 		return KvinIcebergOptions.hasUriScheme(location) ? location : inWorkspace(location).toString();
 	}
 
+	@Iri("plugin://io.github.linkedfactory.service/data/location")
+	public abstract String getLocation();
+
+	/**
+	 * @deprecated replaced by {@link #getLocation()}
+	 */
+	@Deprecated
 	@Iri("plugin://io.github.linkedfactory.service/data/dirName")
 	public abstract String getDirName();
 }

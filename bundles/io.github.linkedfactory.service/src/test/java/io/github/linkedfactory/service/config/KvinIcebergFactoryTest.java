@@ -27,6 +27,7 @@ public class KvinIcebergFactoryTest {
 	 * The settings of a store, like those in the bundle configuration.
 	 */
 	private static class Settings {
+		String location;
 		String dirName;
 		String partitionSpec;
 		String retentionPeriod;
@@ -34,8 +35,8 @@ public class KvinIcebergFactoryTest {
 		String tableProperties;
 		String hadoopProperties;
 
-		Settings(String dirName) {
-			this.dirName = dirName;
+		Settings(String location) {
+			this.location = location;
 		}
 	}
 
@@ -49,6 +50,11 @@ public class KvinIcebergFactoryTest {
 
 	private static KvinIcebergFactory factory(Settings settings) {
 		return new KvinIcebergFactory() {
+			@Override
+			public String getLocation() {
+				return settings.location;
+			}
+
 			@Override
 			public String getDirName() {
 				return settings.dirName;
@@ -145,6 +151,15 @@ public class KvinIcebergFactoryTest {
 	public void usesUriLocationsUnchanged() {
 		assertEquals("s3a://bucket/pod", factory(new Settings("s3a://bucket/pod")).options().location());
 		assertEquals(temporary.getRoot().getAbsolutePath(), factory(settings()).options().location());
+	}
+
+	@Test
+	public void acceptsTheDeprecatedDirName() {
+		Settings settings = new Settings(null);
+		settings.dirName = "s3a://bucket/pod";
+		assertEquals("s3a://bucket/pod", factory(settings).options().location());
+		settings.location = "s3a://bucket/other";
+		assertThrows(IllegalArgumentException.class, () -> factory(settings).options());
 	}
 
 	@Test

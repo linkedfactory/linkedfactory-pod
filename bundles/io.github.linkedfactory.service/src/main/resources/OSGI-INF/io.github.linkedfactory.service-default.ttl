@@ -6,7 +6,7 @@
 
 @base <plugin://io.github.linkedfactory.service/data/> .
 <> <defaultModel> <http://linkedfactory.github.io/data/> .
-<> <store> [ a <KvinLevelDb> ; <dirName> "linkedfactory-valuestore" ] .
+<> <store> [ a <KvinLevelDb> ; <location> "linkedfactory-valuestore" ] .
 
-# <> <store> [ a <KvinPartitioned> ; <dirName> "linkedfactory-partitioned" ; <archiveInterval> "P7D" ; <retentionPeriod> "P30D"] .
-# <> <store> [ a <KvinIceberg> ; <dirName> "linkedfactory-iceberg" ] .
+# <> <store> [ a <KvinPartitioned> ; <location> "linkedfactory-partitioned" ; <archiveInterval> "P7D" ; <retentionPeriod> "P30D"] .
+# <> <store> [ a <KvinIceberg> ; <location> "linkedfactory-iceberg" ] .

@@ -140,14 +140,19 @@ Example with the default model and a LevelDB store:
 <> <defaultModel> <http://linkedfactory.github.io/data/> ;
    <store> [
        a <KvinLevelDb> ;
-       <dirName> "linkedfactory-valuestore"
+       <location> "linkedfactory-valuestore"
    ] .
 ----
+
+`location` is the store directory, relative to the workspace or absolute.
+Default: `linkedfactory-valuestore`.
+A LevelDB store needs a local directory: an absolute `file:` URI such as `file:///data/store` is accepted, any other URI fails initialization.
+The older name `dirName` still works, but Pod logs a warning; setting both fails initialization.
 
 A LevelDB store records the version of its storage format.
 Pod does not open a store that was created by an earlier version without this record, or that has another format version; it fails with an error that names the store directory.
 Pod does not convert such stores.
-To start with an empty store, set a new `dirName` or remove the old directory.
+To start with an empty store, set a new `location` or remove the old directory.
 
 === Partitioned storage
 
@@ -157,7 +162,7 @@ A partitioned store writes new values to LevelDB and moves them to an Iceberg ar
 ----
 <store> [
     a <KvinPartitioned> ;
-    <dirName> "linkedfactory-partitioned" ;
+    <location> "linkedfactory-partitioned" ;
     <archiveInterval> "P7D" ;
     <retentionPeriod> "P30D"
 ] .
@@ -167,8 +172,8 @@ A partitioned store writes new values to LevelDB and moves them to an Iceberg ar
 |===
 |Setting |Meaning
 
-|`dirName`
-|Store directory. Default: `linkedfactory-partition`.
+|`location`
+|Store directory, as for LevelDB. Default: `linkedfactory-partition`.
 
 |`archiveInterval`
 |Time between two archival runs. The first run starts when Pod starts. Without this setting, values stay in LevelDB.
@@ -193,13 +198,13 @@ Both durations are ISO 8601 durations such as `P7D`, or a number of milliseconds
 An invalid retention period, partition spec, or table property fails initialization; an invalid archive interval is logged, and values stay in LevelDB.
 After each archival run, the archive is cleaned up as with `cleanUpInterval` for Iceberg storage, so a partitioned store has no cleanup interval of its own.
 New values go to `current/`; the archive is an Iceberg store as described in <<Iceberg storage>>.
-`dirName` must be a local directory, because LevelDB stores its files there.
+`location` must be a local directory, because LevelDB stores its files there.
 Queries read both.
 Deletes only change values that are not archived yet.
 
 Pod does not open a store whose archive location holds a Parquet archive of an earlier Pod version; it fails with an error that names the location.
 Pod does not convert such archives.
-To start with an empty archive, set a new `archiveLocation` or `dirName`, or remove the old archive.
+To start with an empty archive, set a new `archiveLocation` or `location`, or remove the old archive.
 
 === Iceberg storage
 
@@ -209,7 +214,7 @@ To use Iceberg instead of the default value store, configure a store of type `Kv
 ----
 <store> [
     a <KvinIceberg> ;
-    <dirName> "linkedfactory-iceberg" ;
+    <location> "linkedfactory-iceberg" ;
     <retentionPeriod> "P365D" ;
     <tableProperties> """
         kvin.compaction.min-files=8
@@ -222,7 +227,7 @@ To use Iceberg instead of the default value store, configure a store of type `Kv
 |===
 |Setting |Meaning
 
-|`dirName`
+|`location`
 |Archive location. Default: `linkedfactory-iceberg`. A path is relative to the workspace. A URI such as `s3a://bucket/pod-archive` is used unchanged, see the remote locations below.
 
 |`retentionPeriod`
@@ -263,7 +268,7 @@ Location-based constructors take the archive root and preserve the existing dire
 `KvinPartitioned` takes such an object for its archive; its location is the archive location, and its cleanup interval is ignored.
 The root is a local path, a `file:` URI, or a URI of another Hadoop file system, such as `s3a://bucket/archive`.
 Pod does not include connectors for remote file systems; the connector for the scheme must be on the classpath.
-In the service configuration, set `dirName` to the URI.
+In the service configuration, set `location` to the URI.
 Hadoop shares one file system instance per scheme and bucket within the JVM, so the first store that accesses a bucket determines its Hadoop settings.
 The property `fs.<scheme>.impl.disable.cache=true` gives each store its own instance.
 Fetches read local data files directly, without the Hadoop file system and without vectored I/O.
@@ -334,7 +339,7 @@ For example, item bucketing with 32 buckets:
 ----
 <store> [
     a <KvinIceberg> ;
-    <dirName> "linkedfactory-iceberg" ;
+    <location> "linkedfactory-iceberg" ;
     <partitionSpec> """{"spec-id":0,"fields":[{"name":"item_bucket","transform":"bucket[32]","source-id":1,"field-id":1000}]}"""
 ] .
 ----
