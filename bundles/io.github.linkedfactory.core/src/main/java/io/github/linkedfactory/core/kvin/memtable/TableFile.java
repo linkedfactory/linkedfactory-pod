@@ -18,14 +18,25 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.zip.CRC32C;
 
 /**
  * An append-only file of KVIN records with an in-memory index.
  * <p>
- * Each entry starts with its length, followed by a kind field. The kinds 0 to 3 are value records,
- * where the kind is the number of leading IDs shared with the previous value record. Larger kinds
- * are tombstones of deletes. When an existing file is opened, the entries are replayed in order,
- * so a tombstone removes only the records written before it.
+ * Each entry starts with the length of its payload, followed by the payload. The payload starts
+ * with a kind field. The kinds 0 to 3 are value records, where the kind is the number of leading
+ * IDs shared with the previous value record. The kinds 4 to 6 are tombstones of deletes. When an
+ * existing file is opened, the entries are replayed in order, so a tombstone removes only the
+ * records written before it.
+ * <p>
+ * The entries form groups, each closed by a commit entry with the CRC32C checksum of the
+ * group's bytes, see {@link #commit()}. A group ends with each delete, after
+ * {@link #MAX_GROUP_BYTES}, on {@link #sync()} and on {@link #close()}. Replaying applies the
+ * entries of a group only if its checksum matches, and stops at the first group that does not
+ * match or is not closed, as after a crash of the operating system that persisted only some of
+ * the written pages. The rest of the file is then cleared, so that entries after it are not
+ * read again later. Written entries are only persisted by {@link #sync()}, or by the operating
+ * system.
  */
 public class TableFile implements KvinRecordStore {
 	static long LENGTH = 5L * 1024 * 1024;
@@ -44,6 +55,18 @@ public class TableFile implements KvinRecordStore {
 	 */
 	static final int RANGE_TOMBSTONE = 6;
 
+	/**
+	 * Commit entry that closes a group: kind, CRC32C checksum of the bytes of the group as a
+	 * 4-byte value.
+	 */
+	static final int COMMIT = 7;
+
+	/**
+	 * Number of bytes after which a group is closed, so that a damaged byte drops at most the
+	 * entries of one group of this size, or of one put.
+	 */
+	static int MAX_GROUP_BYTES = 64 * 1024;
+
 	Path path;
 	RandomAccessFile rafile;
 	FileChannel channel;
@@ -53,6 +76,14 @@ public class TableFile implements KvinRecordStore {
 	// read while fetches read the mappings, written by close, so that no fetch reads an unmapped buffer
 	private final ReentrantReadWriteLock mappingLock = new ReentrantReadWriteLock();
 	private volatile boolean closed;
+	// the position up to which the entries are persisted by sync
+	private int syncedPosition;
+	// whether the length of the file is persisted, which changes when the file is created or grows
+	private boolean lengthSynced;
+	// the start of the group that the next commit entry closes
+	private int groupStart;
+	// whether the constructor completed, so that closing commits the written entries
+	private boolean opened;
 	// sorted by context first, so that all items of a context form one range
 	final ConcurrentSkipListMap<ItemWithContext, List<ItemData>> items = new ConcurrentSkipListMap<>();
 
@@ -73,6 +104,7 @@ public class TableFile implements KvinRecordStore {
 			if (readFile && channel.size() > 0) {
 				reconstructItems(channel.size());
 			}
+			opened = true;
 		} catch (IOException | RuntimeException e) {
 			close();
 			throw e;
@@ -126,6 +158,28 @@ public class TableFile implements KvinRecordStore {
 		previousPropertyId = record.propertyId();
 
 		addRange(icp, record.propertyId(), recordStart);
+		if (buffer.position() - groupStart >= MAX_GROUP_BYTES) {
+			commit();
+		}
+	}
+
+	/**
+	 * Closes the group of the entries written since the last commit with a commit entry. Does
+	 * nothing if no entries were written.
+	 */
+	public synchronized void commit() throws IOException {
+		ensureOpen();
+		int groupEnd = buffer.position();
+		if (groupEnd == groupStart) {
+			return;
+		}
+		int crc = checksum(buffer, groupStart, groupEnd);
+		int length = Varint.calcLengthUnsigned(COMMIT) + Integer.BYTES;
+		ensureCapacity(Varint.MAX_BYTES + length);
+		Varint.writeUnsigned(buffer, length);
+		Varint.writeUnsigned(buffer, COMMIT);
+		buffer.putInt(crc);
+		groupStart = buffer.position();
 	}
 
 	/**
@@ -141,6 +195,7 @@ public class TableFile implements KvinRecordStore {
 			buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, capacity);
 			// fetches may still read the previous mapping, so it is only unmapped on close
 			mappings.add(buffer);
+			lengthSynced = false;
 			// a new mapping starts at position 0
 			buffer.position(position);
 		}
@@ -155,6 +210,8 @@ public class TableFile implements KvinRecordStore {
 			length += Varint.calcLengthUnsigned(propertyField) + 2 * Long.BYTES;
 		}
 		try {
+			// closes the group of the preceding records, as a delete is a group of its own
+			commit();
 			ensureCapacity(Varint.MAX_BYTES + length);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
@@ -169,6 +226,11 @@ public class TableFile implements KvinRecordStore {
 			Varint.writeUnsigned(buffer, propertyField);
 			buffer.putLong(end);
 			buffer.putLong(begin);
+		}
+		try {
+			commit();
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
 		}
 		// tombstones do not change the IDs that the next value record is compressed against
 	}
@@ -328,35 +390,44 @@ public class TableFile implements KvinRecordStore {
 	 *
 	 * @return <code>false</code> if the tombstone is incomplete or has an unknown kind
 	 */
-	private boolean applyTombstone(ByteBuffer bb, int kind, int payloadEnd) {
-		if (kind > RANGE_TOMBSTONE) {
-			return false;
+	/**
+	 * A tombstone read from the file, applied when its group is complete.
+	 */
+	private record Tombstone(int kind, long contextId, long itemId, long propertyField, long end, long begin) {
+		void apply(TableFile file) {
+			switch (kind) {
+				case CONTEXT_TOMBSTONE -> file.removeContext(contextId);
+				case ITEM_TOMBSTONE -> file.items.remove(new ItemWithContext(itemId, contextId));
+				default -> file.removeRange(itemId, propertyField == 0 ? null : propertyField - 1, contextId, end, begin);
+			}
 		}
+	}
+
+	/**
+	 * A value record read from the file, added to the index when its group is complete.
+	 */
+	private record PendingRecord(ItemWithContext key, long propertyId, int recordStart) {
+	}
+
+	/**
+	 * Reads the tombstone after its kind, or returns null if it is invalid.
+	 */
+	private static Tombstone readTombstone(ByteBuffer bb, int kind, int payloadEnd) {
 		long contextId = Varint.readUnsigned(bb);
 		if (kind == CONTEXT_TOMBSTONE) {
-			if (bb.position() > payloadEnd) {
-				return false;
-			}
-			removeContext(contextId);
-			return true;
+			return bb.position() > payloadEnd ? null : new Tombstone(kind, contextId, 0, 0, 0, 0);
 		}
 		long itemId = Varint.readUnsigned(bb);
 		if (kind == ITEM_TOMBSTONE) {
-			if (bb.position() > payloadEnd) {
-				return false;
-			}
-			items.remove(new ItemWithContext(itemId, contextId));
-			return true;
+			return bb.position() > payloadEnd ? null : new Tombstone(kind, contextId, itemId, 0, 0, 0);
 		}
 		long propertyField = Varint.readUnsigned(bb);
 		if (bb.position() + 2 * Long.BYTES > payloadEnd) {
-			return false;
+			return null;
 		}
-		long end = bb.getLong();
-		long begin = bb.getLong();
-		removeRange(itemId, propertyField == 0 ? null : propertyField - 1, contextId, end, begin);
-		return true;
+		return new Tombstone(kind, contextId, itemId, propertyField, bb.getLong(), bb.getLong());
 	}
+
 
 	@Override
 	public IExtendedIterator<Long> properties(long itemId, Long contextId) {
@@ -426,6 +497,10 @@ public class TableFile implements KvinRecordStore {
 		try {
 			if (closed) {
 				return;
+			}
+			if (opened) {
+				// the written entries are complete, so they are kept when the file is opened again
+				commit();
 			}
 			closed = true;
 			for (MappedByteBuffer mapping : mappings) {
@@ -543,6 +618,69 @@ public class TableFile implements KvinRecordStore {
 
 	// ---- record navigation from a single start offset ----
 
+	/**
+	 * The CRC32C checksum of the bytes from start to end.
+	 */
+	static int checksum(ByteBuffer buffer, int start, int end) {
+		CRC32C crc = new CRC32C();
+		crc.update(buffer.duplicate().limit(end).position(start));
+		return (int) crc.getValue();
+	}
+
+	/**
+	 * Closes the current group and persists the entries written since the last sync, and the
+	 * length of the file if it changed.
+	 */
+	public synchronized void sync() throws IOException {
+		ensureOpen();
+		commit();
+		int position = buffer.position();
+		if (position > syncedPosition) {
+			buffer.force(syncedPosition, position - syncedPosition);
+		}
+		if (!lengthSynced) {
+			channel.force(true);
+			lengthSynced = true;
+		}
+		syncedPosition = position;
+	}
+
+	/**
+	 * The number of written bytes that no commit entry closes yet, for tests.
+	 */
+	synchronized int uncommittedBytes() {
+		return buffer.position() - groupStart;
+	}
+
+	/**
+	 * The number of written bytes that are not persisted by {@link #sync()}, for tests.
+	 */
+	synchronized int unsyncedBytes() {
+		return lengthSynced ? buffer.position() - syncedPosition : buffer.position();
+	}
+
+	/**
+	 * Clears the bytes after the last valid entry if any of them is set, so that entries after
+	 * an incomplete one are not read when the file is opened again after new entries.
+	 */
+	private void clearAfter(int position, long dataLength) {
+		int end = (int) Math.min(dataLength, buffer.capacity());
+		int set = -1;
+		for (int i = position; i < end; i++) {
+			if (buffer.get(i) != 0) {
+				set = i;
+				break;
+			}
+		}
+		if (set < 0) {
+			return;
+		}
+		for (int i = set; i < end; i++) {
+			buffer.put(i, (byte) 0);
+		}
+		buffer.force(set, end - set);
+	}
+
 	private int payloadStart(int recordStart) {
 		return recordStart + Varint.firstToLength(buffer.get(recordStart));
 	}
@@ -615,68 +753,85 @@ public class TableFile implements KvinRecordStore {
 		return removed;
 	}
 
+	/**
+	 * Replays the complete groups of the file and clears the bytes after them.
+	 */
 	void reconstructItems(long dataLength) {
 		ByteBuffer bb = buffer.duplicate();
 		bb.position(0);
+		// the end of the last complete group, where new entries are appended
+		int validEnd = 0;
+		// the entries of the current group, and the IDs that its records are compressed against
+		List<Object> pending = new ArrayList<>();
+		long itemIdState = previousItemId, contextIdState = previousContextId, propertyIdState = previousPropertyId;
+		boolean hasIdsState = hasPreviousIds;
 
 		while (bb.position() < dataLength) {
 			if (bb.get(bb.position()) == 0) {
 				break;
 			}
-			int recordStart = bb.position();
-			long recordLengthValue;
+			int entryStart = bb.position();
 			try {
-				recordLengthValue = Varint.readUnsigned(bb);
-			} catch (RuntimeException e) {
-				break;
-			}
-			if (recordLengthValue <= 0 || recordLengthValue > Integer.MAX_VALUE) {
-				break;
-			}
-			int recordLength = (int) recordLengthValue;
-			int payloadStart = bb.position();
-			int payloadEnd = payloadStart + recordLength;
-			if (payloadEnd < payloadStart || payloadEnd > dataLength) {
-				break;
-			}
-			try {
-				long sharedPrefix = Varint.readUnsigned(bb);
-				if (sharedPrefix > 3) {
-					if (!applyTombstone(bb, (int) Math.min(sharedPrefix, Integer.MAX_VALUE), payloadEnd)) {
-						bb.position(recordStart);
+				long lengthValue = Varint.readUnsigned(bb);
+				if (lengthValue <= 0 || lengthValue > Integer.MAX_VALUE) {
+					break;
+				}
+				int payloadEnd = bb.position() + (int) lengthValue;
+				if (payloadEnd < bb.position() || payloadEnd > dataLength) {
+					break;
+				}
+				long kind = Varint.readUnsigned(bb);
+				if (kind == COMMIT) {
+					if (bb.position() + Integer.BYTES != payloadEnd
+							|| bb.getInt() != checksum(bb, validEnd, entryStart)) {
 						break;
 					}
-					bb.position(payloadEnd);
-					continue;
+					for (Object entry : pending) {
+						if (entry instanceof PendingRecord r) {
+							addRange(r.key(), r.propertyId(), r.recordStart());
+						} else {
+							((Tombstone) entry).apply(this);
+						}
+					}
+					pending.clear();
+					previousItemId = itemIdState;
+					previousContextId = contextIdState;
+					previousPropertyId = propertyIdState;
+					hasPreviousIds = hasIdsState;
+					validEnd = payloadEnd;
+				} else if (kind > 3) {
+					Tombstone tombstone = kind > RANGE_TOMBSTONE ? null : readTombstone(bb, (int) kind, payloadEnd);
+					if (tombstone == null) {
+						break;
+					}
+					pending.add(tombstone);
+				} else {
+					int sharedPrefix = (int) kind;
+					long itemId = sharedPrefix < 1 ? Varint.readUnsigned(bb) : itemIdState;
+					long contextId = sharedPrefix < 2 ? Varint.readUnsigned(bb) : contextIdState;
+					long propertyId = sharedPrefix < 3 ? Varint.readUnsigned(bb) : propertyIdState;
+					// validate that the key can be parsed
+					Varint.readUnsigned(bb);
+					Varint.readUnsigned(bb);
+					if (bb.position() > payloadEnd) {
+						break;
+					}
+					pending.add(new PendingRecord(new ItemWithContext(itemId, contextId), propertyId, entryStart));
+					hasIdsState = true;
+					itemIdState = itemId;
+					contextIdState = contextId;
+					propertyIdState = propertyId;
 				}
-				long itemId = sharedPrefix < 1 ? Varint.readUnsigned(bb) : previousItemId;
-				long contextId = sharedPrefix < 2 ? Varint.readUnsigned(bb) : previousContextId;
-				long propertyId = sharedPrefix < 3 ? Varint.readUnsigned(bb) : previousPropertyId;
-				if (bb.position() >= payloadEnd) {
-					break;
-				}
-
-				// validate key can be parsed
-				Varint.readUnsigned(bb);
-				Varint.readUnsigned(bb);
-				if (bb.position() > payloadEnd) {
-					break;
-				}
-
-				addRange(new ItemWithContext(itemId, contextId), propertyId, recordStart);
-
-				hasPreviousIds = true;
-				previousItemId = itemId;
-				previousContextId = contextId;
-				previousPropertyId = propertyId;
 				bb.position(payloadEnd);
 			} catch (RuntimeException e) {
-				bb.position(recordStart);
 				break;
 			}
 		}
-		buffer.position(bb.position());
+		buffer.position(validEnd);
+		groupStart = validEnd;
+		clearAfter(validEnd, dataLength);
 	}
+
 
 	void addRange(ItemWithContext icp, long propertyId, int recordStart) {
 		var itemDataList = items.computeIfAbsent(icp, k -> new ArrayList<>());

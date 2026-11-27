@@ -122,11 +122,26 @@ public class KvinMemTable implements Kvin {
 	final DB ids;
 	final CircularBuffer<KvinRecord> queue = new CircularBuffer<>(10000);
 
+	// whether each put and delete persists its entries before it returns
+	final boolean syncWrites;
+
 	/**
-	 * Opens the store in the given directory, creating it if required.
+	 * Opens the store in the given directory, creating it if required. Written values are
+	 * persisted by the operating system, so they survive a crash of the process, but not
+	 * necessarily a crash of the operating system.
 	 */
 	public KvinMemTable(Path path) throws IOException {
-		this(path, TableFileSet::new);
+		this(path, false);
+	}
+
+	/**
+	 * Opens the store in the given directory, creating it if required. With
+	 * <code>syncWrites</code>, each put and delete persists its values before it returns, so
+	 * that they also survive a crash of the operating system or a power loss. This makes small
+	 * writes much slower.
+	 */
+	public KvinMemTable(Path path, boolean syncWrites) throws IOException {
+		this(path, syncWrites, TableFileSet::new);
 	}
 
 	interface TableFileSetFactory {
@@ -138,7 +153,12 @@ public class KvinMemTable implements Kvin {
 	 * for the given path.
 	 */
 	KvinMemTable(Path path, TableFileSetFactory tableFileSetFactory) throws IOException {
+		this(path, false, tableFileSetFactory);
+	}
+
+	KvinMemTable(Path path, boolean syncWrites, TableFileSetFactory tableFileSetFactory) throws IOException {
 		this.path = path;
+		this.syncWrites = syncWrites;
 		Path valueStorePath = path.resolve("ids.dat");
 		this.ids = Iq80DBFactory.factory.open(new File(valueStorePath.toFile(), "ids"),
 				new org.iq80.leveldb.Options()
@@ -536,9 +556,34 @@ public class KvinMemTable implements Kvin {
 				}
 			}
 		}
+		try {
+			// closes the group of the written records, also after a failure, so that they are kept
+			if (syncWrites) {
+				// the URI-ID mappings are already persisted
+				tableFiles.sync();
+			} else {
+				tableFiles.commit();
+			}
+		} catch (IOException | RuntimeException e) {
+			failure = addFailure(failure, e);
+		}
 		if (failure != null) {
 			throw unchecked(failure);
 		}
+	}
+
+	/**
+	 * Persists the entries of a delete if writes are synced.
+	 */
+	private <T> T synced(T deleted) {
+		if (syncWrites) {
+			try {
+				tableFiles.sync();
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+		}
+		return deleted;
 	}
 
 	/**
@@ -806,7 +851,7 @@ public class KvinMemTable implements Kvin {
 				return 0;
 			}
 		}
-		return tableFiles.delete(itemId, propertyId, contextId, end, begin);
+		return synced(tableFiles.delete(itemId, propertyId, contextId, end, begin));
 	}
 
 	/**
@@ -817,7 +862,7 @@ public class KvinMemTable implements Kvin {
 	public boolean delete(URI item, URI context) {
 		long contextId = toId(contextOrDefault(context), EntryType.ContextToId, false, null);
 		long itemId = toId(item, EntryType.SubjectToId, false, null);
-		return contextId >= 0 && itemId >= 0 && tableFiles.delete(itemId, contextId);
+		return contextId >= 0 && itemId >= 0 && synced(tableFiles.delete(itemId, contextId));
 	}
 
 	/**
@@ -827,7 +872,7 @@ public class KvinMemTable implements Kvin {
 	@Override
 	public long delete(URI context) {
 		long contextId = toId(contextOrDefault(context), EntryType.ContextToId, false, null);
-		return contextId < 0 ? 0 : tableFiles.delete(contextId);
+		return contextId < 0 ? 0 : synced(tableFiles.delete(contextId));
 	}
 
 	@Override

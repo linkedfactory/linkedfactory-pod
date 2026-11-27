@@ -9,7 +9,7 @@ import java.io.IOException;
  * A hot store in a {@link KvinMemTable}.
  */
 final class MemTableHotStore extends KvinMemTable implements HotStore {
-	MemTableHotStore(File directory) throws IOException {
-		super(directory.toPath());
+	MemTableHotStore(File directory, boolean syncWrites) throws IOException {
+		super(directory.toPath(), syncWrites);
 	}
 }

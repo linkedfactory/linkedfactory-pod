@@ -8,8 +8,11 @@ import net.enilink.commons.iterator.WrappedIterator;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.channels.FileChannel;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
@@ -38,6 +41,8 @@ public class TableFileSet implements KvinRecordStore {
 	// ordered from oldest to newest
 	final List<TableFile> files = new CopyOnWriteArrayList<>();
 	long nextFileNr;
+	// whether a file was created since the directory was last synced
+	boolean directoryChanged;
 
 	public TableFileSet(Path directory) throws IOException {
 		this(directory, DEFAULT_MAX_FILE_LENGTH);
@@ -79,6 +84,41 @@ public class TableFileSet implements KvinRecordStore {
 	}
 
 	/**
+	 * Closes the current groups of entries, see {@link TableFile#commit()}.
+	 */
+	public synchronized void commit() throws IOException {
+		for (TableFile file : files) {
+			file.commit();
+		}
+	}
+
+	/**
+	 * Persists the entries written to all files since the last sync, and the directory entries
+	 * of new files.
+	 */
+	public synchronized void sync() throws IOException {
+		for (TableFile file : files) {
+			file.sync();
+		}
+		if (directoryChanged) {
+			syncDirectory(directory);
+			directoryChanged = false;
+		}
+	}
+
+	/**
+	 * Persists the entries of a directory. Does nothing on file systems that do not support
+	 * this, such as on Windows.
+	 */
+	static void syncDirectory(Path directory) throws IOException {
+		try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+			channel.force(true);
+		} catch (AccessDeniedException | UnsupportedOperationException e) {
+			// directories cannot be opened or synced on this platform
+		}
+	}
+
+	/**
 	 * Returns the table files from oldest to newest.
 	 */
 	public List<TableFile> getFiles() {
@@ -107,8 +147,13 @@ public class TableFileSet implements KvinRecordStore {
 	synchronized void put(KvinRecord record) throws IOException {
 		TableFile current = files.isEmpty() ? null : files.get(files.size() - 1);
 		if (current == null || current.length() >= maxFileLength) {
+			if (current != null) {
+				// a group does not span files
+				current.commit();
+			}
 			current = new TableFile(directory.resolve("entries_" + (nextFileNr++) + ".dat"));
 			files.add(current);
+			directoryChanged = true;
 		}
 		current.put(record);
 	}

@@ -21,9 +21,19 @@ public interface HotStore extends Kvin {
 	Factory LEVELDB = LevelDbHotStore::new;
 
 	/**
-	 * Hot stores in {@link KvinMemTable}s.
+	 * Hot stores in {@link KvinMemTable}s whose writes are persisted by the operating system,
+	 * see {@link KvinMemTable#KvinMemTable(java.nio.file.Path)}.
 	 */
-	Factory MEMTABLE = MemTableHotStore::new;
+	Factory MEMTABLE = memTable(false);
+
+	/**
+	 * Hot stores in {@link KvinMemTable}s, see {@link KvinMemTable#KvinMemTable(java.nio.file.Path, boolean)}.
+	 *
+	 * @param syncWrites whether each write persists its values before it returns
+	 */
+	static Factory memTable(boolean syncWrites) {
+		return directory -> new MemTableHotStore(directory, syncWrites);
+	}
 
 	/**
 	 * Returns the approximate number of bytes of the stored values, or -1 if it is unknown.

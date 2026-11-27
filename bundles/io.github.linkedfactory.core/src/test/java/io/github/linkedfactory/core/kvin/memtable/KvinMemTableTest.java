@@ -544,4 +544,40 @@ public class KvinMemTableTest {
 		assertEquals(List.of(1), fetched);
 		assertEquals(1, count(derived, contextA));
 	}
+
+	private int unsyncedBytes() {
+		return store.tableFiles.getFiles().stream().mapToInt(TableFile::unsyncedBytes).sum();
+	}
+
+	@Test
+	public void syncsEachWriteIfRequested() throws IOException {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1));
+		assertTrue("Without syncing, the operating system persists writes", unsyncedBytes() > 0);
+		store.close();
+
+		store = new KvinMemTable(directory, true);
+		store.put(new KvinTuple(contextA, item, property, 2, 0, 2));
+		assertEquals(0, unsyncedBytes());
+		assertEquals(1, store.delete(item, property, contextA, 1, 1));
+		assertEquals(0, unsyncedBytes());
+		assertTrue(store.delete(item, contextA));
+		assertEquals(0, unsyncedBytes());
+		store.put(new KvinTuple(contextB, item, property, 3, 0, 3));
+		assertEquals(1, store.delete(contextB));
+		assertEquals(0, unsyncedBytes());
+	}
+
+	@Test
+	public void closesTheGroupOfEachPut() throws IOException {
+		store.put(tuples(contextA, 100));
+		assertEquals(0, store.tableFiles.getFiles().stream().mapToInt(TableFile::uncommittedBytes).sum());
+
+		// also after a failed put, so that the stored records are kept
+		FailingTableFileSet tableFiles = reopenFailing();
+		tableFiles.failing = false;
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1));
+		tableFiles.failing = true;
+		assertThrows(UncheckedIOException.class, () -> store.put(new KvinTuple(contextA, item, property, 2, 0, 2)));
+		assertEquals(0, store.tableFiles.getFiles().stream().mapToInt(TableFile::uncommittedBytes).sum());
+	}
 }

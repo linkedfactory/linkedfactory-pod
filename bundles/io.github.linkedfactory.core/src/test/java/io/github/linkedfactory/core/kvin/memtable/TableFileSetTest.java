@@ -214,4 +214,17 @@ public class TableFileSetTest {
 					values(set.fetchAll().toList()));
 		}
 	}
+
+	@Test
+	public void syncsAllFilesAndTheDirectory() throws IOException {
+		try (TableFileSet set = open()) {
+			set.put(record(CTX, ITEM, PROPERTY, 1, 0, "a"), record(CTX, ITEM, PROPERTY, 2, 0, "b"));
+			assertTrue(set.directoryChanged);
+			set.sync();
+			assertFalse(set.directoryChanged);
+			for (TableFile file : set.getFiles()) {
+				assertEquals(0, file.unsyncedBytes());
+			}
+		}
+	}
 }

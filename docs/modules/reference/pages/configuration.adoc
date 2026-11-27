@@ -274,6 +274,10 @@ Location-based constructors take the archive root and preserve the existing dire
 `KvinPartitioned` takes such an object for its archive; its location is the archive location, and its cleanup interval is ignored.
 It also takes a `HotStore.Factory` for the stores of new values in `current/` and `current-archive/`: `HotStore.LEVELDB`, the default, or `HotStore.MEMTABLE`.
 Open a store always with the same factory; a store of the other type does not read the values in these directories.
+Both types leave persisting new values to the operating system: the values survive a crash of Pod, but not necessarily a crash of the operating system or a power loss.
+`HotStore.memTable(true)` persists the values of each write before the write returns; each write then waits for the disk, so write values in batches.
+After a crash of the operating system, a memtable hot store keeps the writes up to the first incompletely written one; it keeps a write either completely or not at all.
+Writes larger than 64 KB are kept in parts of 64 KB.
 With a maximum hot store size in bytes, a `HotStore.MEMTABLE` store is also archived when it reaches that size; LevelDB hot stores are archived only at the archive interval.
 While a full hot store is archived, new values go to an empty one.
 If that one is also full before the archival ends, writes wait until the archival ends, so the hot stores hold at most about twice the maximum size.

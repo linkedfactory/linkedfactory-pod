@@ -319,4 +319,162 @@ public class TableFileTest {
 			}
 		}
 	}
+
+	private static KvinRecord value(long time, int length) {
+		byte[] value = new byte[length];
+		java.util.Arrays.fill(value, (byte) time);
+		return new KvinRecord(1L, 1L, 1L, time, 0, value);
+	}
+
+	/**
+	 * Writes each record as a group of its own and returns the end of each group.
+	 */
+	private List<Long> write(KvinRecord... records) throws IOException {
+		List<Long> ends = new java.util.ArrayList<>();
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			for (KvinRecord record : records) {
+				tableFile.put(record);
+				tableFile.commit();
+				ends.add(tableFile.length());
+			}
+		}
+		return ends;
+	}
+
+	// length of the commit entry of a group: length, kind and checksum
+	private static final int COMMIT_ENTRY_BYTES = 1 + 1 + Integer.BYTES;
+
+	private void overwrite(long position, byte[] bytes) throws IOException {
+		try (var file = new java.io.RandomAccessFile(tablePath.toFile(), "rw")) {
+			file.seek(position);
+			file.write(bytes);
+		}
+	}
+
+	private List<Long> times() throws IOException {
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			return tableFile.fetch(1L, 1L, 1L, 100).toList().stream().map(KvinRecord::time).toList();
+		}
+	}
+
+	@Test
+	public void dropsATornLastEntry() throws IOException {
+		List<Long> ends = write(value(1, 10), value(2, 10), value(3, 300));
+		// only the first bytes of the last entry reached the disk
+		overwrite(ends.get(1) + 4, new byte[(int) (ends.get(2) - ends.get(1) - 4)]);
+		assertEquals(List.of(2L, 1L), times());
+
+		// new entries follow the last complete one
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			assertEquals((long) ends.get(1), tableFile.length());
+			tableFile.put(value(4, 10));
+		}
+		assertEquals(List.of(4L, 2L, 1L), times());
+	}
+
+	@Test
+	public void stopsAtAnEntryWithAChangedByte() throws IOException {
+		List<Long> ends = write(value(1, 10), value(2, 10), value(3, 10));
+		overwrite(ends.get(1) - COMMIT_ENTRY_BYTES - 1, new byte[]{(byte) 0x55});
+		// the entries after it may depend on it, so they are dropped as well
+		assertEquals(List.of(1L), times());
+	}
+
+	@Test
+	public void clearsTheEntriesAfterATornEntry() throws IOException {
+		List<Long> ends = write(value(1, 10), value(2, 300), value(3, 10), value(4, 10));
+		// a page in the middle did not reach the disk, the following ones did
+		overwrite(ends.get(0) + 4, new byte[100]);
+		assertEquals(List.of(1L), times());
+
+		byte[] content = Files.readAllBytes(tablePath);
+		for (long i = ends.get(0); i < ends.get(3); i++) {
+			assertEquals("Byte " + i + " is cleared", 0, content[(int) i]);
+		}
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			tableFile.put(value(5, 10));
+		}
+		assertEquals(List.of(5L, 1L), times());
+	}
+
+	@Test
+	public void keepsValuesOfATornDelete() throws IOException {
+		long valueEnd;
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			tableFile.put(value(1, 10));
+			// a delete closes the group of the preceding values
+			assertTrue(tableFile.delete(1L, 1L));
+			valueEnd = tableFile.length() - (1 + 1 + 1 + 1 + COMMIT_ENTRY_BYTES);
+		}
+		// the tombstone did not reach the disk completely
+		overwrite(valueEnd + 2, new byte[2]);
+		assertEquals(List.of(1L), times());
+	}
+
+	@Test
+	public void syncsWrittenEntries() throws IOException {
+		long previousLength = TableFile.LENGTH;
+		TableFile.LENGTH = 1024;
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			tableFile.put(value(1, 10));
+			assertTrue(tableFile.unsyncedBytes() > 0);
+			tableFile.sync();
+			assertEquals(0, tableFile.unsyncedBytes());
+
+			// growing the file changes its length
+			for (int i = 2; i < 20; i++) {
+				tableFile.put(value(i, 100));
+			}
+			assertTrue(tableFile.unsyncedBytes() > 0);
+			tableFile.sync();
+			assertEquals(0, tableFile.unsyncedBytes());
+			tableFile.delete(1L, 1L);
+			assertTrue(tableFile.unsyncedBytes() > 0);
+			tableFile.sync();
+			assertEquals(0, tableFile.unsyncedBytes());
+		} finally {
+			TableFile.LENGTH = previousLength;
+		}
+	}
+
+	@Test
+	public void keepsAGroupCompletelyOrNotAtAll() throws IOException {
+		long groupEnd;
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			tableFile.put(value(1, 10));
+			tableFile.commit();
+			groupEnd = tableFile.length();
+			tableFile.put(value(2, 10));
+			tableFile.put(value(3, 10));
+			tableFile.put(value(4, 10));
+		}
+		// the end of the second record of the group did not reach the disk
+		overwrite(groupEnd + 20, new byte[4]);
+		assertEquals(List.of(1L), times());
+	}
+
+	@Test
+	public void dropsEntriesOfAnUnclosedGroup() throws IOException {
+		int previousMaxGroupBytes = TableFile.MAX_GROUP_BYTES;
+		TableFile.MAX_GROUP_BYTES = 200;
+		Path copy = tempDir.toPath().resolve("copy.data");
+		try (TableFile tableFile = new TableFile(tablePath)) {
+			for (int i = 1; i <= 25; i++) {
+				tableFile.put(value(i, 20));
+			}
+			// the state of the file if the process stopped now, as the mapping writes to the file
+			Files.copy(tablePath, copy);
+		} finally {
+			TableFile.MAX_GROUP_BYTES = previousMaxGroupBytes;
+		}
+		try (TableFile reopened = new TableFile(copy)) {
+			List<Long> times = reopened.fetch(1L, 1L, 1L, 100).toList().stream().map(KvinRecord::time).toList();
+			// groups close after 200 bytes, the records of the last group are not closed yet
+			assertTrue(times.size() > 0 && times.size() < 25);
+			assertEquals(times.size() * 1L, (long) times.get(0));
+			assertEquals(1L, (long) times.get(times.size() - 1));
+		}
+		// closing the file closes the last group
+		assertEquals(25, times().size());
+	}
 }
