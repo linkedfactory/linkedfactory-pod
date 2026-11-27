@@ -147,7 +147,6 @@ Example with the default model and a LevelDB store:
 `location` is the store directory, relative to the workspace or absolute.
 Default: `linkedfactory-valuestore`.
 A LevelDB store needs a local directory: an absolute `file:` URI such as `file:///data/store` is accepted, any other URI fails initialization.
-The older name `dirName` still works, but Pod logs a warning; setting both fails initialization.
 
 A LevelDB store records the version of its storage format.
 Pod does not open a store that was created by an earlier version without this record, or that has another format version; it fails with an error that names the store directory.

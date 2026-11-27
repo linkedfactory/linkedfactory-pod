@@ -40,11 +40,6 @@ public class KvinPartitionedFactoryTest {
 			}
 
 			@Override
-			public String getDirName() {
-				return null;
-			}
-
-			@Override
 			public ILiteral getArchiveInterval() {
 				return null;
 			}

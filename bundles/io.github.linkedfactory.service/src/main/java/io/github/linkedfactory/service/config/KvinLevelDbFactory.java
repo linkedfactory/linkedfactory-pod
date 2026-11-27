@@ -31,14 +31,6 @@ public abstract class KvinLevelDbFactory implements IKvinFactory {
 	 */
 	protected String getLocationOr(String defaultLocation) {
 		String location = getLocation();
-		String dirName = getDirName();
-		if (dirName != null) {
-			if (location != null) {
-				throw new IllegalArgumentException("Set only location, not both location and the deprecated dirName");
-			}
-			log.warn("The setting dirName is deprecated, use location instead");
-			location = dirName;
-		}
 		return location == null ? defaultLocation : location;
 	}
 
@@ -86,11 +78,4 @@ public abstract class KvinLevelDbFactory implements IKvinFactory {
 
 	@Iri("plugin://io.github.linkedfactory.service/data/location")
 	public abstract String getLocation();
-
-	/**
-	 * @deprecated replaced by {@link #getLocation()}
-	 */
-	@Deprecated
-	@Iri("plugin://io.github.linkedfactory.service/data/dirName")
-	public abstract String getDirName();
 }
