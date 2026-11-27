@@ -23,6 +23,7 @@ import java.util.concurrent.Future;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -423,5 +424,124 @@ public class KvinMemTableTest {
 				new KvinTuple(contextA, item, property, 2, 0, record),
 				new KvinTuple(contextA, item, property, 1, 0, 1.5),
 				new KvinTuple(Kvin.DEFAULT_CONTEXT, other, property, 3, 0, "x")), tuples);
+	}
+
+	/**
+	 * Records the notifications of a store.
+	 */
+	static class RecordingListener implements io.github.linkedfactory.core.kvin.KvinListener {
+		final List<URI> items = new java.util.concurrent.CopyOnWriteArrayList<>();
+		final List<KvinTuple> values = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+		@Override
+		public void entityCreated(URI item) {
+			items.add(item);
+		}
+
+		@Override
+		public void valueAdded(URI item, URI property, URI context, long time, long seqNr, Object value) {
+			values.add(new KvinTuple(context, item, property, time, (int) seqNr, value));
+		}
+	}
+
+	@Test
+	public void notifiesListenersOfNewItemsAndValues() throws IOException {
+		RecordingListener listener = new RecordingListener();
+		assertTrue(store.addListener(listener));
+		assertFalse(store.addListener(listener));
+
+		List<KvinTuple> tuples = List.of(new KvinTuple(contextA, item, property, 1, 0, 1.0),
+				new KvinTuple(contextA, item, property, 2, 1, 2.0),
+				new KvinTuple(contextB, other, otherProperty, 3, 0, "text"));
+		store.put(tuples);
+		assertEquals(List.of(item, other), listener.items);
+		assertEquals(tuples, listener.values);
+
+		// known items are not created again, also after reopening
+		store.close();
+		store = new KvinMemTable(directory);
+		store.addListener(listener);
+		store.put(new KvinTuple(contextB, item, property, 4, 0, 4.0));
+		assertEquals(List.of(item, other), listener.items);
+		assertEquals(4, listener.values.size());
+
+		assertTrue(store.removeListener(listener));
+		assertFalse(store.removeListener(listener));
+		store.put(new KvinTuple(contextA, URIs.createURI("http://example.org/new"), property, 5, 0, 5.0));
+		assertEquals(2, listener.items.size());
+		assertEquals(4, listener.values.size());
+	}
+
+	@Test
+	public void notifiesListenersOfValuesThatCanOnlyBeIteratedOnce() {
+		RecordingListener listener = new RecordingListener();
+		store.addListener(listener);
+		List<KvinTuple> tuples = tuples(contextA, 3);
+		store.put(net.enilink.commons.iterator.WrappedIterator.create(tuples.iterator()));
+		assertEquals(tuples, listener.values);
+		assertEquals(3, store.fetchAll().toList().size());
+	}
+
+	@Test
+	public void notifiesNoValuesOfAFailedPut() throws IOException {
+		reopenFailing();
+		RecordingListener listener = new RecordingListener();
+		store.addListener(listener);
+		assertThrows(UncheckedIOException.class, () -> store.put(new KvinTuple(contextA, item, property, 1, 0, 1)));
+		// the ID of the item is stored
+		assertEquals(List.of(item), listener.items);
+		assertEquals(List.of(), listener.values);
+	}
+
+	@Test
+	public void storesValuesIfAListenerFails() {
+		RecordingListener listener = new RecordingListener();
+		store.addListener(new io.github.linkedfactory.core.kvin.KvinListener() {
+			@Override
+			public void entityCreated(URI item) {
+				throw new IllegalStateException("Listener failed");
+			}
+
+			@Override
+			public void valueAdded(URI item, URI property, URI context, long time, long seqNr, Object value) {
+				throw new IllegalStateException("Listener failed");
+			}
+		});
+		store.addListener(listener);
+
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1));
+		assertEquals(List.of(item), listener.items);
+		assertEquals(1, listener.values.size());
+		assertEquals(1, count(item, contextA));
+	}
+
+	@Test(timeout = 30_000)
+	public void allowsListenersToUseTheStore() throws Exception {
+		URI derived = URIs.createURI("http://example.org/derived");
+		List<Integer> fetched = new java.util.concurrent.CopyOnWriteArrayList<>();
+		store.addListener(new io.github.linkedfactory.core.kvin.KvinListener() {
+			@Override
+			public void entityCreated(URI item) {
+			}
+
+			@Override
+			public void valueAdded(URI item, URI property, URI context, long time, long seqNr, Object value) {
+				if (item.equals(KvinMemTableTest.this.item)) {
+					fetched.add(store.fetch(item, property, context, 0).toList().size());
+					// from another thread, which waits for the lock of a running put
+					var executor = Executors.newSingleThreadExecutor();
+					try {
+						executor.submit(() -> store.put(new KvinTuple(context, derived, property, time, 0, value))).get();
+					} catch (Exception e) {
+						throw new IllegalStateException(e);
+					} finally {
+						executor.shutdown();
+					}
+				}
+			}
+		});
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1));
+		assertEquals(List.of(1), fetched);
+		assertEquals(1, count(derived, contextA));
 	}
 }

@@ -24,6 +24,8 @@ import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
 import org.iq80.leveldb.impl.Iq80DBFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -34,13 +36,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -77,6 +82,10 @@ public class KvinMemTable implements Kvin {
 			return id + 1;
 		}
 	}
+
+	private static final Logger log = LoggerFactory.getLogger(KvinMemTable.class);
+
+	final Set<KvinListener> listeners = new CopyOnWriteArraySet<>();
 
 	final Striped<ReadWriteLock> locks = Striped.readWriteLock(64);
 
@@ -153,12 +162,19 @@ public class KvinMemTable implements Kvin {
 	final class IdBatch implements AutoCloseable {
 		WriteBatch batch = ids.createWriteBatch();
 		final List<CacheKey> keys = new ArrayList<>();
+		// the new items of the batch, and the new items of all written batches
+		final List<URI> newItems = new ArrayList<>();
+		final List<URI> writtenItems = new ArrayList<>();
 
-		void add(CacheKey cacheKey, long id, byte[] key, byte[] idBytes, byte[] idKeyBytes, byte[] uriBytes) {
+		void add(URI uri, EntryType entryType, CacheKey cacheKey, long id, byte[] key, byte[] idBytes,
+		         byte[] idKeyBytes, byte[] uriBytes) {
 			batch.put(key, idBytes);
 			batch.put(idKeyBytes, uriBytes);
 			keys.add(cacheKey);
 			pendingIds.put(cacheKey, id);
+			if (entryType == EntryType.SubjectToId) {
+				newItems.add(uri);
+			}
 		}
 
 		boolean isFull() {
@@ -183,6 +199,8 @@ public class KvinMemTable implements Kvin {
 				}
 			}
 			keys.clear();
+			writtenItems.addAll(newItems);
+			newItems.clear();
 			batch.close();
 			batch = ids.createWriteBatch();
 		}
@@ -194,6 +212,7 @@ public class KvinMemTable implements Kvin {
 				pendingIds.remove(key);
 			}
 			keys.clear();
+			newItems.clear();
 			batch.close();
 		}
 	}
@@ -313,7 +332,7 @@ public class KvinMemTable implements Kvin {
 			byte[] uriBytes = uri.toString().getBytes(StandardCharsets.UTF_8);
 
 			if (idBatch != null) {
-				idBatch.add(cacheKey, newId, key, idBytesInner, idKeyBytes, uriBytes);
+				idBatch.add(uri, entryType, cacheKey, newId, key, idBytesInner, idKeyBytes, uriBytes);
 			} else {
 				// Ensure that writes to the id database are always synced to disk.
 				// As ids are subject to fewer changes the pages may only
@@ -382,12 +401,40 @@ public class KvinMemTable implements Kvin {
 
 	@Override
 	public boolean addListener(KvinListener listener) {
-		return false;
+		return listeners.add(listener);
 	}
 
 	@Override
 	public boolean removeListener(KvinListener listener) {
-		return false;
+		return listeners.remove(listener);
+	}
+
+	/**
+	 * Notifies the listeners of items whose IDs were created. Failures of listeners are
+	 * logged, as the values are already stored.
+	 */
+	private void notifyEntitiesCreated(List<URI> items) {
+		for (URI item : items) {
+			for (KvinListener listener : listeners) {
+				try {
+					listener.entityCreated(item);
+				} catch (RuntimeException e) {
+					log.warn("Listener {} failed for the new item {}", listener, item, e);
+				}
+			}
+		}
+	}
+
+	private void notifyValuesAdded(Iterable<KvinTuple> tuples) {
+		for (KvinTuple tuple : tuples) {
+			for (KvinListener listener : listeners) {
+				try {
+					listener.valueAdded(tuple.item, tuple.property, tuple.context, tuple.time, tuple.seqNr, tuple.value);
+				} catch (RuntimeException e) {
+					log.warn("Listener {} failed for a value of {}", listener, tuple.item, e);
+				}
+			}
+		}
 	}
 
 	@Override
@@ -399,14 +446,47 @@ public class KvinMemTable implements Kvin {
 	 * Stores the tuples. If storing a record fails, the put stops and throws the failure.
 	 * The records stored before the failure are kept. Puts run one after another, as the
 	 * queue of the writer takes records from one put at a time.
+	 * <p>
+	 * After the tuples are stored, the listeners are notified of the items with new IDs and of
+	 * each added value, outside of the lock of the put. After a failure, the listeners are only
+	 * notified of the items whose IDs were stored, and of no values.
 	 */
 	@Override
-	public synchronized void put(Iterable<KvinTuple> tuples) {
+	public void put(Iterable<KvinTuple> tuples) {
+		boolean notify = !listeners.isEmpty();
+		// an iterable that is not a collection may only be iterated once
+		List<KvinTuple> added = notify && !(tuples instanceof Collection<?>) ? new ArrayList<>() : null;
+		List<URI> newItems = new ArrayList<>();
+		RuntimeException failure = null;
+		try {
+			store(tuples, added, newItems);
+		} catch (RuntimeException e) {
+			failure = e;
+		}
+		if (notify) {
+			notifyEntitiesCreated(newItems);
+		}
+		if (failure != null) {
+			throw failure;
+		}
+		if (notify) {
+			notifyValuesAdded(added != null ? added : tuples);
+		}
+	}
+
+	/**
+	 * Stores the tuples, adds them to <code>added</code> unless it is null, and adds the items
+	 * whose new IDs were written to <code>newItems</code>.
+	 */
+	private synchronized void store(Iterable<KvinTuple> tuples, List<KvinTuple> added, List<URI> newItems) {
 		Future<Void> writer = async ? executor.submit(this::writeQueuedRecords) : null;
 		Throwable failure = null;
 		IdBatch idBatch = new IdBatch();
 		try {
 			for (KvinTuple tuple : tuples) {
+				if (added != null) {
+					added.add(tuple);
+				}
 				KvinRecord record = new KvinRecord(
 					toId(tuple.context, EntryType.ContextToId, true, idBatch),
 					toId(tuple.item, EntryType.SubjectToId, true, idBatch),
@@ -438,6 +518,7 @@ public class KvinMemTable implements Kvin {
 		} catch (Throwable e) {
 			failure = addFailure(failure, e);
 		}
+		newItems.addAll(idBatch.writtenItems);
 		try {
 			idBatch.close();
 		} catch (Throwable e) {

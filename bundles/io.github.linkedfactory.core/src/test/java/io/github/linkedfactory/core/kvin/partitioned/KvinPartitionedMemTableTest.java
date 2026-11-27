@@ -137,4 +137,28 @@ public class KvinPartitionedMemTableTest {
 			return lines.map(line -> line.indexOf('/') < 0 ? "" : line.substring(line.indexOf('/'))).toList();
 		}
 	}
+
+	@Test
+	public void keepsListenersOfTheHotStoreAfterArchival() {
+		List<KvinTuple> values = new java.util.concurrent.CopyOnWriteArrayList<>();
+		List<URI> items = new java.util.concurrent.CopyOnWriteArrayList<>();
+		store.addListener(new io.github.linkedfactory.core.kvin.KvinListener() {
+			@Override
+			public void entityCreated(URI item) {
+				items.add(item);
+			}
+
+			@Override
+			public void valueAdded(URI item, URI property, URI context, long time, long seqNr, Object value) {
+				values.add(new KvinTuple(context, item, property, time, (int) seqNr, value));
+			}
+		});
+		store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, ITEM, PROPERTY, 1, 1.0));
+		store.runArchival();
+		store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, ITEM, PROPERTY, 2, 2.0));
+
+		assertEquals(List.of(1L, 2L), times(values));
+		// each hot store has its own IDs, so a new hot store reports its items again
+		assertEquals(List.of(ITEM, ITEM), items);
+	}
 }
