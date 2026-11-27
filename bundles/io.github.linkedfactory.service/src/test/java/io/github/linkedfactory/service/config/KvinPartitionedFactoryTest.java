@@ -27,6 +27,10 @@ public class KvinPartitionedFactoryTest {
 	@Rule
 	public TemporaryFolder temporary = new TemporaryFolder();
 
+	// the hot store settings of the factories that the test creates
+	private String hotStore;
+	private String maxHotStoreSize;
+
 	private KvinPartitionedFactory factory(String retentionPeriod, String partitionSpec, String tableProperties) {
 		return factory(retentionPeriod, partitionSpec, tableProperties, null, null);
 	}
@@ -72,6 +76,16 @@ public class KvinPartitionedFactoryTest {
 			@Override
 			public ILiteral getPageCacheSize() {
 				return new Literal("1048576");
+			}
+
+			@Override
+			public String getHotStore() {
+				return hotStore;
+			}
+
+			@Override
+			public ILiteral getMaxHotStoreSize() {
+				return maxHotStoreSize == null ? null : new Literal(maxHotStoreSize);
 			}
 		};
 	}
@@ -133,5 +147,71 @@ public class KvinPartitionedFactoryTest {
 		assertThrows(IllegalArgumentException.class, () -> factory("30 days", null, null).create());
 		assertThrows(IllegalArgumentException.class,
 				() -> factory(null, null, "kvin.compaction.min-files=1").create());
+	}
+
+	private File currentHotStore() {
+		return new File(temporary.getRoot(), "current");
+	}
+
+	@Test
+	public void usesLevelDbHotStoresByDefault() throws Exception {
+		try (var store = factory(null, null, null).create()) {
+			store.put(new KvinTuple(null, URIs.createURI("urn:partitioned:item"),
+					URIs.createURI("urn:partitioned:property"), 1, 42));
+		}
+		assertTrue("LevelDB keeps its databases in the directory", new File(currentHotStore(), "values/CURRENT").exists());
+		assertFalse(new File(currentHotStore(), "entries_0.dat").exists());
+	}
+
+	@Test
+	public void usesMemTableHotStores() throws Exception {
+		hotStore = "MemTable";
+		try (var store = factory(null, null, null).create()) {
+			store.put(new KvinTuple(null, URIs.createURI("urn:partitioned:item"),
+					URIs.createURI("urn:partitioned:property"), 1, 42));
+		}
+		assertTrue(new File(currentHotStore(), "entries_0.dat").exists());
+		assertFalse(new File(currentHotStore(), "values").exists());
+	}
+
+	@Test
+	public void archivesAFullMemTableHotStore() throws Exception {
+		hotStore = "memtable";
+		maxHotStoreSize = "4096";
+		var item = URIs.createURI("urn:partitioned:item");
+		var property = URIs.createURI("urn:partitioned:property");
+		try (var store = (KvinPartitioned) factory(null, null, null).create()) {
+			List<KvinTuple> tuples = new java.util.ArrayList<>();
+			for (int i = 1; i <= 500; i++) {
+				tuples.add(new KvinTuple(null, item, property, i, (double) i));
+			}
+			store.put(tuples);
+			// without an archive interval, the full hot store starts the archival
+			long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+			while (!new File(temporary.getRoot(), "archive/iceberg/metadata").isDirectory()
+					|| new File(temporary.getRoot(), "current-archive").exists()) {
+				assertTrue("The full hot store is archived", System.nanoTime() < deadline);
+				Thread.sleep(10);
+			}
+			assertEquals(500, store.fetch(item, property, null, 0).toList().size());
+		}
+	}
+
+	@Test
+	public void rejectsInvalidHotStoreSettings() {
+		hotStore = "rocksdb";
+		assertThrows(IllegalArgumentException.class, () -> factory(null, null, null).create());
+
+		hotStore = "memtable";
+		maxHotStoreSize = "-1";
+		assertThrows(IllegalArgumentException.class, () -> factory(null, null, null).create());
+		maxHotStoreSize = "64 MB";
+		assertThrows(IllegalArgumentException.class, () -> factory(null, null, null).create());
+
+		// LevelDB hot stores have no size
+		hotStore = null;
+		maxHotStoreSize = "4096";
+		assertThrows(IllegalArgumentException.class, () -> factory(null, null, null).create());
+		assertFalse("Invalid settings fail before the store is opened", currentHotStore().exists());
 	}
 }

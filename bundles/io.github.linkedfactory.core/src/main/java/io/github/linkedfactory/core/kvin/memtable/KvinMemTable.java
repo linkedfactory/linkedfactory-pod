@@ -508,7 +508,7 @@ public class KvinMemTable implements Kvin {
 					added.add(tuple);
 				}
 				KvinRecord record = new KvinRecord(
-					toId(tuple.context, EntryType.ContextToId, true, idBatch),
+					toId(contextOrDefault(tuple.context), EntryType.ContextToId, true, idBatch),
 					toId(tuple.item, EntryType.SubjectToId, true, idBatch),
 					toId(tuple.property, EntryType.PropertyToId, true, idBatch),
 					tuple.time,

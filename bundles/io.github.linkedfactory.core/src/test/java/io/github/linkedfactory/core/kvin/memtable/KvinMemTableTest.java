@@ -580,4 +580,12 @@ public class KvinMemTableTest {
 		assertThrows(UncheckedIOException.class, () -> store.put(new KvinTuple(contextA, item, property, 2, 0, 2)));
 		assertEquals(0, store.tableFiles.getFiles().stream().mapToInt(TableFile::uncommittedBytes).sum());
 	}
+
+	@Test
+	public void storesValuesOfTheNullContextInTheDefaultContext() {
+		store.put(new KvinTuple(null, item, property, 1, 0, 1));
+		assertEquals(1, count(item, Kvin.DEFAULT_CONTEXT));
+		assertEquals(1, store.fetch(item, property, null, 0).toList().size());
+		assertEquals(Kvin.DEFAULT_CONTEXT, store.fetchAll().toList().get(0).context);
+	}
 }

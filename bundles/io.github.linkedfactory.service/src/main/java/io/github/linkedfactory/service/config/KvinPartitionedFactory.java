@@ -2,6 +2,7 @@ package io.github.linkedfactory.service.config;
 
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.iceberg.KvinIcebergOptions;
+import io.github.linkedfactory.core.kvin.partitioned.HotStore;
 import io.github.linkedfactory.core.kvin.partitioned.KvinPartitioned;
 import net.enilink.composition.annotations.Iri;
 import net.enilink.komma.core.ILiteral;
@@ -27,10 +28,39 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 			if (archiveIntervalDuration == null) {
 				log.error("invalid archive interval : {}", archiveInterval);
 			}
-			return new KvinPartitioned(path, archiveIntervalDuration, archiveOptions(path));
+			HotStore.Factory hotStoreFactory = hotStoreFactory();
+			long maxHotStoreSize = maxHotStoreSize(hotStoreFactory);
+			return new KvinPartitioned(path, archiveIntervalDuration, archiveOptions(path), hotStoreFactory,
+					maxHotStoreSize);
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
+	}
+
+	/**
+	 * The type of the hot stores: {@code leveldb} by default, or {@code memtable}.
+	 */
+	HotStore.Factory hotStoreFactory() {
+		String type = getHotStore();
+		if (type == null || type.isBlank() || type.trim().equalsIgnoreCase("leveldb")) {
+			return HotStore.LEVELDB;
+		}
+		if (type.trim().equalsIgnoreCase("memtable")) {
+			return HotStore.MEMTABLE;
+		}
+		throw new IllegalArgumentException("Invalid hotStore, use leveldb or memtable: " + type);
+	}
+
+	/**
+	 * The size in bytes at which the hot store is archived, 0 for no limit. Only hot stores
+	 * of the type {@code memtable} have a size.
+	 */
+	long maxHotStoreSize(HotStore.Factory hotStoreFactory) {
+		long size = ConfigLiterals.bytes(getMaxHotStoreSize(), "maxHotStoreSize", 0);
+		if (size > 0 && hotStoreFactory != HotStore.MEMTABLE) {
+			throw new IllegalArgumentException("maxHotStoreSize requires the hotStore memtable");
+		}
+		return size;
 	}
 
 	/**
@@ -71,4 +101,10 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 
 	@Iri("plugin://io.github.linkedfactory.service/data/pageCacheSize")
 	public abstract ILiteral getPageCacheSize();
+
+	@Iri("plugin://io.github.linkedfactory.service/data/hotStore")
+	public abstract String getHotStore();
+
+	@Iri("plugin://io.github.linkedfactory.service/data/maxHotStoreSize")
+	public abstract ILiteral getMaxHotStoreSize();
 }

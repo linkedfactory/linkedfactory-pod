@@ -155,7 +155,7 @@ To start with an empty store, set a new `location` or remove the old directory.
 
 === Partitioned storage
 
-A partitioned store writes new values to LevelDB and moves them to an Iceberg archive at a fixed interval:
+A partitioned store writes new values to a hot store and moves them to an Iceberg archive at a fixed interval, or when the hot store is full:
 
 [source,turtle]
 ----
@@ -175,7 +175,13 @@ A partitioned store writes new values to LevelDB and moves them to an Iceberg ar
 |Store directory, as for LevelDB. Default: `linkedfactory-partition`.
 
 |`archiveInterval`
-|Time between two archival runs. The first run starts when Pod starts. Without this setting, values stay in LevelDB.
+|Time between two archival runs. The first run starts when Pod starts. Without this setting, values stay in the hot store until it reaches `maxHotStoreSize`.
+
+|`hotStore`
+|Optional. Type of the hot store: `leveldb` (default), or `memtable`, which appends values to files and keeps their index in memory. Pod reads only the hot store of the configured type.
+
+|`maxHotStoreSize`
+|Optional, only with `hotStore` `memtable`. Size in bytes at which the hot store is archived, such as `268435456` for 256 MB. New values then go to an empty hot store; if it is full as well before the archival ends, writes wait for the archival. Default: no limit.
 
 |`retentionPeriod`
 |Optional. After each archival run, archived values that are older than this period are removed.
@@ -197,13 +203,14 @@ A partitioned store writes new values to LevelDB and moves them to an Iceberg ar
 |===
 
 Both durations are ISO 8601 durations such as `P7D`, or a number of milliseconds.
-An invalid retention period, partition spec, or table property fails initialization; an invalid archive interval is logged, and values stay in LevelDB.
+An invalid retention period, partition spec, table property, hot store type, or hot store size fails initialization; an invalid archive interval is logged, and values stay in the hot store.
 After each archival run, the archive is cleaned up as with `cleanUpInterval` for Iceberg storage, so a partitioned store has no cleanup interval of its own.
 An archival run writes sorted data files of up to `write.target-file-size-bytes` per partition of the archive, without sorting the values in memory, so `kvin.write.batch-records` does not limit its files.
 New values go to `current/`; the archive is an Iceberg store as described in <<Iceberg storage>>.
-`location` must be a local directory, because LevelDB stores its files there.
+`location` must be a local directory, because the hot store keeps its files there.
 Queries read both.
 Deletes only change values that are not archived yet.
+After a change of `hotStore`, Pod does not read the values that the previous hot store has not archived yet; they stay in `current/` and `current-archive/` until `hotStore` is changed back.
 
 Pod does not open a store whose archive location holds a Parquet archive of an earlier Pod version; it fails with an error that names the location.
 Pod does not convert such archives.
