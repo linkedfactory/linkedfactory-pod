@@ -35,6 +35,8 @@ public abstract class KvinIcebergFactory extends KvinLevelDbFactory {
 				.partitionSpec(getPartitionSpec())
 				.tableProperties(ConfigLiterals.properties(getTableProperties()))
 				.hadoopProperties(ConfigLiterals.properties(getHadoopProperties()))
+				.pageCacheSize(ConfigLiterals.bytes(getPageCacheSize(), "pageCacheSize",
+						KvinIcebergOptions.DEFAULT_PAGE_CACHE_SIZE))
 				.build();
 	}
 
@@ -52,4 +54,7 @@ public abstract class KvinIcebergFactory extends KvinLevelDbFactory {
 
 	@Iri("plugin://io.github.linkedfactory.service/data/hadoopProperties")
 	public abstract String getHadoopProperties();
+
+	@Iri("plugin://io.github.linkedfactory.service/data/pageCacheSize")
+	public abstract ILiteral getPageCacheSize();
 }

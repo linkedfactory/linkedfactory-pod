@@ -186,6 +186,9 @@ A partitioned store writes new values to LevelDB and moves them to an Iceberg ar
 |`hadoopProperties`
 |Optional. Hadoop properties for accessing the archive, as for <<Iceberg storage>>.
 
+|`pageCacheSize`
+|Optional. Memory for cached pages of the archive, as for <<Iceberg storage>>.
+
 |`partitionSpec`
 |Optional. Partitioning of the archive's value table, as for <<Iceberg storage>>.
 
@@ -243,6 +246,9 @@ To use Iceberg instead of the default value store, configure a store of type `Kv
 
 |`hadoopProperties`
 |Optional. Hadoop properties for accessing the archive, one `key=value` per line, for example `fs.s3a.endpoint=https://s3.example.org`.
+
+|`pageCacheSize`
+|Optional. Maximum memory in bytes for decoded data pages that fetches keep for later fetches. Default: `67108864` (64 MiB). `0` disables the cache; a negative number or text fails initialization.
 |===
 
 Both durations are ISO 8601 durations such as `P7D`, or a number of milliseconds; an invalid duration fails initialization.
@@ -255,7 +261,7 @@ The Hadoop properties apply to the value table and the URI-ID tables.
 Do not put credentials in the configuration file; Hadoop's S3A connector also reads them from environment variables and `~/.aws/credentials`.
 
 KvinIceberg maintains a value table in `iceberg/` and separate URI-ID tables in `iceberg-ids/items/`, `iceberg-ids/properties/`, and `iceberg-ids/contexts/`, with bounded in-memory lookup caches.
-Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots and use a value-skipping Parquet reader.
+Its Parquet V2 data files have separate typed value columns (enabling encodings such as delta packing) and use ZSTD compression; reads follow Iceberg snapshots and read only the pages that can hold requested values.
 KvinIceberg does not open a directory that holds a Parquet archive of an earlier Pod version.
 
 The standalone `IcebergRecordStore` implements `KvinRecordStore` and operates exclusively on numeric `KvinRecord` identifiers, without creating or reading URI-ID tables.
@@ -270,8 +276,8 @@ Pod does not include connectors for remote file systems; the connector for the s
 In the service configuration, set `location` to the URI.
 Hadoop shares one file system instance per scheme and bucket within the JVM, so the first store that accesses a bucket determines its Hadoop settings.
 The property `fs.<scheme>.impl.disable.cache=true` gives each store its own instance.
-Fetches read local data files directly, without the Hadoop file system and without vectored I/O.
-They read remote data files through the Hadoop file system with vectored I/O, which requests the pages of a row group in parallel.
+Fetches read pages of local data files directly, without the Hadoop file system.
+They read pages of remote data files through the Hadoop file system; the uncached pages of the key columns of a row group are requested in parallel with vectored I/O.
 
 [source,java]
 ----
@@ -412,13 +418,20 @@ Every output file regenerates `first=true` for the first row of each item/contex
 Manifest caching is enabled for both new and reopened value and URI-ID tables.
 It uses Iceberg's defaults: up to 100 MiB per table FileIO, with individual manifests limited to 8 MiB and entries expiring after 60 seconds without access.
 Caches are released when the store closes.
-Tables still refresh for every query, so caching immutable manifests does not delay visibility of committed writes from other instances; Parquet data is not cached.
+Tables still refresh for every query, so caching immutable manifests does not delay visibility of committed writes from other instances.
 
 Fetches batch uncached item and property URI lookups, merge sorted files with constant-size per-series limit bookkeeping, and defer advancing a reader until another tuple is needed.
 Data files are opened lazily: planned files are ordered by the smallest matching key their column statistics allow (item, property, and latest time), and a file is opened only when that bound is not after the current merge head.
 A latest-value query on time-ordered data therefore usually opens a single file.
-Parquet footers are cached per data file (up to 4096 files); entries for files replaced by compaction or deletes are dropped.
-Limited reads skip value decoding for completed series and use the advancing series boundary to prune subsequent Parquet row groups.
+Parquet footers and page indexes are cached per data file (up to 4096 files each).
+Decoded pages are cached up to `pageCacheSize`; a fetch whose pages are cached reads, decompresses, and decodes no data.
+Data files are immutable, so cached pages never become stale.
+Up to 256 data files stay open between fetches, shared by concurrent fetches.
+Cached entries and open files of data files replaced by compaction or deletes are dropped.
+Within a row group, fetches read only the pages whose minimum and maximum key values may match the query.
+In files sorted in the KVIN order, they search for the rows of the next requested series instead of looking at each row.
+Values are read only for returned rows.
+Limited reads skip the rows of completed series and use the advancing series boundary to prune subsequent Parquet row groups.
 Non-aggregated queries with explicit properties close their readers as soon as every requested item/property combination has reached its limit.
 Queries without explicit properties, or with combinations that have fewer matching tuples than the limit, continue looking for remaining series.
 Property listing projects only identifiers and per-file series-start markers, then resolves distinct property IDs in a batch; it does not read or decode value columns.

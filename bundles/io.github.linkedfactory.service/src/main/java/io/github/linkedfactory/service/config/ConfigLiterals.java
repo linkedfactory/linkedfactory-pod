@@ -53,6 +53,27 @@ final class ConfigLiterals {
 	}
 
 	/**
+	 * Parses a number of bytes that must not be negative.
+	 *
+	 * @param setting the name of the setting, for the error message
+	 * @return the number, or {@code defaultValue} if the literal is missing
+	 */
+	static long bytes(ILiteral literal, String setting, long defaultValue) {
+		if (literal == null) {
+			return defaultValue;
+		}
+		try {
+			long bytes = Long.parseLong(literal.getLabel().trim());
+			if (bytes >= 0) {
+				return bytes;
+			}
+		} catch (NumberFormatException e) {
+			// reported below
+		}
+		throw new IllegalArgumentException("Invalid number of bytes for " + setting + ": " + literal.getLabel());
+	}
+
+	/**
 	 * Parses settings in the format of Java properties files, one {@code key=value} per line.
 	 * Trailing whitespace of values is removed.
 	 *

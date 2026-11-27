@@ -33,6 +33,7 @@ public class KvinIcebergFactoryTest {
 		String cleanUpInterval;
 		String tableProperties;
 		String hadoopProperties;
+		String pageCacheSize;
 
 		Settings(String location) {
 			this.location = location;
@@ -77,6 +78,11 @@ public class KvinIcebergFactoryTest {
 			@Override
 			public String getHadoopProperties() {
 				return settings.hadoopProperties;
+			}
+
+			@Override
+			public ILiteral getPageCacheSize() {
+				return literal(settings.pageCacheSize);
 			}
 		};
 	}
@@ -131,6 +137,22 @@ public class KvinIcebergFactoryTest {
 				options.tableProperties());
 		assertEquals(Map.of("fs.s3a.endpoint", "https://s3.example.org", "fs.s3a.path.style.access", "true"),
 				options.hadoopProperties());
+	}
+
+	@Test
+	public void configuresThePageCacheSize() {
+		Settings settings = settings();
+		assertEquals(io.github.linkedfactory.core.kvin.iceberg.KvinIcebergOptions.DEFAULT_PAGE_CACHE_SIZE,
+				factory(settings).options().pageCacheSize());
+		settings.pageCacheSize = "268435456";
+		assertEquals(268435456L, factory(settings).options().pageCacheSize());
+		settings.pageCacheSize = "0";
+		assertEquals(0L, factory(settings).options().pageCacheSize());
+		for (String invalid : new String[]{"-1", "64 MiB"}) {
+			settings.pageCacheSize = invalid;
+			var e = assertThrows(IllegalArgumentException.class, () -> factory(settings).options());
+			assertTrue(e.getMessage(), e.getMessage().contains("pageCacheSize"));
+		}
 	}
 
 	@Test

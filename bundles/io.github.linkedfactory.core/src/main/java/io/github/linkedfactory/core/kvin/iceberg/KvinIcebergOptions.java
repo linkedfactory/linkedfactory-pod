@@ -19,12 +19,18 @@ import java.util.function.Function;
  * the OSGi service configuration need no Iceberg or Hadoop classes.</p>
  */
 public final class KvinIcebergOptions {
+	/**
+	 * The default {@link Builder#pageCacheSize(long) page cache size}, 64 MiB.
+	 */
+	public static final long DEFAULT_PAGE_CACHE_SIZE = 64L * 1024 * 1024;
+
 	private final String location;
 	private final Duration retentionPeriod;
 	private final Duration cleanUpInterval;
 	private final Function<Schema, PartitionSpec> partitioning;
 	private final Map<String, String> tableProperties;
 	private final Map<String, String> hadoopProperties;
+	private final long pageCacheSize;
 
 	private KvinIcebergOptions(Builder builder) {
 		location = builder.location;
@@ -33,6 +39,7 @@ public final class KvinIcebergOptions {
 		partitioning = builder.partitioning;
 		tableProperties = Map.copyOf(builder.tableProperties);
 		hadoopProperties = Map.copyOf(builder.hadoopProperties);
+		pageCacheSize = builder.pageCacheSize;
 	}
 
 	/**
@@ -74,6 +81,10 @@ public final class KvinIcebergOptions {
 		return hadoopProperties;
 	}
 
+	public long pageCacheSize() {
+		return pageCacheSize;
+	}
+
 	/**
 	 * Creates a Hadoop configuration with the default resources and the Hadoop properties.
 	 * Creating one parses the default resources, so stores create it once.
@@ -92,6 +103,7 @@ public final class KvinIcebergOptions {
 		builder.partitioning = partitioning;
 		builder.tableProperties.putAll(tableProperties);
 		builder.hadoopProperties.putAll(hadoopProperties);
+		builder.pageCacheSize = pageCacheSize;
 		return builder;
 	}
 
@@ -102,6 +114,7 @@ public final class KvinIcebergOptions {
 		private Function<Schema, PartitionSpec> partitioning;
 		private final Map<String, String> tableProperties = new LinkedHashMap<>();
 		private final Map<String, String> hadoopProperties = new LinkedHashMap<>();
+		private long pageCacheSize = DEFAULT_PAGE_CACHE_SIZE;
 
 		private Builder() {
 		}
@@ -183,6 +196,18 @@ public final class KvinIcebergOptions {
 
 		public Builder hadoopProperty(String key, String value) {
 			hadoopProperties.put(Objects.requireNonNull(key), Objects.requireNonNull(value));
+			return this;
+		}
+
+		/**
+		 * Maximum memory in bytes of the decoded data pages that fetches keep for later fetches.
+		 * The default is 64 MiB; 0 disables the cache.
+		 */
+		public Builder pageCacheSize(long bytes) {
+			if (bytes < 0) {
+				throw new IllegalArgumentException("Page cache size must not be negative: " + bytes);
+			}
+			this.pageCacheSize = bytes;
 			return this;
 		}
 

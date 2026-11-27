@@ -68,6 +68,11 @@ public class KvinPartitionedFactoryTest {
 			public String getHadoopProperties() {
 				return hadoopProperties;
 			}
+
+			@Override
+			public ILiteral getPageCacheSize() {
+				return new Literal("1048576");
+			}
 		};
 	}
 
@@ -99,6 +104,7 @@ public class KvinPartitionedFactoryTest {
 		assertEquals(Duration.ofDays(30), options.retentionPeriod());
 		assertNull("Archival runs the cleanups", options.cleanUpInterval());
 		assertEquals(Map.of("write.target-file-size-bytes", "268435456"), options.tableProperties());
+		assertEquals(1048576L, options.pageCacheSize());
 	}
 
 	@Test
