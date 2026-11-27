@@ -197,7 +197,7 @@ public class KvinPartitioned implements Kvin {
 	 * @return true if the values of the previous hot store were archived and the store removed
 	 */
 	private boolean archive() {
-		log.info("Run archival");
+		log.debug("Run archival");
 		boolean archived = false;
 		Lock writeLock = null;
 		try {
