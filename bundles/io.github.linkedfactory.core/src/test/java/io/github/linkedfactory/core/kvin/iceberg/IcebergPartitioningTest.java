@@ -405,4 +405,88 @@ public class IcebergPartitioningTest {
 			}
 		}
 	}
+
+	private static List<KvinRecord> sortedRecords() {
+		List<KvinRecord> records = new ArrayList<>();
+		for (long context : List.of(0L, 4L)) {
+			for (long item : List.of(1L, 2L, 3L)) {
+				for (long property : List.of(2L, 3L)) {
+					for (long time = 29; time >= 0; time -= 4) {
+						records.add(new KvinRecord(context, item, property, time, 0, (int) time));
+					}
+				}
+			}
+		}
+		return records;
+	}
+
+	private static List<Long> times(IcebergRecordStore store, long item, long property, long context) {
+		try (var rows = store.fetch(item, property, context, 0)) {
+			return rows.toList().stream().map(KvinRecord::time).toList();
+		}
+	}
+
+	@Test
+	public void appendSortedWritesOneSortedFilePerPartition() throws Exception {
+		Function<Schema, PartitionSpec> partitioning = schema -> PartitionSpec.builderFor(schema)
+				.bucket("itemId", 4).truncate("time", 10).build();
+		try (var store = new IcebergRecordStore(root().toString(), null, partitioning)) {
+			List<KvinRecord> input = sortedRecords();
+			store.appendSorted(input);
+			store.awaitCompaction();
+
+			assertValidFiles();
+			Table table = table();
+			PartitionKey key = new PartitionKey(table.spec(), table.schema());
+			java.util.Set<StructLikeWrapper> partitions = new java.util.HashSet<>();
+			for (KvinRecord record : input) {
+				org.apache.iceberg.data.GenericRecord row = org.apache.iceberg.data.GenericRecord.create(table.schema());
+				row.set(0, record.itemId());
+				row.set(3, record.time());
+				key.partition(row);
+				partitions.add(StructLikeWrapper.forType(table.spec().partitionType()).copyFor(key));
+			}
+			assertEquals(partitions.size(), files().size());
+			assertEquals(List.of(29L, 25L, 21L, 17L, 13L, 9L, 5L, 1L), times(store, 2, 3, 4));
+		}
+	}
+
+	@Test
+	public void appendSortedStartsNewFilesAtTheTargetSize() throws Exception {
+		try (var store = new IcebergRecordStore(root().toString())) {
+			table().updateProperties()
+					.set("write.target-file-size-bytes", "1")
+					.set("kvin.compaction.min-files", "1000")
+					.commit();
+			List<KvinRecord> input = sortedRecords().subList(0, 12);
+			store.appendSorted(input);
+
+			// every row exceeds the target size
+			assertEquals(input.size(), files().size());
+			assertValidFiles();
+			assertEquals(List.of(29L, 25L, 21L, 17L, 13L, 9L, 5L, 1L), times(store, 1, 2, 0));
+			assertEquals(List.of(29L, 25L, 21L, 17L), times(store, 1, 3, 0));
+		}
+	}
+
+	@Test
+	public void appendSortedRejectsUnsortedRecords() throws Exception {
+		try (var store = new IcebergRecordStore(root().toString())) {
+			List<KvinRecord> input = new ArrayList<>(sortedRecords());
+			// an older value before a newer one of the same series
+			java.util.Collections.swap(input, 0, 1);
+			assertThrows(IllegalArgumentException.class, () -> store.appendSorted(input));
+
+			assertNull(table().currentSnapshot());
+			Path data = root().resolve("iceberg/data");
+			if (Files.exists(data)) {
+				try (var paths = Files.walk(data)) {
+					assertEquals(List.of(), paths.filter(p -> p.toString().endsWith(".parquet")).toList());
+				}
+			}
+
+			store.appendSorted(sortedRecords());
+			assertEquals(8, times(store, 1, 2, 0).size());
+		}
+	}
 }

@@ -13,6 +13,7 @@ import org.apache.iceberg.ManifestFiles;
 import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
 import org.apache.parquet.HadoopReadOptions;
@@ -745,5 +746,39 @@ public class KvinIcebergTest {
 		store.close();
 		FileUtils.deleteDirectory(directory.toPath().resolve("iceberg-ids").toFile());
 		assertThrows(UncheckedIOException.class, () -> new KvinIceberg(directory.toString()));
+	}
+
+	@Test
+	public void appendsSeriesInTheOrderOfItsIds() throws Exception {
+		URI otherProperty = URIs.createURI("urn:test:other-property");
+		// the archive knows the other item first, so it has the lower ID
+		store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, other, property, 1, 1));
+		java.nio.file.Path sourceDirectory = directory.toPath().resolve("source");
+		try (var source = new io.github.linkedfactory.core.kvin.memtable.KvinMemTable(sourceDirectory)) {
+			// the source knows the item first
+			source.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 5, 5),
+					new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 4, 4),
+					new KvinTuple(Kvin.DEFAULT_CONTEXT, other, property, 3, 3),
+					new KvinTuple(Kvin.DEFAULT_CONTEXT, other, property, 2, 2),
+					new KvinTuple(Kvin.DEFAULT_CONTEXT, item, otherProperty, 1, 1));
+
+			// appendSorted rejects the records if the series are not in the order of the archive
+			store.appendSeries(source, source.fetchLatest().toList());
+		}
+
+		assertEquals(List.of(5L, 4L), store.fetch(item, property, null, 0).toList().stream().map(t -> t.time).toList());
+		assertEquals(List.of(3L, 2L, 1L), store.fetch(other, property, null, 0).toList().stream().map(t -> t.time).toList());
+		assertEquals(List.of(1L), store.fetch(item, otherProperty, null, 0).toList().stream().map(t -> t.time).toList());
+		assertEquals(5, store.fetch(item, property, null, 0).next().value);
+		// one data file for the first put and one for the appended series
+		try (CloseableIterable<FileScanTask> tasks = valueTable().newScan().planFiles()) {
+			assertEquals(2, java.util.stream.StreamSupport.stream(tasks.spliterator(), false).count());
+		}
+	}
+
+	@Test
+	public void appendsNothingWithoutSeries() {
+		store.appendSeries(store, List.of());
+		assertNull(valueTable().currentSnapshot());
 	}
 }

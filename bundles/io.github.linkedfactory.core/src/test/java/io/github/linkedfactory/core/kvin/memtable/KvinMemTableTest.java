@@ -2,6 +2,8 @@ package io.github.linkedfactory.core.kvin.memtable;
 
 import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.Record;
+import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import net.enilink.komma.core.URI;
 import net.enilink.komma.core.URIs;
 import org.apache.commons.io.FileUtils;
@@ -10,11 +12,20 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public class KvinMemTableTest {
 	private final URI item = URIs.createURI("http://example.org/item");
@@ -92,5 +103,325 @@ public class KvinMemTableTest {
 		assertEquals(0, count(item, contextA));
 		assertEquals(1, count(item, contextB));
 		assertEquals(1, count(other, contextB));
+	}
+
+	/**
+	 * Fails each put of a record while {@link #failing} is set.
+	 */
+	static class FailingTableFileSet extends TableFileSet {
+		volatile boolean failing = true;
+
+		FailingTableFileSet(Path directory) throws IOException {
+			super(directory);
+		}
+
+		@Override
+		synchronized void put(KvinRecord record) throws IOException {
+			if (failing) {
+				throw new IOException("Disk full");
+			}
+			super.put(record);
+		}
+	}
+
+	private FailingTableFileSet reopenFailing() throws IOException {
+		store.close();
+		FailingTableFileSet[] tableFiles = new FailingTableFileSet[1];
+		store = new KvinMemTable(directory, path -> tableFiles[0] = new FailingTableFileSet(path));
+		return tableFiles[0];
+	}
+
+	private List<KvinTuple> tuples(URI context, int count) {
+		List<KvinTuple> tuples = new ArrayList<>();
+		for (int i = 0; i < count; i++) {
+			tuples.add(new KvinTuple(context, URIs.createURI("http://example.org/item" + i), property, 1, 0, i));
+		}
+		return tuples;
+	}
+
+	// more tuples than fit into the queue of the writer, so that a stopped writer would block the put
+	@Test(timeout = 30_000)
+	public void throwsFailureOfTheWriter() throws IOException {
+		FailingTableFileSet tableFiles = reopenFailing();
+		var e = assertThrows(UncheckedIOException.class, () -> store.put(tuples(contextA, 50_000)));
+		assertEquals("Disk full", e.getCause().getMessage());
+
+		tableFiles.failing = false;
+		store.put(new KvinTuple(contextB, item, property, 1, 0, 1));
+		assertEquals(1, count(item, contextB));
+		// the records left in the queue by the failed put are not written by the next put
+		assertEquals(0, count(URIs.createURI("http://example.org/item1"), contextA));
+		assertTrue(store.pendingIds.isEmpty());
+	}
+
+	@Test
+	public void throwsFailureOfASynchronousWrite() throws IOException {
+		reopenFailing();
+		store.async = false;
+		var e = assertThrows(UncheckedIOException.class, () -> store.put(tuples(contextA, 10)));
+		assertEquals("Disk full", e.getCause().getMessage());
+		assertTrue(store.pendingIds.isEmpty());
+	}
+
+	@Test
+	public void writesTheIdsOfAFailedPut() throws IOException {
+		reopenFailing();
+		assertThrows(UncheckedIOException.class, () -> store.put(new KvinTuple(contextA, item, property, 1, 0, 1)));
+		store.close();
+
+		store = new KvinMemTable(directory);
+		assertNotEquals(-1, id(item, KvinMemTable.EntryType.SubjectToId));
+	}
+
+	@Test
+	public void keepsOnlyUnwrittenIdsPending() throws IOException {
+		int count = 3 * KvinMemTable.MAX_PENDING_IDS;
+		List<KvinTuple> tuples = new ArrayList<>(tuples(contextA, count));
+		// the same item in a later ID batch of the put reuses the written ID
+		tuples.add(new KvinTuple(contextA, URIs.createURI("http://example.org/item0"), property, 2, 0, 1));
+		store.put(tuples);
+
+		assertTrue(store.pendingIds.isEmpty());
+		assertTrue(store.uriToIdCache.size() <= 20_000);
+		assertEquals(2, count(URIs.createURI("http://example.org/item0"), contextA));
+		store.close();
+
+		store = new KvinMemTable(directory);
+		for (int i = 0; i < count; i++) {
+			assertNotEquals(-1, id(URIs.createURI("http://example.org/item" + i), KvinMemTable.EntryType.SubjectToId));
+		}
+	}
+
+	private final URI otherProperty = URIs.createURI("http://example.org/another");
+
+	private List<Long> times(List<KvinTuple> tuples) {
+		return tuples.stream().map(t -> t.time).toList();
+	}
+
+	@Test
+	public void fetchesValuesNewestFirst() {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1.0),
+				new KvinTuple(contextA, item, property, 3, 0, 3.0),
+				new KvinTuple(contextA, item, property, 2, 0, 2.0),
+				new KvinTuple(contextA, item, property, 2, 1, 2.5),
+				new KvinTuple(contextB, item, property, 4, 0, 4.0));
+
+		List<KvinTuple> tuples = store.fetch(item, property, contextA, 0).toList();
+		assertEquals(List.of(3L, 2L, 2L, 1L), times(tuples));
+		assertEquals(List.of(3.0, 2.5, 2.0, 1.0), tuples.stream().map(t -> t.value).toList());
+		assertEquals(1, tuples.get(1).seqNr);
+		assertEquals(contextA, tuples.get(0).context);
+		assertEquals(item, tuples.get(0).item);
+		assertEquals(property, tuples.get(0).property);
+
+		assertEquals(List.of(3L, 2L), times(store.fetch(item, property, contextA, 2).toList()));
+		assertEquals(List.of(2L, 2L), times(store.fetch(item, property, contextA, 2, 2, 0, 0, null).toList()));
+		assertEquals(List.of(4L), times(store.fetch(item, property, contextB, 0).toList()));
+	}
+
+	@Test
+	public void fetchesNothingForUnknownUris() {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1));
+		assertEquals(List.of(), store.fetch(other, property, contextA, 0).toList());
+		assertEquals(List.of(), store.fetch(item, otherProperty, contextA, 0).toList());
+		assertEquals(List.of(), store.fetch(item, property, URIs.createURI("ctx:unknown"), 0).toList());
+		assertEquals(List.of(), store.fetch(item, null, URIs.createURI("ctx:unknown"), 0).toList());
+	}
+
+	@Test
+	public void fetchesAllPropertiesWithALimitForEach() {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1),
+				new KvinTuple(contextA, item, property, 2, 0, 2),
+				new KvinTuple(contextA, item, otherProperty, 1, 0, 3),
+				new KvinTuple(contextA, item, otherProperty, 2, 0, 4));
+
+		List<KvinTuple> tuples = store.fetch(item, null, contextA, 1).toList();
+		// ordered by property URI
+		assertEquals(List.of(otherProperty, property), tuples.stream().map(t -> t.property).toList());
+		assertEquals(List.of(2L, 2L), times(tuples));
+		assertEquals(4, store.fetch(item, null, contextA, 0).toList().size());
+	}
+
+	@Test
+	public void fetchesTheDefaultContextForNull() {
+		store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, item, property, 1, 0, 1));
+		List<KvinTuple> tuples = store.fetch(item, property, null, 0).toList();
+		assertEquals(1, tuples.size());
+		assertEquals(Kvin.DEFAULT_CONTEXT, tuples.get(0).context);
+		assertEquals(List.of(property), store.properties(item, null).toList());
+	}
+
+	@Test
+	public void aggregatesValues() {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1),
+				new KvinTuple(contextA, item, property, 2, 0, 5),
+				new KvinTuple(contextA, item, property, 3, 0, 3));
+		List<KvinTuple> tuples = store.fetch(item, property, contextA, 10, 0, 0, 10, "max").toList();
+		assertEquals(1, tuples.size());
+		assertEquals(5, ((Number) tuples.get(0).value).intValue());
+	}
+
+	@Test
+	public void decodesStoredValues() {
+		URI longProperty = URIs.createURI("http://example.org/" + "p".repeat(300));
+		Record record = new Record(longProperty, 1.5).append(new Record(property, "text"));
+		Object[] array = {1, "two", item};
+		store.put(new KvinTuple(contextA, item, property, 1, 0, "text"),
+				new KvinTuple(contextA, item, property, 2, 0, other),
+				new KvinTuple(contextA, item, property, 3, 0, record),
+				new KvinTuple(contextA, item, property, 4, 0, array),
+				new KvinTuple(contextA, item, property, 5, 0, 42L));
+
+		List<Object> values = store.fetch(item, property, contextA, 0).toList().stream().map(t -> t.value).toList();
+		assertEquals(42L, values.get(0));
+		assertArrayEquals(array, (Object[]) values.get(1));
+		assertEquals(record, values.get(2));
+		assertEquals(other, values.get(3));
+		assertEquals("text", values.get(4));
+	}
+
+	@Test
+	public void fetchesValuesAfterReopening() throws IOException {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1),
+				new KvinTuple(contextA, item, otherProperty, 2, 0, 2));
+		store.close();
+
+		store = new KvinMemTable(directory);
+		assertEquals(List.of(1L), times(store.fetch(item, property, contextA, 0).toList()));
+		assertEquals(List.of(otherProperty, property), store.properties(item, contextA).toList());
+	}
+
+	@Test
+	public void listsPropertiesWithValues() {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1),
+				new KvinTuple(contextA, item, otherProperty, 1, 0, 2),
+				new KvinTuple(contextB, other, property, 1, 0, 3));
+
+		assertEquals(List.of(otherProperty, property), store.properties(item, contextA).toList());
+		assertEquals(List.of(), store.properties(item, contextB).toList());
+		assertEquals(List.of(), store.properties(URIs.createURI("http://example.org/unknown"), contextA).toList());
+
+		store.delete(contextA);
+		assertEquals(List.of(), store.properties(item, contextA).toList());
+	}
+
+	@Test
+	public void listsDescendantsWithValuesInTheContext() {
+		URI parent = URIs.createURI("http://example.org/machine");
+		URI child = URIs.createURI("http://example.org/machine/axis");
+		URI otherChild = URIs.createURI("http://example.org/machine/spindle");
+		URI sibling = URIs.createURI("http://example.org/robot");
+		store.put(new KvinTuple(contextA, parent, property, 1, 0, 1),
+				new KvinTuple(contextA, child, property, 1, 0, 2),
+				new KvinTuple(contextB, otherChild, property, 1, 0, 3),
+				new KvinTuple(contextA, sibling, property, 1, 0, 4));
+
+		assertEquals(List.of(parent, child), store.descendants(parent, contextA).toList());
+		assertEquals(List.of(otherChild), store.descendants(parent, contextB).toList());
+		assertEquals(List.of(parent), store.descendants(parent, contextA, 1).toList());
+		assertEquals(List.of(), store.descendants(parent, contextA, 0).toList());
+		assertEquals(List.of(), store.descendants(parent, URIs.createURI("ctx:unknown")).toList());
+
+		store.delete(contextA);
+		assertEquals(List.of(), store.descendants(parent, contextA).toList());
+	}
+
+	@Test(timeout = 60_000)
+	public void storesConcurrentPuts() throws Exception {
+		int threads = 4;
+		int count = 20_000;
+		ExecutorService executor = Executors.newFixedThreadPool(threads);
+		try {
+			List<Future<?>> futures = new ArrayList<>();
+			for (int t = 0; t < threads; t++) {
+				URI threadItem = URIs.createURI("http://example.org/thread" + t);
+				futures.add(executor.submit(() -> {
+					List<KvinTuple> tuples = new ArrayList<>();
+					for (int i = 1; i <= count; i++) {
+						tuples.add(new KvinTuple(contextA, threadItem, property, i, 0, i));
+						if (tuples.size() == 1000) {
+							store.put(tuples);
+							tuples.clear();
+						}
+					}
+				}));
+			}
+			for (Future<?> future : futures) {
+				future.get();
+			}
+		} finally {
+			executor.shutdown();
+		}
+		for (int t = 0; t < threads; t++) {
+			URI threadItem = URIs.createURI("http://example.org/thread" + t);
+			assertEquals(count, store.fetch(threadItem, property, contextA, 0).toList().size());
+		}
+	}
+
+	@Test
+	public void deletesTimeRanges() throws IOException {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1),
+				new KvinTuple(contextA, item, property, 2, 0, 2),
+				new KvinTuple(contextA, item, property, 3, 0, 3),
+				new KvinTuple(contextA, item, otherProperty, 2, 0, 4),
+				new KvinTuple(contextB, item, property, 2, 0, 5));
+
+		assertEquals(1, store.delete(item, property, contextA, 2, 2));
+		assertEquals(List.of(3L, 1L), times(store.fetch(item, property, contextA, 0).toList()));
+		assertEquals(1, store.fetch(item, otherProperty, contextA, 0).toList().size());
+		assertEquals(1, store.fetch(item, property, contextB, 0).toList().size());
+
+		// all properties
+		assertEquals(3, store.delete(item, null, contextA, 3, 1));
+		assertEquals(List.of(), store.fetch(item, null, contextA, 0).toList());
+
+		assertEquals(0, store.delete(other, property, contextA, 3, 1));
+		assertEquals(0, store.delete(item, URIs.createURI("http://example.org/unknown"), contextB, 3, 1));
+		store.close();
+
+		store = new KvinMemTable(directory);
+		assertEquals(List.of(), store.fetch(item, null, contextA, 0).toList());
+		assertEquals(1, store.fetch(item, property, contextB, 0).toList().size());
+	}
+
+	@Test
+	public void deletesItems() throws IOException {
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1),
+				new KvinTuple(contextA, item, otherProperty, 1, 0, 2),
+				new KvinTuple(contextA, other, property, 1, 0, 3),
+				new KvinTuple(contextB, item, property, 1, 0, 4));
+
+		assertTrue(store.delete(item, contextA));
+		assertEquals(List.of(), store.fetch(item, null, contextA, 0).toList());
+		assertEquals(List.of(), store.properties(item, contextA).toList());
+		assertEquals(1, store.fetch(other, property, contextA, 0).toList().size());
+		assertEquals(1, store.fetch(item, property, contextB, 0).toList().size());
+
+		assertEquals(false, store.delete(item, contextA));
+		assertEquals(false, store.delete(URIs.createURI("http://example.org/unknown"), contextA));
+
+		// the item can be used again
+		store.put(new KvinTuple(contextA, item, property, 2, 0, 5));
+		assertEquals(List.of(2L), times(store.fetch(item, property, contextA, 0).toList()));
+		store.close();
+
+		store = new KvinMemTable(directory);
+		assertEquals(List.of(2L), times(store.fetch(item, property, contextA, 0).toList()));
+	}
+
+	@Test
+	public void fetchesAllValues() {
+		Record record = new Record(property, "text");
+		store.put(new KvinTuple(contextA, item, property, 1, 0, 1.5),
+				new KvinTuple(contextA, item, property, 2, 0, record),
+				new KvinTuple(contextB, other, otherProperty, 1, 0, item));
+		store.delete(other, contextB);
+		store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, other, property, 3, 0, "x"));
+
+		List<KvinTuple> tuples = store.fetchAll().toList();
+		assertEquals(List.of(
+				new KvinTuple(contextA, item, property, 2, 0, record),
+				new KvinTuple(contextA, item, property, 1, 0, 1.5),
+				new KvinTuple(Kvin.DEFAULT_CONTEXT, other, property, 3, 0, "x")), tuples);
 	}
 }

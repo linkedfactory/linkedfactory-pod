@@ -3,6 +3,7 @@ package io.github.linkedfactory.core.kvin.memtable;
 import io.github.linkedfactory.core.kvin.records.KvinRecord;
 import org.apache.commons.io.FileUtils;
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -16,6 +17,7 @@ import java.util.List;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class TableFileTest {
@@ -219,6 +221,102 @@ public class TableFileTest {
 			}
 		} finally {
 			TableFile.LENGTH = length;
+		}
+	}
+
+	/**
+	 * Returns the number of mappings of the file in this process, or -1 if unknown.
+	 */
+	static long mappings(Path file) throws IOException {
+		Path maps = Path.of("/proc/self/maps");
+		if (!Files.isReadable(maps)) {
+			return -1;
+		}
+		String path = file.toRealPath().toString();
+		try (var lines = Files.lines(maps)) {
+			return lines.filter(line -> line.endsWith(" " + path) || line.endsWith("\t" + path)
+					|| line.endsWith(path)).count();
+		}
+	}
+
+	@Test
+	public void unmapsAllMappingsOnClose() throws IOException {
+		Assume.assumeTrue("Unmapping is not supported", BufferUnmapper.isSupported());
+		Assume.assumeTrue("Mappings are not visible", mappings(tempDir.toPath()) >= 0);
+		long previousLength = TableFile.LENGTH;
+		TableFile.LENGTH = 1024;
+		try {
+			TableFile tableFile = new TableFile(tablePath);
+			byte[] value = new byte[100];
+			for (int i = 0; i < 100; i++) {
+				// grows the file beyond the first mappings
+				tableFile.put(new KvinRecord(1L, 1L, 1L, i, 0, value));
+			}
+			assertTrue("The grown file has several mappings", mappings(tablePath) >= 2);
+
+			tableFile.close();
+			assertEquals(0, mappings(tablePath));
+		} finally {
+			TableFile.LENGTH = previousLength;
+		}
+	}
+
+	@Test
+	public void failsAfterClose() throws IOException {
+		TableFile tableFile = new TableFile(tablePath);
+		tableFile.put(new KvinRecord(1L, 1L, 1L, 1, 0, new byte[]{1}));
+		tableFile.close();
+		// closing again does nothing
+		tableFile.close();
+
+		assertThrows(IllegalStateException.class, () -> tableFile.fetch(1L, 1L, 1L, 10));
+		assertThrows(IllegalStateException.class,
+				() -> tableFile.put(new KvinRecord(1L, 1L, 1L, 2, 0, new byte[]{2})));
+		assertThrows(IllegalStateException.class, () -> tableFile.delete(1L, 1L));
+		assertThrows(IllegalStateException.class, () -> tableFile.delete(1L));
+		assertThrows(IllegalStateException.class, () -> tableFile.delete(1L, 1L, 1L, 2, 1));
+
+		// the values are kept
+		try (TableFile reopened = new TableFile(tablePath)) {
+			assertEquals(1, reopened.fetch(1L, 1L, 1L, 10).toList().size());
+		}
+	}
+
+	@Test(timeout = 60_000)
+	public void closesWhileOtherThreadsFetch() throws Exception {
+		for (int round = 0; round < 20; round++) {
+			Path path = tempDir.toPath().resolve("concurrent-" + round + ".data");
+			TableFile tableFile = new TableFile(path);
+			for (int i = 0; i < 1000; i++) {
+				tableFile.put(new KvinRecord(1L, 1L, 1L, i, 0, new byte[]{(byte) i}));
+			}
+			java.util.concurrent.CountDownLatch reading = new java.util.concurrent.CountDownLatch(4);
+			List<Thread> readers = new java.util.ArrayList<>();
+			java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
+			for (int t = 0; t < 4; t++) {
+				Thread reader = new Thread(() -> {
+					reading.countDown();
+					try {
+						while (true) {
+							assertEquals(1000, tableFile.fetch(1L, 1L, 1L, 1000).toList().size());
+						}
+					} catch (IllegalStateException e) {
+						// closed
+					} catch (Throwable e) {
+						failure.set(e);
+					}
+				});
+				reader.start();
+				readers.add(reader);
+			}
+			reading.await();
+			tableFile.close();
+			for (Thread reader : readers) {
+				reader.join();
+			}
+			if (failure.get() != null) {
+				throw new AssertionError(failure.get());
+			}
 		}
 	}
 }

@@ -199,6 +199,7 @@ A partitioned store writes new values to LevelDB and moves them to an Iceberg ar
 Both durations are ISO 8601 durations such as `P7D`, or a number of milliseconds.
 An invalid retention period, partition spec, or table property fails initialization; an invalid archive interval is logged, and values stay in LevelDB.
 After each archival run, the archive is cleaned up as with `cleanUpInterval` for Iceberg storage, so a partitioned store has no cleanup interval of its own.
+An archival run writes sorted data files of up to `write.target-file-size-bytes` per partition of the archive, without sorting the values in memory, so `kvin.write.batch-records` does not limit its files.
 New values go to `current/`; the archive is an Iceberg store as described in <<Iceberg storage>>.
 `location` must be a local directory, because LevelDB stores its files there.
 Queries read both.
@@ -271,6 +272,13 @@ Latest-value fetches include negative timestamps.
 Location-based constructors take the archive root and preserve the existing directory layout.
 `KvinIceberg`, `IcebergRecordStore`, and `IcebergIdStore` also take a `KvinIcebergOptions` object with all settings of the service configuration; the URI-ID store uses only its location and Hadoop properties.
 `KvinPartitioned` takes such an object for its archive; its location is the archive location, and its cleanup interval is ignored.
+It also takes a `HotStore.Factory` for the stores of new values in `current/` and `current-archive/`: `HotStore.LEVELDB`, the default, or `HotStore.MEMTABLE`.
+Open a store always with the same factory; a store of the other type does not read the values in these directories.
+With a maximum hot store size in bytes, a `HotStore.MEMTABLE` store is also archived when it reaches that size; LevelDB hot stores are archived only at the archive interval.
+While a full hot store is archived, new values go to an empty one.
+If that one is also full before the archival ends, writes wait until the archival ends, so the hot stores hold at most about twice the maximum size.
+After a failed archival, writes do not wait, and a full hot store starts the next archival one minute later at the earliest.
+Closing the store waits for a running archival.
 The root is a local path, a `file:` URI, or a URI of another Hadoop file system, such as `s3a://bucket/archive`.
 Pod does not include connectors for remote file systems; the connector for the scheme must be on the classpath.
 In the service configuration, set `location` to the URI.
@@ -363,7 +371,7 @@ Set them with `<tableProperties>` in the service configuration, with `KvinIceber
 
 |`kvin.write.batch-records`
 |131072
-|Number of records that a write sorts in memory and stores as one data file per partition. A write with more records creates several files. Must be at least 1.
+|Number of records that a write sorts in memory and stores as one data file per partition. A write with more records creates several files. Archival runs of a partitioned store do not use it. Must be at least 1.
 
 |`write.parquet.row-group-size-bytes`
 |8 MB
@@ -379,7 +387,7 @@ Set them with `<tableProperties>` in the service configuration, with `KvinIceber
 
 |`write.target-file-size-bytes`
 |128 MB
-|Target size of compacted files. Files smaller than half of it are compacted.
+|Target size of compacted files and of the files of archival runs. Files smaller than half of it are compacted.
 |===
 
 ID allocation stages mappings, including forward and reverse lookups, until `flush()` or `close()`; batches automatically flush at 8192 new mappings.
@@ -397,6 +405,8 @@ Explicit-property fetches do not read ahead.
 
 The value table declares the sort order `contextId ASC, itemId ASC, propertyId ASC, time DESC, seqNr DESC` in Iceberg metadata.
 Each batch is physically sorted in that order, and new data files record its sort-order ID.
+`IcebergRecordStore.appendSorted(records)` takes records that are already in this order and writes them without buffering, to one data file per partition that rolls at `write.target-file-size-bytes`; it rejects unsorted records and then commits nothing.
+`KvinIceberg.appendSeries(source, series)` appends all values of the given series of another `Kvin` store in this order, fetching one series at a time.
 Opening an existing store updates the table's default sort order if needed, without rewriting or relabeling old files.
 Sorted data and column statistics support scan pruning; sort-order metadata alone does not guarantee faster searches or globally ordered query results.
 

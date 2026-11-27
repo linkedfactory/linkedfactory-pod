@@ -150,6 +150,86 @@ public class KvinIceberg implements Kvin {
 		});
 	}
 
+	/**
+	 * Appends all values of the given series of another store, for example of a store that is
+	 * archived. Each series is given by one of its tuples, of which only the context, item and
+	 * property are used. The series are written in the order of the IDs of this store, and the
+	 * values of each series in the order in which the source fetches them, newest first. With
+	 * an {@link IcebergRecordStore}, the values are therefore written to sorted data files
+	 * without sorting them in memory, see {@link IcebergRecordStore#appendSorted(Iterable)}.
+	 */
+	public synchronized void appendSeries(Kvin source, Iterable<KvinTuple> series) {
+		List<KvinTuple> keys = new ArrayList<>();
+		series.forEach(keys::add);
+		if (keys.isEmpty()) {
+			return;
+		}
+		Map<URI, Long> contexts = idStore.getIds(keys.stream().map(t -> context(t.context)).distinct().toList(), IdKind.CONTEXT, true);
+		Map<URI, Long> items = idStore.getIds(keys.stream().map(t -> t.item).distinct().toList(), IdKind.ITEM, true);
+		Map<URI, Long> properties = idStore.getIds(keys.stream().map(t -> t.property).distinct().toList(), IdKind.PROPERTY, true);
+		idStore.flush();
+		List<Series> sorted = keys.stream()
+				.map(t -> new Series(contexts.get(context(t.context)), items.get(t.item), properties.get(t.property),
+						t.context, t.item, t.property))
+				.distinct()
+				.sorted(Comparator.comparingLong(Series::contextId).thenComparingLong(Series::itemId)
+						.thenComparingLong(Series::propertyId))
+				.toList();
+		try (SeriesRecords records = new SeriesRecords(source, sorted)) {
+			if (recordStore instanceof IcebergRecordStore iceberg) {
+				iceberg.appendSorted(() -> records);
+			} else {
+				recordStore.put(() -> records);
+			}
+		}
+	}
+
+	private record Series(long contextId, long itemId, long propertyId, URI context, URI item, URI property) {
+	}
+
+	/**
+	 * The records of the series in their order, fetched from the source one series at a time.
+	 */
+	private static final class SeriesRecords implements Iterator<KvinRecord>, AutoCloseable {
+		private final Kvin source;
+		private final Iterator<Series> remaining;
+		private Series current;
+		private IExtendedIterator<KvinTuple> values = NiceIterator.emptyIterator();
+
+		SeriesRecords(Kvin source, List<Series> series) {
+			this.source = source;
+			this.remaining = series.iterator();
+		}
+
+		@Override
+		public boolean hasNext() {
+			while (!values.hasNext()) {
+				values.close();
+				if (!remaining.hasNext()) {
+					values = NiceIterator.emptyIterator();
+					return false;
+				}
+				current = remaining.next();
+				values = source.fetch(current.item(), current.property(), current.context(), 0);
+			}
+			return true;
+		}
+
+		@Override
+		public KvinRecord next() {
+			if (!hasNext()) {
+				throw new java.util.NoSuchElementException();
+			}
+			KvinTuple t = values.next();
+			return new KvinRecord(current.contextId(), current.itemId(), current.propertyId(), t.time, t.seqNr, t.value);
+		}
+
+		@Override
+		public void close() {
+			values.close();
+		}
+	}
+
 	private static URI context(URI context) {
 		return context == null ? DEFAULT_CONTEXT : context;
 	}

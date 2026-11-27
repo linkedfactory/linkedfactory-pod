@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * An append-only file of KVIN records with an in-memory index.
@@ -47,6 +48,11 @@ public class TableFile implements KvinRecordStore {
 	RandomAccessFile rafile;
 	FileChannel channel;
 	MappedByteBuffer buffer;
+	// every mapping of the file, as growing the file maps it again; unmapped on close
+	private final List<MappedByteBuffer> mappings = new ArrayList<>();
+	// read while fetches read the mappings, written by close, so that no fetch reads an unmapped buffer
+	private final ReentrantReadWriteLock mappingLock = new ReentrantReadWriteLock();
+	private volatile boolean closed;
 	// sorted by context first, so that all items of a context form one range
 	final ConcurrentSkipListMap<ItemWithContext, List<ItemData>> items = new ConcurrentSkipListMap<>();
 
@@ -61,9 +67,21 @@ public class TableFile implements KvinRecordStore {
 		rafile = new RandomAccessFile(path.toString(), "rw");
 		channel = rafile.getChannel();
 		long mappedLength = readFile ? Math.max(channel.size(), LENGTH) : LENGTH;
-		buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, mappedLength);
-		if (readFile && channel.size() > 0) {
-			reconstructItems(channel.size());
+		try {
+			buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, mappedLength);
+			mappings.add(buffer);
+			if (readFile && channel.size() > 0) {
+				reconstructItems(channel.size());
+			}
+		} catch (IOException | RuntimeException e) {
+			close();
+			throw e;
+		}
+	}
+
+	private void ensureOpen() {
+		if (closed) {
+			throw new IllegalStateException("Table file is closed: " + path);
 		}
 	}
 
@@ -84,6 +102,7 @@ public class TableFile implements KvinRecordStore {
 	}
 
 	synchronized void put(KvinRecord record) throws IOException {
+		ensureOpen();
 		ItemWithContext icp = new ItemWithContext(record.itemId(), record.contextId());
 
 		int itemLength = compressedIdsLength(record.itemId(), record.contextId(), record.propertyId());
@@ -120,6 +139,8 @@ public class TableFile implements KvinRecordStore {
 				capacity *= 2;
 			}
 			buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, capacity);
+			// fetches may still read the previous mapping, so it is only unmapped on close
+			mappings.add(buffer);
 			// a new mapping starts at position 0
 			buffer.position(position);
 		}
@@ -160,6 +181,17 @@ public class TableFile implements KvinRecordStore {
 	@Override
 	public IExtendedIterator<KvinRecord> fetch(long itemId, Long propertyId, Long contextId, long end, long begin,
 	                                           long limit, long interval, String op) {
+		mappingLock.readLock().lock();
+		try {
+			ensureOpen();
+			return fetchMapped(itemId, propertyId, contextId, end, begin, limit, interval);
+		} finally {
+			mappingLock.readLock().unlock();
+		}
+	}
+
+	private IExtendedIterator<KvinRecord> fetchMapped(long itemId, Long propertyId, Long contextId, long end, long begin,
+	                                                  long limit, long interval) {
 		if (limit <= 0) {
 			return NiceIterator.emptyIterator();
 		}
@@ -204,6 +236,7 @@ public class TableFile implements KvinRecordStore {
 
 	@Override
 	public synchronized long delete(long itemId, Long propertyId, Long contextId, long end, long begin) {
+		ensureOpen();
 		long ctx = contextOrDefault(contextId);
 		Long property = propertyId == null || propertyId == -1 ? null : propertyId;
 		if (!items.containsKey(new ItemWithContext(itemId, ctx))) {
@@ -215,6 +248,7 @@ public class TableFile implements KvinRecordStore {
 
 	@Override
 	public synchronized boolean delete(long itemId, Long contextId) {
+		ensureOpen();
 		long ctx = contextOrDefault(contextId);
 		if (!items.containsKey(new ItemWithContext(itemId, ctx))) {
 			return false;
@@ -228,6 +262,7 @@ public class TableFile implements KvinRecordStore {
 	 */
 	@Override
 	public synchronized long delete(Long contextId) {
+		ensureOpen();
 		long ctx = contextOrDefault(contextId);
 		if (contextRange(ctx).isEmpty()) {
 			return 0;
@@ -381,12 +416,27 @@ public class TableFile implements KvinRecordStore {
 		return -(low + 1);
 	}
 
+	/**
+	 * Closes the file and unmaps it, if supported, see {@link BufferUnmapper}. Waits for
+	 * running fetches, and later reads and writes fail.
+	 */
 	@Override
-	public void close() {
+	public synchronized void close() {
+		mappingLock.writeLock().lock();
 		try {
+			if (closed) {
+				return;
+			}
+			closed = true;
+			for (MappedByteBuffer mapping : mappings) {
+				BufferUnmapper.unmap(mapping);
+			}
+			mappings.clear();
 			rafile.close();
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
+		} finally {
+			mappingLock.writeLock().unlock();
 		}
 	}
 

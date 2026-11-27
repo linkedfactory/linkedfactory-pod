@@ -197,4 +197,21 @@ public class TableFileSetTest {
 			assertEquals(0, set.delete(CTX));
 		}
 	}
+
+	@Test
+	public void fetchesAllRecordsInKeyOrder() throws IOException {
+		try (TableFileSet set = open()) {
+			set.put(record(OTHER_CTX, ITEM, PROPERTY, 1, 0, "other context"),
+					record(CTX, ITEM, OTHER_PROPERTY, 1, 0, "other property"),
+					record(CTX, ITEM, PROPERTY, 1, 0, "t1"),
+					record(CTX, ITEM, PROPERTY, 2, 0, "t2 old"),
+					record(CTX, ITEM, PROPERTY, 2, 0, "t2 new"),
+					record(CTX, ITEM + 1, PROPERTY, 5, 0, "next item"));
+			set.delete(ITEM + 1, CTX);
+
+			// a record of a newer file replaces the record with the same key
+			assertEquals(List.of("t2 new", "t1", "other property", "other context"),
+					values(set.fetchAll().toList()));
+		}
+	}
 }

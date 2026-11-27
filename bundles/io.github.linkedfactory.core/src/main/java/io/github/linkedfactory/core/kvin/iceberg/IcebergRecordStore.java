@@ -350,17 +350,7 @@ public class IcebergRecordStore implements KvinRecordStore {
 
 		try {
 			for (KvinRecord record : records) {
-				GenericRecord row = GenericRecord.create(SCHEMA);
-
-				row.set(0, record.itemId());
-				row.set(1, record.contextId());
-				row.set(2, record.propertyId());
-				row.set(3, record.time());
-				row.set(4, record.seqNr());
-				row.set(5, false);
-
-				setValue(row, record.value());
-				batch.add(row);
+				batch.add(toRow(record));
 
 				if (batch.size() >= batchSize) {
 					writeBatch(batch, files, paths);
@@ -391,6 +381,149 @@ public class IcebergRecordStore implements KvinRecordStore {
 			}
 
 			throw e;
+		}
+	}
+
+	private static GenericRecord toRow(KvinRecord record) throws IOException {
+		GenericRecord row = GenericRecord.create(SCHEMA);
+		row.set(0, record.itemId());
+		row.set(1, record.contextId());
+		row.set(2, record.propertyId());
+		row.set(3, record.time());
+		row.set(4, record.seqNr());
+		row.set(5, false);
+		setValue(row, record.value());
+		return row;
+	}
+
+	/**
+	 * Appends records that are sorted by context, item and property, then by descending time
+	 * and descending sequence number, see {@link KvinRecord#compareTo(KvinRecord)}. Unlike
+	 * {@link #put(Iterable)}, the records are neither buffered nor sorted in memory: they are
+	 * written directly to one data file per partition, and a new file is started when a file
+	 * reaches {@code write.target-file-size-bytes}. All files are committed in one append,
+	 * followed by a background compaction.
+	 *
+	 * <p>Records with the same key are all appended; a fetch returns one of them.</p>
+	 *
+	 * @throws IllegalArgumentException if the records are not sorted; nothing is committed then
+	 */
+	public synchronized void appendSorted(Iterable<KvinRecord> records) {
+		table.refresh();
+		PartitionSpec spec = table.spec();
+		validatePartitionSpec(spec);
+		long targetSize = PropertyUtil.propertyAsLong(table.properties(), TableProperties.WRITE_TARGET_FILE_SIZE_BYTES,
+				DEFAULT_COMPACTION_TARGET_SIZE);
+		PartitionKey key = new PartitionKey(spec, SCHEMA);
+		// the rows of different partitions interleave, so each partition has an open file
+		Map<PartitionKey, SortedFileWriter> writers = new HashMap<>();
+		List<DataFile> files = new ArrayList<>();
+		List<String> paths = new ArrayList<>();
+		boolean committed = false;
+		try {
+			KvinRecord previous = null;
+			for (KvinRecord record : records) {
+				if (previous != null && previous.compareTo(record) > 0) {
+					throw new IllegalArgumentException("Records are not sorted: " + record + " follows " + previous);
+				}
+				previous = record;
+				GenericRecord row = toRow(record);
+				key.partition(row);
+				SortedFileWriter writer = writers.get(key);
+				if (writer == null) {
+					PartitionKey partition = key.copy();
+					writer = new SortedFileWriter(spec, partition, targetSize, files, paths);
+					writers.put(partition, writer);
+				}
+				writer.write(row);
+			}
+			for (SortedFileWriter writer : writers.values()) {
+				writer.finish();
+			}
+			writers.clear();
+			if (!files.isEmpty()) {
+				commitAppend(files);
+				committed = true;
+				scheduleCompaction();
+			}
+		} catch (CommitStateUnknownException e) {
+			// A possibly committed file must never be removed.
+			throw e;
+		} catch (IOException | RuntimeException e) {
+			for (SortedFileWriter writer : writers.values()) {
+				writer.abort(e);
+			}
+			if (!committed) {
+				cleanup(paths);
+			}
+			if (e instanceof IOException io) {
+				throw new UncheckedIOException("Unable to write Iceberg data", io);
+			}
+			throw (RuntimeException) e;
+		}
+	}
+
+	/**
+	 * Writes the sorted rows of one partition to data files of at most the target size.
+	 */
+	private final class SortedFileWriter {
+		private final PartitionSpec spec;
+		private final PartitionKey partition;
+		private final long targetSize;
+		private final List<DataFile> files;
+		private final List<String> paths;
+		private DataWriter<org.apache.iceberg.data.Record> writer;
+		private long item, context, property;
+
+		SortedFileWriter(PartitionSpec spec, PartitionKey partition, long targetSize, List<DataFile> files,
+				List<String> paths) {
+			this.spec = spec;
+			this.partition = partition;
+			this.targetSize = targetSize;
+			this.files = files;
+			this.paths = paths;
+		}
+
+		void write(GenericRecord row) throws IOException {
+			if (writer != null && writer.length() >= targetSize) {
+				finish();
+			}
+			long nextItem = (Long) row.get(0), nextContext = (Long) row.get(1), nextProperty = (Long) row.get(2);
+			boolean first = writer == null || nextItem != item || nextContext != context || nextProperty != property;
+			if (writer == null) {
+				writer = newWriter(table, spec, partition, targetSize, paths);
+			}
+			row.set(5, first);
+			writer.write(row);
+			item = nextItem;
+			context = nextContext;
+			property = nextProperty;
+		}
+
+		/**
+		 * Closes the current file and adds it to the files to commit.
+		 */
+		void finish() throws IOException {
+			if (writer != null) {
+				DataWriter<org.apache.iceberg.data.Record> current = writer;
+				writer = null;
+				current.close();
+				files.add(current.toDataFile());
+			}
+		}
+
+		/**
+		 * Closes the current file after a failure; the caller removes it.
+		 */
+		void abort(Exception failure) {
+			if (writer != null) {
+				try {
+					writer.close();
+				} catch (IOException | RuntimeException e) {
+					failure.addSuppressed(e);
+				}
+				writer = null;
+			}
 		}
 	}
 

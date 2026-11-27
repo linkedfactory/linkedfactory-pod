@@ -6,8 +6,6 @@ import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.iceberg.KvinIceberg;
 import io.github.linkedfactory.core.kvin.iceberg.KvinIcebergOptions;
-import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
-import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDbArchiver;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
 import net.enilink.commons.iterator.IExtendedIterator;
 import net.enilink.commons.iterator.NiceIterator;
@@ -26,9 +24,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class KvinPartitioned implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinPartitioned.class);
@@ -39,8 +42,28 @@ public class KvinPartitioned implements Kvin {
 	protected File currentStorePath, currentStoreArchivePath;
 	// location of the Iceberg archive, a path or a URI
 	protected String archiveLocation;
-	protected volatile KvinLevelDb hotStore, hotStoreArchive;
+	protected final HotStore.Factory hotStoreFactory;
+	protected volatile HotStore hotStore, hotStoreArchive;
 	protected Kvin archiveStore;
+	// the size in bytes at which the hot store is archived, 0 for no limit
+	protected final long maxHotStoreSize;
+	// time after a failed archival before a full hot store starts the next one
+	long archivalRetryDelayNanos = TimeUnit.MINUTES.toNanos(1);
+
+	// held by each archival run, so that runs do not overlap
+	private final ReentrantLock archivalLock = new ReentrantLock();
+	// signalled when an archival run ends, to resume stalled writes
+	private final Object archivalEnded = new Object();
+	// runs the archivals that full hot stores request
+	private final ExecutorService archiver = Executors.newSingleThreadExecutor(task -> {
+		Thread thread = new Thread(task, "kvin-partitioned-archival");
+		thread.setDaemon(true);
+		return thread;
+	});
+	private final AtomicBoolean archivalRequested = new AtomicBoolean();
+	private volatile long lastFailedArchival;
+	private volatile boolean closed;
+	private ScheduledFuture<?> cyclicArchival;
 
 	ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 
@@ -61,15 +84,48 @@ public class KvinPartitioned implements Kvin {
 	 * up after each archival run.
 	 */
 	public KvinPartitioned(File path, Duration archiveInterval, KvinIcebergOptions archiveOptions) throws IOException {
+		this(path, archiveInterval, archiveOptions, HotStore.LEVELDB);
+	}
+
+	/**
+	 * Creates a store whose Iceberg archive uses the given settings, and whose hot stores
+	 * the factory opens, see {@link HotStore#LEVELDB} and {@link HotStore#MEMTABLE}. The hot
+	 * stores are the directories {@code current} and {@code current-archive} in {@code path},
+	 * so the same factory must be used each time the store is opened.
+	 */
+	public KvinPartitioned(File path, Duration archiveInterval, KvinIcebergOptions archiveOptions,
+	                       HotStore.Factory hotStoreFactory) throws IOException {
+		this(path, archiveInterval, archiveOptions, hotStoreFactory, 0);
+	}
+
+	/**
+	 * Creates a store that also archives its hot store when it reaches the given size in
+	 * bytes, see {@link HotStore#sizeInBytes()}; 0 for no limit. While the values of a full
+	 * hot store are archived, new values go to an empty hot store. If that store also
+	 * reaches the size before the archival ends, writes wait for the end of the archival, so
+	 * the hot stores hold at most about twice the size.
+	 */
+	public KvinPartitioned(File path, Duration archiveInterval, KvinIcebergOptions archiveOptions,
+	                       HotStore.Factory hotStoreFactory, long maxHotStoreSize) throws IOException {
+		if (maxHotStoreSize < 0) {
+			throw new IllegalArgumentException("The maximum hot store size must not be negative: " + maxHotStoreSize);
+		}
 		this.path = path;
+		this.hotStoreFactory = hotStoreFactory;
+		this.maxHotStoreSize = maxHotStoreSize;
 		this.archiveInterval = archiveInterval;
 		this.currentStorePath = new File(path, "current");
 		this.currentStoreArchivePath = new File(path, "current-archive");
 		this.archiveLocation = archiveOptions.location();
 		Files.createDirectories(this.currentStorePath.toPath());
-		hotStore = new KvinLevelDb(this.currentStorePath);
+		hotStore = hotStoreFactory.open(this.currentStorePath);
 		if (Files.exists(this.currentStoreArchivePath.toPath())) {
-			hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
+			try {
+				hotStoreArchive = hotStoreFactory.open(this.currentStoreArchivePath);
+			} catch (IOException | RuntimeException e) {
+				hotStore.close();
+				throw e;
+			}
 		}
 		try {
 			archiveStore = createArchiveStore(archiveOptions.toBuilder().cleanUpInterval(null).build());
@@ -79,6 +135,7 @@ public class KvinPartitioned implements Kvin {
 			if (hotStoreArchive != null) {
 				hotStoreArchive.close();
 			}
+			archiver.shutdown();
 			throw e;
 		}
 		scheduleCyclicArchival();
@@ -110,8 +167,38 @@ public class KvinPartitioned implements Kvin {
 		}
 	}
 
+	/**
+	 * Archives the values of the hot store: starts a new hot store, copies the values of the
+	 * previous one into the archive store, and then removes it. Waits for a running archival
+	 * first. Does nothing after the store is closed.
+	 */
 	public void runArchival() {
+		archivalLock.lock();
+		try {
+			if (closed) {
+				return;
+			}
+			if (archive()) {
+				lastFailedArchival = 0;
+			} else {
+				lastFailedArchival = Math.max(System.nanoTime(), 1);
+			}
+		} finally {
+			archivalLock.unlock();
+			synchronized (archivalEnded) {
+				archivalEnded.notifyAll();
+			}
+		}
+	}
+
+	/**
+	 * Runs one archival.
+	 *
+	 * @return true if the values of the previous hot store were archived and the store removed
+	 */
+	private boolean archive() {
 		log.info("Run archival");
+		boolean archived = false;
 		Lock writeLock = null;
 		try {
 			writeLock = writeLock();
@@ -128,12 +215,13 @@ public class KvinPartitioned implements Kvin {
 		}
 
 		try {
-			new KvinLevelDbArchiver(hotStoreArchive, archiveStore).archive();
+			archive(hotStoreArchive);
 			try {
 				writeLock = writeLock();
 				this.hotStoreArchive.close();
 				this.hotStoreArchive = null;
 				FileUtils.deleteDirectory(this.currentStoreArchivePath);
+				archived = true;
 			} catch (IOException e) {
 				log.error("Deleting hot store archive failed", e);
 			} finally {
@@ -153,11 +241,89 @@ public class KvinPartitioned implements Kvin {
 				log.error("Cleaning up archive store failed", e);
 			}
 		}
+		return archived;
+	}
+
+	/**
+	 * True while an archival runs, for tests.
+	 */
+	boolean isArchivalRunning() {
+		return archivalLock.isLocked();
+	}
+
+	private boolean isFull(HotStore store) {
+		return maxHotStoreSize > 0 && store.sizeInBytes() >= maxHotStoreSize;
+	}
+
+	/**
+	 * Starts an archival in the background unless one is already requested, or an archival
+	 * failed less than the retry delay ago.
+	 */
+	private void requestArchival() {
+		long failed = lastFailedArchival;
+		if (closed || failed != 0 && System.nanoTime() - failed < archivalRetryDelayNanos) {
+			return;
+		}
+		if (archivalRequested.compareAndSet(false, true)) {
+			try {
+				archiver.execute(() -> {
+					archivalRequested.set(false);
+					runArchival();
+				});
+			} catch (RejectedExecutionException e) {
+				// the store is closing
+				archivalRequested.set(false);
+			}
+		}
+	}
+
+	/**
+	 * Waits while the hot store is full and the previous hot store is still archived, as the
+	 * full hot store can only be archived after that.
+	 */
+	private void awaitHotStoreCapacity() {
+		if (maxHotStoreSize == 0) {
+			return;
+		}
+		synchronized (archivalEnded) {
+			boolean logged = false;
+			while (!closed && archivalLock.isLocked() && hotStoreArchive != null && isFull(hotStore)) {
+				if (!logged) {
+					log.warn("Hot store is full, writes wait until the running archival ends");
+					logged = true;
+				}
+				try {
+					// also checks the condition again if the notification is missed
+					archivalEnded.wait(100);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					throw new KvinException("Interrupted while waiting for the archival", e);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Copies all values of the hot store into the archive store. An Iceberg archive fetches
+	 * the values one series at a time in the order of its IDs, so that it writes sorted data
+	 * files without sorting the values in memory.
+	 */
+	private void archive(HotStore store) {
+		if (archiveStore instanceof KvinIceberg icebergStore) {
+			try (IExtendedIterator<KvinTuple> series = store.fetchLatest()) {
+				icebergStore.appendSeries(store, series);
+			}
+		} else {
+			try (IExtendedIterator<KvinTuple> tuples = store.fetchAll()) {
+				archiveStore.put(tuples);
+			}
+		}
 	}
 
 	private void scheduleCyclicArchival() {
 		if (this.archiveInterval != null) {
-			scheduler.scheduleWithFixedDelay(this::runArchival, 0, archiveInterval.toMillis(), TimeUnit.MILLISECONDS);
+			cyclicArchival = scheduler.scheduleWithFixedDelay(this::runArchival, 0, archiveInterval.toMillis(),
+					TimeUnit.MILLISECONDS);
 		}
 	}
 
@@ -178,13 +344,24 @@ public class KvinPartitioned implements Kvin {
 		this.put(Arrays.asList(tuples));
 	}
 
+	/**
+	 * Stores the tuples in the hot store. If the hot store has a maximum size, a full hot
+	 * store starts an archival, and writes wait while the hot store is full and the previous
+	 * one is still archived.
+	 */
 	@Override
 	public void put(Iterable<KvinTuple> tuples) {
+		awaitHotStoreCapacity();
 		Lock readLock = readLock();
+		boolean full;
 		try {
 			hotStore.put(tuples);
+			full = isFull(hotStore);
 		} finally {
 			readLock.release();
+		}
+		if (full) {
+			requestArchival();
 		}
 	}
 
@@ -192,12 +369,12 @@ public class KvinPartitioned implements Kvin {
 		hotStore.close();
 		FileUtils.deleteDirectory(this.currentStoreArchivePath);
 		FileUtils.moveDirectory(this.currentStorePath, this.currentStoreArchivePath);
-		hotStore = new KvinLevelDb(currentStorePath);
+		hotStore = hotStoreFactory.open(currentStorePath);
 		for (KvinListener listener : listeners) {
 			// register listeners on new hot store
 			hotStore.addListener(listener);
 		}
-		hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
+		hotStoreArchive = hotStoreFactory.open(this.currentStoreArchivePath);
 	}
 
 	@Override
@@ -476,8 +653,24 @@ public class KvinPartitioned implements Kvin {
 		return WrappedIterator.create(properties.iterator());
 	}
 
+	/**
+	 * Closes the store. Cancels further archivals and waits for a running one.
+	 */
 	@Override
 	public void close() {
+		if (cyclicArchival != null) {
+			cyclicArchival.cancel(false);
+		}
+		archiver.shutdown();
+		archivalLock.lock();
+		try {
+			closed = true;
+		} finally {
+			archivalLock.unlock();
+		}
+		synchronized (archivalEnded) {
+			archivalEnded.notifyAll();
+		}
 		Lock readLock = readLock();
 		try {
 			try {

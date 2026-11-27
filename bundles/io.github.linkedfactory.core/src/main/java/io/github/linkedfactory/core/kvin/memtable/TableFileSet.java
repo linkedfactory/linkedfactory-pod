@@ -68,6 +68,17 @@ public class TableFileSet implements KvinRecordStore {
 	}
 
 	/**
+	 * Returns the number of bytes written to all table files, including tombstones.
+	 */
+	public long length() {
+		long length = 0;
+		for (TableFile file : files) {
+			length += file.length();
+		}
+		return length;
+	}
+
+	/**
 	 * Returns the table files from oldest to newest.
 	 */
 	public List<TableFile> getFiles() {
@@ -126,6 +137,57 @@ public class TableFileSet implements KvinRecordStore {
 			}
 		}
 		return WrappedIterator.create(result.iterator());
+	}
+
+	/**
+	 * Returns all records, ordered by context, item, property, descending time and descending
+	 * sequence number. Of the records with the same key in several files, the record of the
+	 * newest file is returned. The files are merged one item at a time.
+	 */
+	public IExtendedIterator<KvinRecord> fetchAll() {
+		return fetchAll(Long.MAX_VALUE);
+	}
+
+	/**
+	 * Returns the newest record of each series of context, item and property, in the order of
+	 * {@link #fetchAll()}.
+	 */
+	public IExtendedIterator<KvinRecord> fetchLatest() {
+		return fetchAll(1);
+	}
+
+	private IExtendedIterator<KvinRecord> fetchAll(long limitPerSeries) {
+		List<TableFile> snapshot = new ArrayList<>(files);
+		SortedSet<TableFile.ItemWithContext> keys = new TreeSet<>();
+		for (TableFile file : snapshot) {
+			keys.addAll(file.items.keySet());
+		}
+		Iterator<TableFile.ItemWithContext> remainingKeys = keys.iterator();
+		return new NiceIterator<>() {
+			Iterator<KvinRecord> records = Collections.emptyIterator();
+
+			@Override
+			public boolean hasNext() {
+				while (!records.hasNext() && remainingKeys.hasNext()) {
+					TableFile.ItemWithContext key = remainingKeys.next();
+					List<KvinRecord> itemRecords = new ArrayList<>();
+					for (Long property : properties(snapshot, key.itemId, key.contextId)) {
+						mergeSeries(snapshot, key.itemId, property, key.contextId, Long.MAX_VALUE, Long.MIN_VALUE,
+								limitPerSeries, 0, itemRecords);
+					}
+					records = itemRecords.iterator();
+				}
+				return records.hasNext();
+			}
+
+			@Override
+			public KvinRecord next() {
+				if (!hasNext()) {
+					throw new NoSuchElementException();
+				}
+				return records.next();
+			}
+		};
 	}
 
 	/**
