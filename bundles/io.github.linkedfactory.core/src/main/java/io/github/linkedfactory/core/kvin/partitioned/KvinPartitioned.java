@@ -35,7 +35,12 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class KvinPartitioned implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinPartitioned.class);
-	private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+	// starts the cyclic archivals of all stores; a daemon thread, as it is never shut down
+	private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1, task -> {
+		Thread thread = new Thread(task, "kvin-partitioned-scheduler");
+		thread.setDaemon(true);
+		return thread;
+	});
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
 	protected Duration archiveInterval;
