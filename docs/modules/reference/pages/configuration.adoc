@@ -183,6 +183,9 @@ A partitioned store writes new values to a hot store and moves them to an Iceber
 |`maxHotStoreSize`
 |Optional, only with `hotStore` `memtable`. Size in bytes at which the hot store is archived, such as `268435456` for 256 MB. New values then go to an empty hot store; if it is full as well before the archival ends, writes wait for the archival. Default: no limit.
 
+|`hotStoreSyncWrites`
+|Optional, only with `hotStore` `memtable`. `true` persists the values of each write before the write returns, so that they survive a crash of the operating system or a power loss. Each write then waits for the disk, so write values in batches. Default: `false`, which leaves persisting to the operating system, as for `leveldb`: values survive a crash of Pod, but not necessarily a crash of the operating system.
+
 |`retentionPeriod`
 |Optional. After each archival run, archived values that are older than this period are removed.
 
@@ -203,7 +206,7 @@ A partitioned store writes new values to a hot store and moves them to an Iceber
 |===
 
 Both durations are ISO 8601 durations such as `P7D`, or a number of milliseconds.
-An invalid retention period, partition spec, table property, hot store type, or hot store size fails initialization; an invalid archive interval is logged, and values stay in the hot store.
+An invalid retention period, partition spec, table property, hot store type, hot store size, or `hotStoreSyncWrites` value fails initialization; an invalid archive interval is logged, and values stay in the hot store.
 After each archival run, the archive is cleaned up as with `cleanUpInterval` for Iceberg storage, so a partitioned store has no cleanup interval of its own.
 An archival run writes sorted data files of up to `write.target-file-size-bytes` per partition of the archive, without sorting the values in memory, so `kvin.write.batch-records` does not limit its files.
 New values go to `current/`; the archive is an Iceberg store as described in <<Iceberg storage>>.

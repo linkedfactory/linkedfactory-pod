@@ -719,6 +719,13 @@ public class KvinMemTable implements Kvin {
 	}
 
 	/**
+	 * True if each put and delete persists its values before it returns.
+	 */
+	public boolean isSyncWrites() {
+		return syncWrites;
+	}
+
+	/**
 	 * Returns the number of bytes written to the table files, which grows with the number of
 	 * values and with the memory of their index.
 	 */

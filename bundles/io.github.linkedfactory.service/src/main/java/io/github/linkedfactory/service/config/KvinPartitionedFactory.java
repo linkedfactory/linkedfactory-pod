@@ -29,7 +29,7 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 				log.error("invalid archive interval : {}", archiveInterval);
 			}
 			HotStore.Factory hotStoreFactory = hotStoreFactory();
-			long maxHotStoreSize = maxHotStoreSize(hotStoreFactory);
+			long maxHotStoreSize = maxHotStoreSize();
 			return new KvinPartitioned(path, archiveIntervalDuration, archiveOptions(path), hotStoreFactory,
 					maxHotStoreSize);
 		} catch (IOException e) {
@@ -41,12 +41,27 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 	 * The type of the hot stores: {@code leveldb} by default, or {@code memtable}.
 	 */
 	HotStore.Factory hotStoreFactory() {
+		boolean memTable = isMemTableHotStore();
+		boolean syncWrites = ConfigLiterals.bool(getHotStoreSyncWrites(), "hotStoreSyncWrites", false);
+		if (memTable) {
+			return HotStore.memTable(syncWrites);
+		}
+		if (syncWrites) {
+			throw new IllegalArgumentException("hotStoreSyncWrites requires the hotStore memtable");
+		}
+		return HotStore.LEVELDB;
+	}
+
+	/**
+	 * True if the hot store type is {@code memtable}, false for {@code leveldb}.
+	 */
+	private boolean isMemTableHotStore() {
 		String type = getHotStore();
 		if (type == null || type.isBlank() || type.trim().equalsIgnoreCase("leveldb")) {
-			return HotStore.LEVELDB;
+			return false;
 		}
 		if (type.trim().equalsIgnoreCase("memtable")) {
-			return HotStore.MEMTABLE;
+			return true;
 		}
 		throw new IllegalArgumentException("Invalid hotStore, use leveldb or memtable: " + type);
 	}
@@ -55,9 +70,9 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 	 * The size in bytes at which the hot store is archived, 0 for no limit. Only hot stores
 	 * of the type {@code memtable} have a size.
 	 */
-	long maxHotStoreSize(HotStore.Factory hotStoreFactory) {
+	long maxHotStoreSize() {
 		long size = ConfigLiterals.bytes(getMaxHotStoreSize(), "maxHotStoreSize", 0);
-		if (size > 0 && hotStoreFactory != HotStore.MEMTABLE) {
+		if (size > 0 && !isMemTableHotStore()) {
 			throw new IllegalArgumentException("maxHotStoreSize requires the hotStore memtable");
 		}
 		return size;
@@ -107,4 +122,7 @@ public abstract class KvinPartitionedFactory extends KvinLevelDbFactory {
 
 	@Iri("plugin://io.github.linkedfactory.service/data/maxHotStoreSize")
 	public abstract ILiteral getMaxHotStoreSize();
+
+	@Iri("plugin://io.github.linkedfactory.service/data/hotStoreSyncWrites")
+	public abstract ILiteral getHotStoreSyncWrites();
 }

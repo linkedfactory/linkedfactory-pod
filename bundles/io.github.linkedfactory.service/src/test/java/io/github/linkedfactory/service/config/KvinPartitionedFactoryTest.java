@@ -30,6 +30,7 @@ public class KvinPartitionedFactoryTest {
 	// the hot store settings of the factories that the test creates
 	private String hotStore;
 	private String maxHotStoreSize;
+	private String hotStoreSyncWrites;
 
 	private KvinPartitionedFactory factory(String retentionPeriod, String partitionSpec, String tableProperties) {
 		return factory(retentionPeriod, partitionSpec, tableProperties, null, null);
@@ -86,6 +87,11 @@ public class KvinPartitionedFactoryTest {
 			@Override
 			public ILiteral getMaxHotStoreSize() {
 				return maxHotStoreSize == null ? null : new Literal(maxHotStoreSize);
+			}
+
+			@Override
+			public ILiteral getHotStoreSyncWrites() {
+				return hotStoreSyncWrites == null ? null : new Literal(hotStoreSyncWrites);
 			}
 		};
 	}
@@ -212,6 +218,47 @@ public class KvinPartitionedFactoryTest {
 		hotStore = null;
 		maxHotStoreSize = "4096";
 		assertThrows(IllegalArgumentException.class, () -> factory(null, null, null).create());
+		assertFalse("Invalid settings fail before the store is opened", currentHotStore().exists());
+	}
+
+	private boolean openedHotStoreSyncsWrites() throws Exception {
+		File directory = temporary.newFolder();
+		try (var hotStore = factory(null, null, null).hotStoreFactory().open(directory)) {
+			return ((io.github.linkedfactory.core.kvin.memtable.KvinMemTable) hotStore).isSyncWrites();
+		}
+	}
+
+	@Test
+	public void syncsWritesOfMemTableHotStoresIfConfigured() throws Exception {
+		hotStore = "memtable";
+		assertFalse(openedHotStoreSyncsWrites());
+		hotStoreSyncWrites = "TRUE";
+		assertTrue(openedHotStoreSyncsWrites());
+		hotStoreSyncWrites = "false";
+		assertFalse(openedHotStoreSyncsWrites());
+
+		// the configured store uses the setting
+		hotStoreSyncWrites = "true";
+		var item = URIs.createURI("urn:partitioned:item");
+		var property = URIs.createURI("urn:partitioned:property");
+		try (var store = factory(null, null, null).create()) {
+			store.put(new KvinTuple(null, item, property, 1, 42));
+			assertEquals(1, store.fetch(item, property, null, 0).toList().size());
+		}
+	}
+
+	@Test
+	public void rejectsInvalidSyncSettings() {
+		hotStore = "memtable";
+		hotStoreSyncWrites = "yes";
+		assertThrows(IllegalArgumentException.class, () -> factory(null, null, null).create());
+
+		// LevelDB hot stores leave persisting to the operating system
+		hotStore = null;
+		hotStoreSyncWrites = "true";
+		assertThrows(IllegalArgumentException.class, () -> factory(null, null, null).create());
+		hotStoreSyncWrites = "false";
+		factory(null, null, null).hotStoreFactory();
 		assertFalse("Invalid settings fail before the store is opened", currentHotStore().exists());
 	}
 }

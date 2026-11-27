@@ -53,6 +53,26 @@ final class ConfigLiterals {
 	}
 
 	/**
+	 * Parses {@code true} or {@code false}, ignoring case.
+	 *
+	 * @param setting the name of the setting, for the error message
+	 * @return the value, or {@code defaultValue} if the literal is missing
+	 */
+	static boolean bool(ILiteral literal, String setting, boolean defaultValue) {
+		if (literal == null) {
+			return defaultValue;
+		}
+		String label = literal.getLabel().trim();
+		if (label.equalsIgnoreCase("true")) {
+			return true;
+		}
+		if (label.equalsIgnoreCase("false")) {
+			return false;
+		}
+		throw new IllegalArgumentException("Invalid value for " + setting + ", use true or false: " + literal.getLabel());
+	}
+
+	/**
 	 * Parses a number of bytes that must not be negative.
 	 *
 	 * @param setting the name of the setting, for the error message
