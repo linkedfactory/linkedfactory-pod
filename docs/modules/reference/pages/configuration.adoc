@@ -175,16 +175,31 @@ A partitioned store writes new values to LevelDB and moves them to an Iceberg ar
 
 |`retentionPeriod`
 |Optional. After each archival run, archived values that are older than this period are removed.
+
+|`archiveLocation`
+|Optional. Location of the Iceberg archive. Default: `archive/` in the store directory. A path is relative to the workspace. A URI such as `s3a://bucket/pod-archive` is used unchanged, as for <<Iceberg storage>>.
+
+|`hadoopProperties`
+|Optional. Hadoop properties for accessing the archive, as for <<Iceberg storage>>.
+
+|`partitionSpec`
+|Optional. Partitioning of the archive's value table, as for <<Iceberg storage>>.
+
+|`tableProperties`
+|Optional. Iceberg table properties of the archive's value table, as for <<Iceberg storage>>.
 |===
 
 Both durations are ISO 8601 durations such as `P7D`, or a number of milliseconds.
-New values go to `current/`; the archive in `archive/` is an Iceberg store as described in <<Iceberg storage>>.
+An invalid retention period, partition spec, or table property fails initialization; an invalid archive interval is logged, and values stay in LevelDB.
+After each archival run, the archive is cleaned up as with `cleanUpInterval` for Iceberg storage, so a partitioned store has no cleanup interval of its own.
+New values go to `current/`; the archive is an Iceberg store as described in <<Iceberg storage>>.
+`dirName` must be a local directory, because LevelDB stores its files there.
 Queries read both.
 Deletes only change values that are not archived yet.
 
-Pod does not open a store whose `archive/` directory holds a Parquet archive of an earlier Pod version; it fails with an error that names the directory.
+Pod does not open a store whose archive location holds a Parquet archive of an earlier Pod version; it fails with an error that names the location.
 Pod does not convert such archives.
-To start with an empty archive, set a new `dirName` or remove the old directory.
+To start with an empty archive, set a new `archiveLocation` or `dirName`, or remove the old archive.
 
 === Iceberg storage
 
@@ -245,6 +260,7 @@ Latest-value fetches include negative timestamps.
 `IcebergIdStore` implements `IdStore` for all `IdKind` values and can be used without a record store.
 Location-based constructors take the archive root and preserve the existing directory layout.
 `KvinIceberg`, `IcebergRecordStore`, and `IcebergIdStore` also take a `KvinIcebergOptions` object with all settings of the service configuration; the URI-ID store uses only its location and Hadoop properties.
+`KvinPartitioned` takes such an object for its archive; its location is the archive location, and its cleanup interval is ignored.
 The root is a local path, a `file:` URI, or a URI of another Hadoop file system, such as `s3a://bucket/archive`.
 Pod does not include connectors for remote file systems; the connector for the scheme must be on the classpath.
 In the service configuration, set `dirName` to the URI.

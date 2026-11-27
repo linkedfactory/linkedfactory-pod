@@ -53,7 +53,7 @@ public class ArchiveRetentionTest {
 		long now = System.currentTimeMillis();
 		long weekDuration = Duration.of(7, ChronoUnit.DAYS).toMillis();
 
-		kvinPartitioned = new KvinPartitioned(tempDir, null, null);
+		kvinPartitioned = new KvinPartitioned(tempDir, null, (Duration) null);
 
 		kvinPartitioned.put(tupleGenerator.setStartTime(now - weekDuration * 4).generate());
 		kvinPartitioned.put(tupleGenerator.setStartTime(now - weekDuration * 2).generate());

@@ -1,6 +1,7 @@
 package io.github.linkedfactory.service.config;
 
 import io.github.linkedfactory.core.kvin.Kvin;
+import io.github.linkedfactory.core.kvin.iceberg.KvinIcebergOptions;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import net.enilink.composition.annotations.Iri;
 import org.eclipse.core.runtime.Platform;
@@ -25,20 +26,29 @@ public abstract class KvinLevelDbFactory implements IKvinFactory {
 
 	protected File getStorePathOr(String name) {
 		String dirName = getDirName();
-		if (dirName == null) {
-			dirName = name;
+		return inWorkspace(dirName == null ? name : dirName);
+	}
+
+	/**
+	 * Resolves a relative path against the workspace; absolute paths are returned unchanged.
+	 */
+	protected File inWorkspace(String path) {
+		if (new File(path).isAbsolute()) {
+			return new File(path);
 		}
-		File valueStorePath;
-		if (new File(dirName).isAbsolute()) {
-			valueStorePath = new File(dirName);
-		} else {
-			try {
-				valueStorePath = new File(new File(Platform.getInstanceLocation().getURL().toURI()), dirName);
-			} catch (URISyntaxException e) {
-				throw new RuntimeException(e);
-			}
+		try {
+			return new File(new File(Platform.getInstanceLocation().getURL().toURI()), path);
+		} catch (URISyntaxException e) {
+			throw new RuntimeException(e);
 		}
-		return valueStorePath;
+	}
+
+	/**
+	 * Returns a URI such as {@code s3a://bucket/archive} unchanged, and resolves a path
+	 * with {@link #inWorkspace(String)}.
+	 */
+	protected String locationInWorkspace(String location) {
+		return KvinIcebergOptions.hasUriScheme(location) ? location : inWorkspace(location).toString();
 	}
 
 	@Iri("plugin://io.github.linkedfactory.service/data/dirName")

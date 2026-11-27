@@ -5,6 +5,7 @@ import io.github.linkedfactory.core.kvin.KvinException;
 import io.github.linkedfactory.core.kvin.KvinListener;
 import io.github.linkedfactory.core.kvin.KvinTuple;
 import io.github.linkedfactory.core.kvin.iceberg.KvinIceberg;
+import io.github.linkedfactory.core.kvin.iceberg.KvinIcebergOptions;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDbArchiver;
 import io.github.linkedfactory.core.kvin.util.AggregatingIterator;
@@ -35,28 +36,51 @@ public class KvinPartitioned implements Kvin {
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
 	protected Duration archiveInterval;
-	protected File currentStorePath, currentStoreArchivePath, archiveStorePath;
+	protected File currentStorePath, currentStoreArchivePath;
+	// location of the Iceberg archive, a path or a URI
+	protected String archiveLocation;
 	protected volatile KvinLevelDb hotStore, hotStoreArchive;
 	protected Kvin archiveStore;
 
 	ReadWriteLockManager lockManager = new ReadPrefReadWriteLockManager(true, 5000);
 
 	public KvinPartitioned(File path) throws IOException {
-		this(path, null, null);
+		this(path, null, (Duration) null);
 	}
 
 	public KvinPartitioned(File path, Duration archiveInterval, Duration retentionPeriod) throws IOException {
+		this(path, archiveInterval, KvinIcebergOptions.builder(new File(path, "archive").toString())
+				.retentionPeriod(retentionPeriod).build());
+	}
+
+	/**
+	 * Creates a store whose Iceberg archive uses the given settings. The location of the
+	 * settings is the location of the archive: by default the directory {@code archive} in
+	 * {@code path}, but it may also be another directory or a remote location such as
+	 * {@code s3a://bucket/archive}. The cleanup interval is ignored: the archive is cleaned
+	 * up after each archival run.
+	 */
+	public KvinPartitioned(File path, Duration archiveInterval, KvinIcebergOptions archiveOptions) throws IOException {
 		this.path = path;
 		this.archiveInterval = archiveInterval;
 		this.currentStorePath = new File(path, "current");
 		this.currentStoreArchivePath = new File(path, "current-archive");
-		this.archiveStorePath = new File(path, "archive");
+		this.archiveLocation = archiveOptions.location();
 		Files.createDirectories(this.currentStorePath.toPath());
 		hotStore = new KvinLevelDb(this.currentStorePath);
 		if (Files.exists(this.currentStoreArchivePath.toPath())) {
 			hotStoreArchive = new KvinLevelDb(this.currentStoreArchivePath);
 		}
-		archiveStore = createArchiveStore(archiveStorePath, retentionPeriod);
+		try {
+			archiveStore = createArchiveStore(archiveOptions.toBuilder().cleanUpInterval(null).build());
+		} catch (RuntimeException e) {
+			// releases the LevelDB locks, so that the store can be opened again
+			hotStore.close();
+			if (hotStoreArchive != null) {
+				hotStoreArchive.close();
+			}
+			throw e;
+		}
 		scheduleCyclicArchival();
 	}
 
@@ -64,8 +88,8 @@ public class KvinPartitioned implements Kvin {
 	 * Creates the store that receives the archived values. Called from the constructor,
 	 * so overriding methods must not use instance fields of the subclass.
 	 */
-	protected Kvin createArchiveStore(File archiveStorePath, Duration retentionPeriod) {
-		return new KvinIceberg(archiveStorePath.toString(), retentionPeriod);
+	protected Kvin createArchiveStore(KvinIcebergOptions archiveOptions) {
+		return new KvinIceberg(archiveOptions);
 	}
 
 	Lock writeLock() {

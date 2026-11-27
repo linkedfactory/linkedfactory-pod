@@ -64,8 +64,8 @@ public class KvinPartitionedTest {
 		kvinPartitioned.runArchival();
 		kvinPartitioned.put(tupleGenerator.setStartTime(1673823600000L).generate());
 
-		assertTrue(kvinPartitioned.archiveStorePath.listFiles().length > 0); // main folder
-		assertTrue(new File(kvinPartitioned.archiveStorePath, "iceberg/metadata").isDirectory()); // Iceberg value table
+		assertTrue(new File(kvinPartitioned.archiveLocation).listFiles().length > 0); // main folder
+		assertTrue(new File(kvinPartitioned.archiveLocation, "iceberg/metadata").isDirectory()); // Iceberg value table
 
 		storeIterator = kvinPartitioned.hotStore.fetchAll();
 		recordCount = 0;
