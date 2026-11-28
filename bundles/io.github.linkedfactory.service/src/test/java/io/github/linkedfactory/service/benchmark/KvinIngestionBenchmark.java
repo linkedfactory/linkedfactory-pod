@@ -1,8 +1,14 @@
 package io.github.linkedfactory.service.benchmark;
 
 import com.google.inject.Guice;
+import io.github.linkedfactory.core.kvin.Kvin;
 import io.github.linkedfactory.core.kvin.KvinTuple;
+import io.github.linkedfactory.core.kvin.iceberg.KvinIceberg;
+import io.github.linkedfactory.core.kvin.iceberg.KvinIcebergOptions;
 import io.github.linkedfactory.core.kvin.leveldb.KvinLevelDb;
+import io.github.linkedfactory.core.kvin.memtable.KvinMemTable;
+import io.github.linkedfactory.core.kvin.partitioned.HotStore;
+import io.github.linkedfactory.core.kvin.partitioned.KvinPartitioned;
 import io.github.linkedfactory.core.kvin.util.CsvFormatParser;
 import io.github.linkedfactory.core.kvin.util.JsonFormatParser;
 import io.github.linkedfactory.service.KvinService;
@@ -40,6 +46,10 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.junit.Assert;
 import scala.Function0;
 import scala.PartialFunction;
@@ -68,6 +78,13 @@ import java.util.concurrent.TimeUnit;
 public class KvinIngestionBenchmark {
 	private static final int SEQUENTIAL_CSV_FILE_COUNT = 10;
 
+	public static void main(String[] args) throws RunnerException {
+		Options options = new OptionsBuilder()
+				.include(KvinIngestionBenchmark.class.getSimpleName())
+				.build();
+		new Runner(options).run();
+	}
+
 	@State(Scope.Thread)
 	public static class BenchmarkState {
 		private List<KvinIngestionWorkload> workloads;
@@ -77,7 +94,7 @@ public class KvinIngestionBenchmark {
 		private int nextVariantIndex;
 		private KvinIngestionWorkload workload;
 		private IModelSet modelSet;
-		private KvinLevelDb store;
+		private Kvin store;
 		private File storeDirectory;
 		private KvinService service;
 		private KvinService parseOnlyService;
@@ -114,7 +131,13 @@ public class KvinIngestionBenchmark {
 					? Files.createTempDirectory("kvin-ingestion-jmh-")
 					: Files.createTempDirectory(Path.of(tempRoot), "kvin-ingestion-jmh-");
 			storeDirectory = directory.toFile();
-			store = new KvinLevelDb(storeDirectory);
+			// store = new KvinLevelDb(storeDirectory);
+			// no cyclic archival, as its first run would overlap with the measured writes
+			store = new KvinPartitioned(storeDirectory, null,
+					KvinIcebergOptions.builder(new File(storeDirectory, "archive").toString()).build(),
+					HotStore.MEMTABLE);
+			// store = new KvinMemTable(directory, false);
+			// store = new KvinIceberg(directory.toString());
 			store.put(workload.preseedTuples());
 			service = new BenchmarkService(false);
 			parseOnlyService = new BenchmarkService(true);
