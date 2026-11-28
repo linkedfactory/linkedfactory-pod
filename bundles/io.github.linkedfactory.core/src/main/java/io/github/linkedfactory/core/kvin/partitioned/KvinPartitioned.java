@@ -32,6 +32,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class KvinPartitioned implements Kvin {
 	static final Logger log = LoggerFactory.getLogger(KvinPartitioned.class);
@@ -44,7 +46,14 @@ public class KvinPartitioned implements Kvin {
 	protected List<KvinListener> listeners = new ArrayList<>();
 	protected File path;
 	protected Duration archiveInterval;
-	protected File currentStorePath, currentStoreArchivePath;
+	// hot store directories: hot-<n>, newer stores have larger numbers
+	static final Pattern HOT_STORE_DIRECTORY = Pattern.compile("hot-(\\d+)");
+	// hot store directories of earlier versions, kept until they are archived
+	static final String LEGACY_HOT_STORE = "current", LEGACY_HOT_STORE_ARCHIVE = "current-archive";
+	// the directories of the hot store and of the hot store that is archived
+	protected volatile File hotStorePath, hotStoreArchivePath;
+	// the number of the next hot store directory
+	private long nextHotStoreNr;
 	// location of the Iceberg archive, a path or a URI
 	protected String archiveLocation;
 	protected final HotStore.Factory hotStoreFactory;
@@ -95,8 +104,9 @@ public class KvinPartitioned implements Kvin {
 	/**
 	 * Creates a store whose Iceberg archive uses the given settings, and whose hot stores
 	 * the factory opens, see {@link HotStore#LEVELDB} and {@link HotStore#MEMTABLE}. The hot
-	 * stores are the directories {@code current} and {@code current-archive} in {@code path},
-	 * so the same factory must be used each time the store is opened.
+	 * stores are the directories {@code hot-<n>} in {@code path}; directories {@code current}
+	 * and {@code current-archive} of earlier versions are used until they are archived. The
+	 * same factory must be used each time the store is opened.
 	 */
 	public KvinPartitioned(File path, Duration archiveInterval, KvinIcebergOptions archiveOptions,
 	                       HotStore.Factory hotStoreFactory) throws IOException {
@@ -119,19 +129,8 @@ public class KvinPartitioned implements Kvin {
 		this.hotStoreFactory = hotStoreFactory;
 		this.maxHotStoreSize = maxHotStoreSize;
 		this.archiveInterval = archiveInterval;
-		this.currentStorePath = new File(path, "current");
-		this.currentStoreArchivePath = new File(path, "current-archive");
 		this.archiveLocation = archiveOptions.location();
-		Files.createDirectories(this.currentStorePath.toPath());
-		hotStore = hotStoreFactory.open(this.currentStorePath);
-		if (Files.exists(this.currentStoreArchivePath.toPath())) {
-			try {
-				hotStoreArchive = hotStoreFactory.open(this.currentStoreArchivePath);
-			} catch (IOException | RuntimeException e) {
-				hotStore.close();
-				throw e;
-			}
-		}
+		openHotStores();
 		try {
 			archiveStore = createArchiveStore(archiveOptions.toBuilder().cleanUpInterval(null).build());
 		} catch (RuntimeException e) {
@@ -144,6 +143,46 @@ public class KvinPartitioned implements Kvin {
 			throw e;
 		}
 		scheduleCyclicArchival();
+	}
+
+	/**
+	 * Opens the newest hot store directory as hot store, and an older one as the hot store
+	 * that is archived next. Creates the first hot store directory if there is none.
+	 */
+	private void openHotStores() throws IOException {
+		Files.createDirectories(path.toPath());
+		SortedMap<Long, File> directories = new TreeMap<>();
+		File[] files = path.listFiles(File::isDirectory);
+		for (File file : files == null ? new File[0] : files) {
+			Matcher matcher = HOT_STORE_DIRECTORY.matcher(file.getName());
+			if (matcher.matches()) {
+				directories.put(Long.parseLong(matcher.group(1)), file);
+			} else if (file.getName().equals(LEGACY_HOT_STORE_ARCHIVE)) {
+				directories.put(-2L, file);
+			} else if (file.getName().equals(LEGACY_HOT_STORE)) {
+				directories.put(-1L, file);
+			}
+		}
+		if (directories.size() > 2) {
+			throw new IOException("Expected at most two hot stores, the one for new values and the one that is "
+					+ "archived, but found " + directories.values() + " in " + path);
+		}
+		nextHotStoreNr = directories.isEmpty() ? 1 : Math.max(directories.lastKey(), 0) + 1;
+		if (directories.isEmpty()) {
+			directories.put(nextHotStoreNr, new File(path, "hot-" + nextHotStoreNr++));
+		}
+		hotStorePath = directories.get(directories.lastKey());
+		Files.createDirectories(hotStorePath.toPath());
+		hotStore = hotStoreFactory.open(hotStorePath);
+		if (directories.size() == 2) {
+			try {
+				hotStoreArchivePath = directories.get(directories.firstKey());
+				hotStoreArchive = hotStoreFactory.open(hotStoreArchivePath);
+			} catch (IOException | RuntimeException e) {
+				hotStore.close();
+				throw e;
+			}
+		}
 	}
 
 	/**
@@ -204,35 +243,34 @@ public class KvinPartitioned implements Kvin {
 	private boolean archive() {
 		log.debug("Run archival");
 		boolean archived = false;
-		Lock writeLock = null;
-		try {
-			writeLock = writeLock();
-			if (this.hotStoreArchive == null) {
-				// the hot store archive might exist if a previous archival was interrupted
+		// the hot store archive might exist if a previous archival was interrupted
+		if (this.hotStoreArchive == null) {
+			try {
 				createNewHotDataStore();
-			}
-		} catch (IOException e) {
-			log.error("Creating archive failed", e);
-		} finally {
-			if (writeLock != null) {
-				writeLock.release();
+			} catch (IOException | RuntimeException e) {
+				log.error("Creating a new hot store failed", e);
+				return false;
 			}
 		}
 
 		try {
-			archive(hotStoreArchive);
+			HotStore archivedStore = hotStoreArchive;
+			File archivedPath = hotStoreArchivePath;
+			archive(archivedStore);
+			// no reader uses the store after the write lock is acquired, so it is closed afterwards
+			Lock writeLock = writeLock();
 			try {
-				writeLock = writeLock();
-				this.hotStoreArchive.close();
 				this.hotStoreArchive = null;
-				FileUtils.deleteDirectory(this.currentStoreArchivePath);
+				this.hotStoreArchivePath = null;
+			} finally {
+				writeLock.release();
+			}
+			try {
+				archivedStore.close();
+				FileUtils.deleteDirectory(archivedPath);
 				archived = true;
 			} catch (IOException e) {
 				log.error("Deleting hot store archive failed", e);
-			} finally {
-				if (writeLock != null) {
-					writeLock.release();
-				}
 			}
 		} catch (Exception e) {
 			log.error("Archiving data to archive store failed", e);
@@ -370,16 +408,39 @@ public class KvinPartitioned implements Kvin {
 		}
 	}
 
+	/**
+	 * Starts a new hot store for new values, and keeps the previous one as the hot store that
+	 * is archived. The new store is opened before the write lock is acquired, so writes wait
+	 * only for the swap of the stores.
+	 *
+	 * @throws IllegalStateException if the previous hot store is not archived yet
+	 */
 	public void createNewHotDataStore() throws IOException {
-		hotStore.close();
-		FileUtils.deleteDirectory(this.currentStoreArchivePath);
-		FileUtils.moveDirectory(this.currentStorePath, this.currentStoreArchivePath);
-		hotStore = hotStoreFactory.open(currentStorePath);
-		for (KvinListener listener : listeners) {
-			// register listeners on new hot store
-			hotStore.addListener(listener);
+		if (hotStoreArchive != null) {
+			throw new IllegalStateException("The previous hot store is not archived yet: " + hotStoreArchivePath);
 		}
-		hotStoreArchive = hotStoreFactory.open(this.currentStoreArchivePath);
+		File newPath = new File(path, "hot-" + nextHotStoreNr++);
+		HotStore newStore;
+		try {
+			Files.createDirectories(newPath.toPath());
+			newStore = hotStoreFactory.open(newPath);
+		} catch (IOException | RuntimeException e) {
+			FileUtils.deleteQuietly(newPath);
+			throw e;
+		}
+		Lock writeLock = writeLock();
+		try {
+			for (KvinListener listener : listeners) {
+				// register listeners on new hot store
+				newStore.addListener(listener);
+			}
+			hotStoreArchive = hotStore;
+			hotStoreArchivePath = hotStorePath;
+			hotStore = newStore;
+			hotStorePath = newPath;
+		} finally {
+			writeLock.release();
+		}
 	}
 
 	@Override

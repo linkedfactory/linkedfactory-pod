@@ -65,11 +65,12 @@ public class KvinPartitionedMemTableTest {
 		store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, ITEM, PROPERTY, 1, 1.0),
 				new KvinTuple(Kvin.DEFAULT_CONTEXT, ITEM, PROPERTY, 2, 2.0),
 				new KvinTuple(Kvin.DEFAULT_CONTEXT, ITEM, OTHER_PROPERTY, 1, 3.0));
+		File archivedPath = store.hotStorePath;
 		store.runArchival();
 
 		assertEquals(0, store.hotStore.fetchAll().toList().size());
 		assertNull(store.hotStoreArchive);
-		assertFalse(store.currentStoreArchivePath.exists());
+		assertFalse(archivedPath.exists());
 		assertEquals(List.of(2L, 1L), times(store.archiveStore.fetch(ITEM, PROPERTY, Kvin.DEFAULT_CONTEXT, 0).toList()));
 
 		// archived and hot values are merged
@@ -123,13 +124,11 @@ public class KvinPartitionedMemTableTest {
 	public void unmapsTheArchivedHotStore() throws Exception {
 		org.junit.Assume.assumeTrue(java.nio.file.Files.isReadable(java.nio.file.Path.of("/proc/self/maps")));
 		store.put(new KvinTuple(Kvin.DEFAULT_CONTEXT, ITEM, PROPERTY, 1, 1.0));
-		String current = store.currentStorePath.toPath().toRealPath().toString();
-		assertTrue(mappedFiles().stream().anyMatch(file -> file.startsWith(current + "/")));
+		String archived = store.hotStorePath.toPath().toRealPath().toString();
+		assertTrue(mappedFiles().stream().anyMatch(file -> file.startsWith(archived + "/")));
 
 		store.runArchival();
-		// the directory of the archived hot store is removed, so its parent is resolved
-		String archived = tempDir.toPath().toRealPath().resolve("current-archive").toString();
-		assertEquals(List.of(), mappedFiles().stream().filter(file -> file.startsWith(archived)).toList());
+		assertEquals(List.of(), mappedFiles().stream().filter(file -> file.startsWith(archived + "/")).toList());
 	}
 
 	static List<String> mappedFiles() throws IOException {

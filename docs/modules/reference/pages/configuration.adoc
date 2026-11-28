@@ -209,11 +209,14 @@ Both durations are ISO 8601 durations such as `P7D`, or a number of milliseconds
 An invalid retention period, partition spec, table property, hot store type, hot store size, or `hotStoreSyncWrites` value fails initialization; an invalid archive interval is logged, and values stay in the hot store.
 After each archival run, the archive is cleaned up as with `cleanUpInterval` for Iceberg storage, so a partitioned store has no cleanup interval of its own.
 An archival run writes sorted data files of up to `write.target-file-size-bytes` per partition of the archive, without sorting the values in memory, so `kvin.write.batch-records` does not limit its files.
-New values go to `current/`; the archive is an Iceberg store as described in <<Iceberg storage>>.
+New values go to the hot store in a directory `hot-<n>/`, for example `hot-1/`; the archive is an Iceberg store as described in <<Iceberg storage>>.
+Each archival run starts a new hot store with the next number and removes the previous one after archiving it.
+Hot stores of earlier Pod versions in `current/` and `current-archive/` are still read and archived, and then removed.
+`location` holds at most two hot store directories, the one for new values and the one that is archived; with more, Pod fails with an error that names them.
 `location` must be a local directory, because the hot store keeps its files there.
 Queries read both.
 Deletes only change values that are not archived yet.
-After a change of `hotStore`, Pod does not read the values that the previous hot store has not archived yet; they stay in `current/` and `current-archive/` until `hotStore` is changed back.
+After a change of `hotStore`, Pod does not read the values that the previous hot store has not archived yet; they stay in their hot store directories until `hotStore` is changed back.
 
 Pod does not open a store whose archive location holds a Parquet archive of an earlier Pod version; it fails with an error that names the location.
 Pod does not convert such archives.
@@ -282,7 +285,7 @@ Latest-value fetches include negative timestamps.
 Location-based constructors take the archive root and preserve the existing directory layout.
 `KvinIceberg`, `IcebergRecordStore`, and `IcebergIdStore` also take a `KvinIcebergOptions` object with all settings of the service configuration; the URI-ID store uses only its location and Hadoop properties.
 `KvinPartitioned` takes such an object for its archive; its location is the archive location, and its cleanup interval is ignored.
-It also takes a `HotStore.Factory` for the stores of new values in `current/` and `current-archive/`: `HotStore.LEVELDB`, the default, or `HotStore.MEMTABLE`.
+It also takes a `HotStore.Factory` for the stores of new values in the `hot-<n>/` directories: `HotStore.LEVELDB`, the default, or `HotStore.MEMTABLE`.
 Open a store always with the same factory; a store of the other type does not read the values in these directories.
 Both types leave persisting new values to the operating system: the values survive a crash of Pod, but not necessarily a crash of the operating system or a power loss.
 `HotStore.memTable(true)` persists the values of each write before the write returns; each write then waits for the disk, so write values in batches.

@@ -61,11 +61,12 @@ public class KvinPartitionedArchiveStoreTest {
 		KvinPartitioned store = new KvinPartitioned(tempDir, null, (Duration) null);
 		try {
 			store.put(generator(1672614000000L).generate());
+			File archivedPath = store.hotStorePath;
 			store.runArchival();
 
 			assertTrue(store.archiveStore instanceof KvinIceberg);
 			assertEquals(0, store.hotStore.fetchAll().toList().size());
-			assertTrue(!store.currentStoreArchivePath.exists());
+			assertTrue(!archivedPath.exists());
 			assertEquals(10, store.archiveStore.fetch(ITEM, PROPERTY, Kvin.DEFAULT_CONTEXT, 0).toList().size());
 
 			// archived and hot values are merged

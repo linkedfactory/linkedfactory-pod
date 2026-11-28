@@ -156,7 +156,7 @@ public class KvinPartitionedFactoryTest {
 	}
 
 	private File currentHotStore() {
-		return new File(temporary.getRoot(), "current");
+		return new File(temporary.getRoot(), "hot-1");
 	}
 
 	@Test
@@ -195,7 +195,7 @@ public class KvinPartitionedFactoryTest {
 			// without an archive interval, the full hot store starts the archival
 			long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
 			while (!new File(temporary.getRoot(), "archive/iceberg/metadata").isDirectory()
-					|| new File(temporary.getRoot(), "current-archive").exists()) {
+					|| new File(temporary.getRoot(), "hot-1").exists()) {
 				assertTrue("The full hot store is archived", System.nanoTime() < deadline);
 				Thread.sleep(10);
 			}
